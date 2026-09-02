@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build Output
+dist/
+
+# Environment & Keys
+.env
+.env.local
+
+# Backups & Uploads
+uploads/
+backups/
+
+# System Files
+*.log
+.DS_Store
+.vscode/
