@@ -8,6 +8,7 @@ dotenv.config();
 
 const app: Application = express();
 
+// Middlewares
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
