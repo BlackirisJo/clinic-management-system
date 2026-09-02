@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import authRoutes from './modules/auth/auth.routes';
 import patientsRoutes from './modules/patients/patients.routes';
 import prescriptionsRoutes from './modules/prescriptions/prescriptions.routes';
+import billingRoutes from './modules/billing/billing.routes';
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientsRoutes);
 app.use('/api/prescriptions', prescriptionsRoutes);
+app.use('/api/billing', billingRoutes);
 
 // Health Check Endpoint
 app.get('/health', (req: Request, res: Response) => {
