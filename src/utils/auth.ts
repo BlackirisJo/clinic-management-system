@@ -20,3 +20,10 @@ export const comparePassword = async (password: string, hash: string): Promise<b
 export const generateToken = (payload: { userId: number; roleId: number; clinicId: number | null }): string => {
   return jwt.sign({ ...payload, jti: randomUUID() }, JWT_SECRET, { expiresIn: '8h' });
 };
+
+export const generatePatientToken = (patientId: number): { token: string; jti: string; expiresAt: number } => {
+  const jti = randomUUID();
+  const token = jwt.sign({ patientId, kind: 'PATIENT', jti }, JWT_SECRET, { expiresIn: '8h' });
+  const payload = jwt.decode(token) as { exp: number };
+  return { token, jti, expiresAt: payload.exp };
+};

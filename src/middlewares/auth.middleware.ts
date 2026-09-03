@@ -13,6 +13,7 @@ export interface AuthenticatedRequest extends Request {
     roleName?: string;
     permissions?: string[];
   };
+  patient?: { patientId: number; jti: string };
 }
 
 // 1. التحقق من صحة توكن JWT (Authentication)
@@ -110,4 +111,24 @@ export const requirePermission = (requiredPermission: string) => {
       message: 'عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء',
     });
   };
+};
+
+export const authenticatePatientJWT = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined;
+  if (!token) return res.status(401).json({ message: 'رمز دخول المريض غير موجود' });
+  try {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ message: 'إعدادات التوثيق غير مكتملة على الخادم' });
+    const decoded = jwt.verify(token, secret) as { patientId?: number; kind?: string; jti?: string };
+    if (decoded.kind !== 'PATIENT' || !decoded.patientId || !decoded.jti) return res.status(403).json({ message: 'رمز المريض غير صالح' });
+    const session = await pool.query(
+      `SELECT 1 FROM patient_sessions WHERE patient_id = $1 AND jti = $2 AND revoked_at IS NULL AND expires_at > NOW()`,
+      [decoded.patientId, decoded.jti]
+    );
+    if (!session.rowCount) return res.status(403).json({ message: 'جلسة المريض منتهية أو ملغاة' });
+    req.patient = { patientId: decoded.patientId, jti: decoded.jti };
+    return next();
+  } catch {
+    return res.status(403).json({ message: 'رمز دخول المريض غير صالح أو منتهي الصلاحية' });
+  }
 };
