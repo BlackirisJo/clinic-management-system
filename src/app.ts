@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { randomUUID } from 'crypto';
 import authRoutes from './modules/auth/auth.routes';
 import patientsRoutes from './modules/patients/patients.routes';
 import prescriptionsRoutes from './modules/prescriptions/prescriptions.routes';
@@ -17,7 +19,15 @@ const app: Application = express();
 app.use(helmet());
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map((origin) => origin.trim());
 app.use(cors({ origin: allowedOrigins }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  const requestId = randomUUID();
+  res.setHeader('X-Request-Id', requestId);
+  const startedAt = Date.now();
+  res.on('finish', () => console.log(JSON.stringify({ requestId, method: req.method, path: req.path, status: res.statusCode, durationMs: Date.now() - startedAt })));
+  next();
+});
+app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false }));
 
 // فحص سلامة السيرفر (Health Check)
 app.get('/health', async (req: Request, res: Response) => {

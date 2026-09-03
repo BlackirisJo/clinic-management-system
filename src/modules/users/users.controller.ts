@@ -7,6 +7,9 @@ const canManageAllClinics = (req: AuthenticatedRequest) => req.user?.roleName ==
 
 export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
   const clinicId = canManageAllClinics(req) && req.query.clinic_id ? Number(req.query.clinic_id) : req.user?.clinicId;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
   try {
     const result = await pool.query(
       `SELECT u.user_id, u.full_name, u.username, u.phone, u.status, u.is_force_password_change,
@@ -15,8 +18,8 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
        FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN clinics c ON c.clinic_id = u.clinic_id
        WHERE ($1::int IS NULL OR u.clinic_id = $1)
-       ORDER BY u.created_at DESC`, [clinicId]);
-    return res.status(200).json({ users: result.rows });
+       ORDER BY u.created_at DESC LIMIT $2 OFFSET $3`, [clinicId, limit, offset]);
+     return res.status(200).json({ users: result.rows, pagination: { page, limit, returned: result.rows.length } });
   } catch (error) {
     console.error('List Users Error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء جلب المستخدمين' });
@@ -114,6 +117,9 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
     const values = entries.map(([, value]) => value);
     const setClause = entries.map(([key], index) => `${key} = $${index + 1}`).join(', ');
     const result = await pool.query(`UPDATE users SET ${setClause}, updated_at = NOW() WHERE user_id = $${values.length + 1} RETURNING user_id, full_name, username, phone, status, is_force_password_change, role_id, clinic_id`, [...values, targetId]);
+    if (body.status && body.status !== 'ACTIVE' || body.password) {
+      await pool.query('UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [targetId]);
+    }
     try {
       await pool.query(
         `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)

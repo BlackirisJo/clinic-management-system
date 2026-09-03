@@ -18,17 +18,20 @@ export const login = async (req: Request, res: Response) => {
     );
 
     if (userQuery.rows.length === 0) {
+      await pool.query(`INSERT INTO audit_logs (action, resource_type, metadata) VALUES ('LOGIN_FAILURE', 'AUTH', $1)`, [JSON.stringify({ username, ip: req.ip })]);
       return res.status(401).json({ message: 'اسم المستخدم أو كلمة السر غير صحيحة' });
     }
 
     const user = userQuery.rows[0];
 
     if (user.status !== 'ACTIVE') {
+      await pool.query(`INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, metadata) VALUES ($1, $2, 'LOGIN_BLOCKED', 'AUTH', $3)`, [user.user_id, user.clinic_id, JSON.stringify({ ip: req.ip })]);
       return res.status(403).json({ message: 'الحساب غير فعال أو معطل' });
     }
 
     const isPasswordValid = await comparePassword(password, user.password_hash);
     if (!isPasswordValid) {
+      await pool.query(`INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, metadata) VALUES ($1, $2, 'LOGIN_FAILURE', 'AUTH', $3)`, [user.user_id, user.clinic_id, JSON.stringify({ ip: req.ip })]);
       return res.status(401).json({ message: 'اسم المستخدم أو كلمة السر غير صحيحة' });
     }
 
@@ -44,6 +47,7 @@ export const login = async (req: Request, res: Response) => {
         [user.user_id, tokenPayload.jti, tokenPayload.exp]
       );
     }
+    await pool.query(`INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, metadata) VALUES ($1, $2, 'LOGIN_SUCCESS', 'AUTH', $3)`, [user.user_id, user.clinic_id, JSON.stringify({ ip: req.ip })]);
 
     return res.status(200).json({
       message: 'تم تسجيل الدخول بنجاح',
@@ -59,4 +63,9 @@ export const logout = async (req: AuthenticatedRequest, res: Response) => {
   const jti = req.authToken?.jti;
   if (jti) await pool.query('UPDATE user_sessions SET revoked_at = NOW() WHERE jti = $1', [jti]);
   return res.status(200).json({ message: 'تم إنهاء الجلسة بنجاح' });
+};
+
+export const logoutAll = async (req: AuthenticatedRequest, res: Response) => {
+  await pool.query('UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [req.user?.userId]);
+  return res.status(200).json({ message: 'تم إنهاء جميع الجلسات بنجاح' });
 };

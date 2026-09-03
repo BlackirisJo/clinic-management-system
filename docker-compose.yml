@@ -36,6 +36,7 @@ services:
       - BACKUP_DIR=/app/backups
       - ADMIN_USERNAME=${ADMIN_USERNAME}
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
     volumes:
       - ./backups:/app/backups
     depends_on:

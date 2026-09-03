@@ -59,6 +59,9 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
 // 2. استرجاع المواعيد مع إمكانية الفلترة
 export const getAppointments = async (req: AuthenticatedRequest, res: Response) => {
   const { clinic_id, doctor_id, patient_id, date, status } = req.query;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
 
   try {
     let queryText = `
@@ -103,12 +106,14 @@ export const getAppointments = async (req: AuthenticatedRequest, res: Response) 
       queryParams.push(status);
     }
 
-    queryText += ` ORDER BY a.appointment_date DESC, a.start_time ASC`;
+    queryText += ` ORDER BY a.appointment_date DESC, a.start_time ASC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    queryParams.push(limit, offset);
 
     const result = await pool.query(queryText, queryParams);
 
     return res.status(200).json({
       appointments: result.rows,
+      pagination: { page, limit, returned: result.rows.length },
     });
   } catch (error) {
     console.error('خطأ أثناء جلب المواعيد:', error);

@@ -35,6 +35,9 @@ export const createPatient = async (req: AuthenticatedRequest, res: Response) =>
 // 2. البحث واسترجاع قائمة المرضى
 export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
   const { search } = req.query;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
 
   try {
     let query = 'SELECT * FROM patients WHERE clinic_id = $1';
@@ -45,12 +48,14 @@ export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
       params.push(`%${search}%`);
     }
 
-    query += ' ORDER BY created_at DESC LIMIT 50';
+    query += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(limit, offset);
 
     const result = await pool.query(query, params);
 
     return res.status(200).json({
       patients: result.rows,
+      pagination: { page, limit, returned: result.rows.length },
     });
   } catch (error) {
     console.error('Get Patients Error:', error);
