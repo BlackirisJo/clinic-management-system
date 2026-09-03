@@ -29,6 +29,7 @@ const PERMISSIONS = [
   { key: 'VIEW_INVOICES', group: 'Finance', desc: 'عرض الفواتير والتقارير المالية' },
   { key: 'CREATE_EXPENSE', group: 'Finance', desc: 'تسجيل المصاريف التشغيلية' },
   { key: 'VIEW_FINANCIAL_REPORTS', group: 'Finance', desc: 'الاطلاع على الإحصائيات والأرباح' },
+  { key: 'VIEW_REPORTS', group: 'Reports', desc: 'عرض التقارير الشاملة للنظام' },
 
   // النسخ الاحتياطي
   { key: 'MANAGE_BACKUPS', group: 'System', desc: 'إنشاء وتنزيل النسخ الاحتياطية' },
@@ -45,7 +46,7 @@ const ROLES = [
 
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   DOCTOR: ['VIEW_PATIENTS', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_PRESCRIPTION', 'VIEW_PRESCRIPTIONS', 'VIEW_MEDICATIONS', 'VIEW_SHARED_PATIENT_RECORDS'],
-  ACCOUNTANT: ['VIEW_PATIENTS', 'MANAGE_SERVICES', 'CREATE_INVOICE', 'VIEW_INVOICES', 'CREATE_EXPENSE', 'VIEW_FINANCIAL_REPORTS'],
+  ACCOUNTANT: ['VIEW_PATIENTS', 'MANAGE_SERVICES', 'CREATE_INVOICE', 'VIEW_INVOICES', 'CREATE_EXPENSE', 'VIEW_FINANCIAL_REPORTS', 'VIEW_REPORTS'],
   RECEPTIONIST: ['VIEW_PATIENTS', 'CREATE_PATIENT', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_INVOICE', 'VIEW_INVOICES', 'VIEW_SHARED_PATIENT_RECORDS'],
 };
 
