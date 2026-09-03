@@ -34,6 +34,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY}
       - BACKUP_DIR=/app/backups
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD}
     volumes:
       - ./backups:/app/backups
     depends_on:

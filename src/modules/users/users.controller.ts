@@ -53,6 +53,15 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
        RETURNING user_id, full_name, username, phone, status, is_force_password_change, medical_license_no, sub_specialty, direct_phone, clinic_id`,
       [role.rows[0].role_id, targetClinicId ?? null, full_name, username, passwordHash, phone ?? null, medical_license_no ?? null, sub_specialty ?? null, direct_phone ?? null]
     );
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
+         VALUES ($1, $2, 'USER_CREATED', 'USER', $3)`,
+        [req.user?.userId, req.user?.clinicId, result.rows[0].user_id]
+      );
+    } catch (auditError) {
+      console.error('User creation audit failed:', auditError);
+    }
     return res.status(201).json({ user: { ...result.rows[0], role_name } });
   } catch (error: any) {
     if (error.code === '23505') return res.status(409).json({ message: 'اسم المستخدم مستخدم بالفعل' });
@@ -105,6 +114,15 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
     const values = entries.map(([, value]) => value);
     const setClause = entries.map(([key], index) => `${key} = $${index + 1}`).join(', ');
     const result = await pool.query(`UPDATE users SET ${setClause}, updated_at = NOW() WHERE user_id = $${values.length + 1} RETURNING user_id, full_name, username, phone, status, is_force_password_change, role_id, clinic_id`, [...values, targetId]);
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
+         VALUES ($1, $2, 'USER_UPDATED', 'USER', $3)`,
+        [req.user?.userId, req.user?.clinicId, targetId]
+      );
+    } catch (auditError) {
+      console.error('User update audit failed:', auditError);
+    }
     return res.status(200).json({ user: result.rows[0] });
   } catch (error) {
     console.error('Update User Error:', error);

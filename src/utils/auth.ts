@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -17,5 +18,5 @@ export const comparePassword = async (password: string, hash: string): Promise<b
 };
 
 export const generateToken = (payload: { userId: number; roleId: number; clinicId: number | null }): string => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' });
+  return jwt.sign({ ...payload, jti: randomUUID() }, JWT_SECRET, { expiresIn: '8h' });
 };

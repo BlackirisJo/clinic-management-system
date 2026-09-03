@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import rateLimit from 'express-rate-limit';
-import { login } from './auth.controller';
+import { login, logout } from './auth.controller';
 import { authenticateJWT, AuthenticatedRequest } from '../../middlewares/auth.middleware';
 
 const router = Router();
@@ -22,5 +22,6 @@ router.get('/me', authenticateJWT, (req: AuthenticatedRequest, res: Response) =>
     user: req.user,
   });
 });
+router.post('/logout', authenticateJWT, logout);
 
 export default router;

@@ -3,6 +3,9 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../config/database';
 
 export interface AuthenticatedRequest extends Request {
+  authToken?: {
+    jti: string;
+  };
   user?: {
     userId: number;
     roleId: number;
@@ -41,7 +44,17 @@ export const authenticateJWT = async (
       userId: number;
       roleId: number;
       clinicId: number | null;
+      jti?: string;
     };
+
+    if (!decoded.jti) return res.status(403).json({ message: 'الجلسة غير صالحة' });
+    const session = await pool.query(
+      `SELECT 1 FROM user_sessions s JOIN users u ON u.user_id = s.user_id
+       WHERE s.jti = $1 AND s.user_id = $2 AND s.revoked_at IS NULL
+         AND s.expires_at > NOW() AND u.status = 'ACTIVE'`,
+      [decoded.jti, decoded.userId]
+    );
+    if (!session.rowCount) return res.status(403).json({ message: 'الجلسة منتهية أو ملغاة' });
 
     // جلب اسم الدور والصلاحيات المرتبطة بـ role_id من قاعدة البيانات
     const roleAndPermissionsQuery = await pool.query(
@@ -69,6 +82,7 @@ export const authenticateJWT = async (
       roleName,
       permissions,
     };
+    req.authToken = { jti: decoded.jti };
 
     return next();
   } catch (error) {

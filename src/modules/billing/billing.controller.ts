@@ -46,9 +46,11 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
   }
 
   const client = await pool.connect();
+  let transactionActive = false;
 
   try {
     await client.query('BEGIN');
+    transactionActive = true;
 
     const patientOwnership = await client.query(
       'SELECT 1 FROM patients WHERE patient_id = $1 AND clinic_id = $2',
@@ -139,7 +141,21 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     await client.query('COMMIT');
-    await pool.query('REFRESH MATERIALIZED VIEW mv_clinic_monthly_kpis');
+    transactionActive = false;
+    try {
+      await pool.query('REFRESH MATERIALIZED VIEW mv_clinic_monthly_kpis');
+    } catch (refreshError) {
+      console.error('KPI refresh failed after invoice commit:', refreshError);
+    }
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
+         VALUES ($1, $2, 'INVOICE_CREATED', 'INVOICE', $3, $4)`,
+        [receptionist_id, userClinicId, invoiceId, JSON.stringify({ total: totalAmount, net: netAmount })]
+      );
+    } catch (auditError) {
+      console.error('Invoice audit failed after commit:', auditError);
+    }
 
     return res.status(201).json({
       message: 'تم إصدار الفاتورة وتحصيل المبلغ بنجاح',
@@ -147,7 +163,7 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
       net_amount: netAmount,
     });
   } catch (error: any) {
-    await client.query('ROLLBACK');
+    if (transactionActive) await client.query('ROLLBACK');
     console.error('Create Invoice Error:', error);
     return res.status(500).json({ message: error.message || 'حدث خطأ عند إصدار الفاتورة' });
   } finally {
@@ -175,6 +191,15 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
        RETURNING *`,
       [clinic_id || null, category, amount, description || null, spent_by_user_id]
     );
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
+         VALUES ($1, $2, 'EXPENSE_CREATED', 'EXPENSE', $3)`,
+        [spent_by_user_id, userClinicId, result.rows[0].expense_id]
+      );
+    } catch (auditError) {
+      console.error('Expense audit failed after commit:', auditError);
+    }
 
     return res.status(201).json({
       message: 'تم تسجيل المصروف بنجاح',

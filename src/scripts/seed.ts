@@ -52,6 +52,12 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 
 const seedDatabase = async () => {
   const client = await pool.connect();
+  const adminUsername = process.env.ADMIN_USERNAME;
+  const adminPassword = process.env.ADMIN_INITIAL_PASSWORD;
+
+  if (!adminUsername || !adminPassword) {
+    throw new Error('ADMIN_USERNAME and ADMIN_INITIAL_PASSWORD are required');
+  }
 
   try {
     console.log('🌱 بدء زرع البيانات الأولية (Seeding)...');
@@ -122,21 +128,19 @@ const seedDatabase = async () => {
 
     // 5. إنشاء حساب SUPER_ADMIN الرئيسي
     console.log('5. إنشاء حساب الأدمن الرئيسي...');
-    const adminPasswordHash = await bcrypt.hash('Admin@123456', 10);
+    const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
     
     await client.query(
       `INSERT INTO users (role_id, clinic_id, full_name, username, password_hash, status)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (username) DO NOTHING;`,
-      [superAdminRoleId, defaultClinicId, 'Super Admin', 'admin', adminPasswordHash, 'ACTIVE']
+      [superAdminRoleId, defaultClinicId, 'Super Admin', adminUsername, adminPasswordHash, 'ACTIVE']
     );
 
     await client.query('COMMIT');
     console.log('✅ تم إكمال زرع البيانات بنجاح!');
     console.log('------------------------------------');
-    console.log('بيانات تسجيل الدخول للآدمن الرئيسي:');
-    console.log('اسم المستخدم: admin');
-    console.log('كلمة المرور: Admin@123456');
+    console.log('Initial administrator account created or preserved.');
     console.log('------------------------------------');
   } catch (error) {
     await client.query('ROLLBACK');

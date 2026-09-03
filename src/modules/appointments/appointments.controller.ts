@@ -142,6 +142,15 @@ export const updateAppointmentStatus = async (req: AuthenticatedRequest, res: Re
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'الموعد المطلوب غير موجود' });
     }
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
+         VALUES ($1, $2, 'APPOINTMENT_STATUS_UPDATED', 'APPOINTMENT', $3, $4)`,
+        [req.user?.userId, userClinicId, id, JSON.stringify({ status })]
+      );
+    } catch (auditError) {
+      console.error('Appointment audit failed after commit:', auditError);
+    }
 
     return res.status(200).json({
       message: 'تم تحديث حالة الموعد بنجاح',

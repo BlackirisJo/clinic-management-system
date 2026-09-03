@@ -69,11 +69,17 @@ export const createVisit = async (req: AuthenticatedRequest, res: Response) => {
 
   try {
     const ownership = await pool.query(
-      `SELECT 1 FROM patients WHERE patient_id = $1 AND clinic_id = $2
-       UNION ALL SELECT 1 FROM users WHERE user_id = $3 AND clinic_id = $2`,
+      `SELECT p.clinic_id AS owner_clinic_id,
+              EXISTS (SELECT 1 FROM patient_clinic_shares s
+                      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
+                        AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()) AS can_write
+       FROM patients p JOIN users u ON u.user_id = $3 AND u.clinic_id = $2
+       WHERE p.patient_id = $1`,
       [patient_id, clinic_id, doctor_id]
     );
-    if (ownership.rows.length !== 2) {
+    const patientAccess = ownership.rows[0];
+    const canUsePatient = patientAccess && (patientAccess.owner_clinic_id === clinic_id || patientAccess.can_write);
+    if (!canUsePatient || ownership.rows.length !== 1) {
       return res.status(403).json({ message: 'بيانات الزيارة لا تنتمي إلى العيادة المحددة' });
     }
     const result = await pool.query(
