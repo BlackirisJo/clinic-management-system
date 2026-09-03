@@ -30,7 +30,6 @@ app.use('/api/prescriptions', prescriptionsRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/backups', backupsRoutes);
 app.use('/api/appointments', appointmentRoutes);
-app.use('/api/appointments', appointmentRoutes);
 
 // معالجة المسارات غير الموجودة (404 Not Found)
 app.use((req: Request, res: Response) => {

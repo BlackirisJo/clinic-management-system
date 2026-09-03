@@ -6,29 +6,29 @@ import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
 export const createAppointment = async (req: AuthenticatedRequest, res: Response) => {
   const { clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, reason, notes } = req.body;
 
+  // التحقق المبدئي من حقول البيانات الأساسية
   if (!clinic_id || !patient_id || !doctor_id || !appointment_date || !start_time || !end_time) {
-    return res.status(400).json({ message: 'الرجاء توفير جميع البيانات الأساسية للحجز (العيادة، المريض، الطبيب، التاريخ، ووقت بداية ونهاية الموعد)' });
+    return res.status(400).json({ 
+      message: 'الرجاء توفير جميع البيانات الأساسية للحجز (العيادة، المريض، الطبيب، التاريخ، ووقت بداية ونهاية الموعد)' 
+    });
   }
 
   try {
-    // التحقق من عدم وجود تعارض في مواعيد الطبيب لنفس اليوم والوقت
+    // التحقق من عدم وجود تعارض في مواعيد الطبيب لنفس اليوم والوقت (Overlapping Check)
     const conflictCheck = await pool.query(
       `SELECT appointment_id FROM appointments 
        WHERE doctor_id = $1 
          AND appointment_date = $2 
          AND status NOT IN ('CANCELLED')
-         AND (
-           (start_time <= $3 AND end_time > $3) OR
-           (start_time < $4 AND end_time >= $4) OR
-           (start_time >= $3 AND end_time <= $4)
-         )`,
+         AND start_time < $4 AND end_time > $3`,
       [doctor_id, appointment_date, start_time, end_time]
     );
 
     if (conflictCheck.rows.length > 0) {
-      return res.status(409).json({ message: 'الطبيب لديه موعد آخر محجوز في هذا الوقت' });
+      return res.status(409).json({ message: 'الطبيب لديه موعد آخر محجوز يتداخل مع هذا الوقت' });
     }
 
+    // إدراج الحجز الجديد في قاعدة البيانات
     const result = await pool.query(
       `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, reason, notes, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SCHEDULED')
@@ -41,8 +41,8 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
       appointment: result.rows[0],
     });
   } catch (error) {
-    console.error('Create Appointment Error:', error);
-    return res.status(500).json({ message: 'حدث خطأ أثناء حجز الموعد' });
+    console.error('خطأ أثناء إنشاء الموعد:', error);
+    return res.status(500).json({ message: 'حدث خطأ داخلي أثناء حجز الموعد' });
   }
 };
 
@@ -101,12 +101,12 @@ export const getAppointments = async (req: AuthenticatedRequest, res: Response) 
       appointments: result.rows,
     });
   } catch (error) {
-    console.error('Get Appointments Error:', error);
-    return res.status(500).json({ message: 'حدث خطأ أثناء جلب المواعيد' });
+    console.error('خطأ أثناء جلب المواعيد:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء جلب قائمة المواعيد' });
   }
 };
 
-// 3. تحديث حالة الموعد (CONFIRMED, COMPLETED, CANCELLED, NO_SHOW)
+// 3. تحديث حالة الموعد (SCHEDULED, CONFIRMED, COMPLETED, CANCELLED, NO_SHOW)
 export const updateAppointmentStatus = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { status, cancellation_reason } = req.body;
@@ -129,7 +129,7 @@ export const updateAppointmentStatus = async (req: AuthenticatedRequest, res: Re
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'الموعد غير موجود' });
+      return res.status(404).json({ message: 'الموعد المطلوب غير موجود' });
     }
 
     return res.status(200).json({
@@ -137,7 +137,7 @@ export const updateAppointmentStatus = async (req: AuthenticatedRequest, res: Re
       appointment: result.rows[0],
     });
   } catch (error) {
-    console.error('Update Appointment Status Error:', error);
+    console.error('خطأ أثناء تحديث حالة الموعد:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء تحديث حالة الموعد' });
   }
 };
