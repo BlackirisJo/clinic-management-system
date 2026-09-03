@@ -2,13 +2,14 @@
   "name": "clinic-management-system",
   "version": "1.0.0",
   "description": "Clinic Management System Backend API",
-  "main": "dist/server.js",
+  "main": "dist/index.js",
   "scripts": {
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
+    "migrate": "node dist/scripts/migrate.js",
     "seed": "tsx src/scripts/seed.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run build && node --test dist/tests/*.test.js"
   },
   "keywords": [],
   "author": "",

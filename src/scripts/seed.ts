@@ -12,18 +12,23 @@ const PERMISSIONS = [
   { key: 'CREATE_PATIENT', group: 'Patients', desc: 'إضافة مريض جديد' },
   { key: 'EDIT_PATIENTS', group: 'Patients', desc: 'تعديل بيانات المرضى' },
   { key: 'CREATE_VISIT', group: 'Visits', desc: 'تسجيل زيارة جديدة للمريض' },
+  { key: 'SHARE_PATIENT_RECORDS', group: 'Patients', desc: 'مشاركة السجلات الطبية مع عيادات أخرى' },
+  { key: 'VIEW_SHARED_PATIENT_RECORDS', group: 'Patients', desc: 'عرض السجلات الطبية المشتركة' },
+  { key: 'VIEW_APPOINTMENTS', group: 'Appointments', desc: 'عرض المواعيد' },
+  { key: 'MANAGE_APPOINTMENTS', group: 'Appointments', desc: 'إدارة المواعيد' },
   
   // الروشتات والأدوية
-  { key: 'CREATE_PRESCRIPTIONS', group: 'Prescriptions', desc: 'إنشاء روشتة طبية' },
+  { key: 'CREATE_PRESCRIPTION', group: 'Prescriptions', desc: 'إنشاء روشتة طبية' },
   { key: 'VIEW_PRESCRIPTIONS', group: 'Prescriptions', desc: 'عرض الروشتات الطبية' },
+  { key: 'VIEW_MEDICATIONS', group: 'Pharmacy', desc: 'عرض دليل الأدوية' },
   { key: 'MANAGE_MEDICATIONS', group: 'Pharmacy', desc: 'إضافة وتعديل الأدوية' },
   
   // المالية والفواتير
   { key: 'MANAGE_SERVICES', group: 'Finance', desc: 'إدارة قائمة الخدمات وأسعارها' },
-  { key: 'CREATE_INVOICES', group: 'Finance', desc: 'إصدار فواتير للخدمات والزيارات' },
+  { key: 'CREATE_INVOICE', group: 'Finance', desc: 'إصدار فواتير للخدمات والزيارات' },
   { key: 'VIEW_INVOICES', group: 'Finance', desc: 'عرض الفواتير والتقارير المالية' },
-  { key: 'CREATE_EXPENSES', group: 'Finance', desc: 'تسجيل المصاريف التشغيلية' },
-  { key: 'VIEW_FINANCIAL_KPIS', group: 'Finance', desc: 'الاطلاع على الإحصائيات والأرباح' },
+  { key: 'CREATE_EXPENSE', group: 'Finance', desc: 'تسجيل المصاريف التشغيلية' },
+  { key: 'VIEW_FINANCIAL_REPORTS', group: 'Finance', desc: 'الاطلاع على الإحصائيات والأرباح' },
 
   // النسخ الاحتياطي
   { key: 'MANAGE_BACKUPS', group: 'System', desc: 'إنشاء وتنزيل النسخ الاحتياطية' },
@@ -37,6 +42,12 @@ const ROLES = [
   { name: 'ACCOUNTANT', desc: 'المحاسب (الفواتير، المصاريف، والتقارير)' },
   { name: 'RECEPTIONIST', desc: 'موظف الاستقبال (تسجيل المرضى والزيارات والفواتير)' },
 ];
+
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  DOCTOR: ['VIEW_PATIENTS', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_PRESCRIPTION', 'VIEW_PRESCRIPTIONS', 'VIEW_MEDICATIONS', 'VIEW_SHARED_PATIENT_RECORDS'],
+  ACCOUNTANT: ['VIEW_PATIENTS', 'MANAGE_SERVICES', 'CREATE_INVOICE', 'VIEW_INVOICES', 'CREATE_EXPENSE', 'VIEW_FINANCIAL_REPORTS'],
+  RECEPTIONIST: ['VIEW_PATIENTS', 'CREATE_PATIENT', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_INVOICE', 'VIEW_INVOICES', 'VIEW_SHARED_PATIENT_RECORDS'],
+};
 
 const seedDatabase = async () => {
   const client = await pool.connect();
@@ -83,14 +94,30 @@ const seedDatabase = async () => {
       );
     }
 
+    for (const [roleName, permissionKeys] of Object.entries(ROLE_PERMISSIONS)) {
+      const roleResult = await client.query('SELECT role_id FROM roles WHERE role_name = $1', [roleName]);
+      for (const permissionKey of permissionKeys) {
+        await client.query(
+          `INSERT INTO role_permissions (role_id, permission_id)
+           SELECT $1, permission_id FROM permissions WHERE permission_key = $2
+           ON CONFLICT DO NOTHING`,
+          [roleResult.rows[0]?.role_id, permissionKey]
+        );
+      }
+    }
+
     // 4. إنشاء العيادة الرئيسية الأولى
     console.log('4. إنشاء العيادة الأولى...');
     const clinicResult = await client.query(
       `INSERT INTO clinics (clinic_name)
-       VALUES ('العيادة الرئيسية')
+       SELECT 'العيادة الرئيسية'
+       WHERE NOT EXISTS (SELECT 1 FROM clinics WHERE clinic_name = 'العيادة الرئيسية')
        RETURNING clinic_id;`
     );
-    const defaultClinicId = clinicResult.rows[0]?.clinic_id || 1;
+    const existingClinic = await client.query(
+      `SELECT clinic_id FROM clinics WHERE clinic_name = 'العيادة الرئيسية' ORDER BY clinic_id LIMIT 1`
+    );
+    const defaultClinicId = clinicResult.rows[0]?.clinic_id || existingClinic.rows[0]?.clinic_id || 1;
 
     // 5. إنشاء حساب SUPER_ADMIN الرئيسي
     console.log('5. إنشاء حساب الأدمن الرئيسي...');

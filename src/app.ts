@@ -1,7 +1,7 @@
+import 'dotenv/config';
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import authRoutes from './modules/auth/auth.routes';
 import patientsRoutes from './modules/patients/patients.routes';
 import prescriptionsRoutes from './modules/prescriptions/prescriptions.routes';
@@ -9,18 +9,23 @@ import billingRoutes from './modules/billing/billing.routes';
 import backupsRoutes from './modules/backups/backups.routes';
 import appointmentRoutes from './modules/appointments/appointments.routes';
 
-dotenv.config();
-
 const app: Application = express();
 
 // Middlewares للأمان ومعالجة الطلبات
 app.use(helmet());
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map((origin) => origin.trim());
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 // فحص سلامة السيرفر (Health Check)
-app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'OK', message: 'Clinic API is running securely' });
+app.get('/health', async (req: Request, res: Response) => {
+  try {
+    const { pool } = await import('./config/database');
+    await pool.query('SELECT 1');
+    res.status(200).json({ status: 'OK', message: 'Clinic API is running securely', database: 'OK' });
+  } catch {
+    res.status(503).json({ status: 'DEGRADED', message: 'Database is unavailable', database: 'ERROR' });
+  }
 });
 
 // تسجيل مسارات الـ API الرئيسية

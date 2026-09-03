@@ -31,7 +31,10 @@ export const authenticateJWT = async (
   }
 
   try {
-    const JWT_SECRET = process.env.JWT_SECRET || 'default_secret';
+    const JWT_SECRET = process.env.JWT_SECRET;
+    if (!JWT_SECRET) {
+      return res.status(500).json({ message: 'إعدادات التوثيق غير مكتملة على الخادم' });
+    }
     
     // استخدام التحويل إلى unknown أولاً لتجنب خطأ TS2352
     const decoded = jwt.verify(token, JWT_SECRET) as unknown as {

@@ -58,8 +58,9 @@ export const getMedications = async (req: AuthenticatedRequest, res: Response) =
 export const createPrescription = async (req: AuthenticatedRequest, res: Response) => {
   const { visit_id, patient_id, notes, items } = req.body;
   const doctor_id = req.user?.userId;
+  const clinic_id = req.user?.clinicId;
 
-  if (!visit_id || !patient_id || !doctor_id || !Array.isArray(items) || items.length === 0) {
+  if (!visit_id || !patient_id || !doctor_id || clinic_id === null || clinic_id === undefined || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'بيانات الروشتة غير مكتملة أو لا تحتوي على أدوبة' });
   }
 
@@ -67,6 +68,14 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
 
   try {
     await client.query('BEGIN');
+
+    const visitOwnership = await client.query(
+      `SELECT 1 FROM visits WHERE visit_id = $1 AND patient_id = $2 AND clinic_id = $3 AND doctor_id = $4`,
+      [visit_id, patient_id, clinic_id, doctor_id]
+    );
+    if (visitOwnership.rows.length !== 1) {
+      throw new Error('الزيارة لا تنتمي إلى المريض أو العيادة أو الطبيب الحالي');
+    }
 
     // إنشاء السجل الرئيسي للروشتة
     const prescriptionResult = await client.query(
@@ -129,8 +138,9 @@ export const getPrescriptionById = async (req: AuthenticatedRequest, res: Respon
        FROM prescriptions p
        JOIN patients pt ON p.patient_id = pt.patient_id
        JOIN users u ON p.doctor_id = u.user_id
-       WHERE p.prescription_id = $1`,
-      [id]
+      JOIN visits v ON p.visit_id = v.visit_id
+      WHERE p.prescription_id = $1 AND v.clinic_id = $2`,
+          [id, req.user?.clinicId]
     );
 
     if (prescriptionQuery.rows.length === 0) {

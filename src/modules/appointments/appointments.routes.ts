@@ -1,12 +1,25 @@
-import { Router } from 'express';
+import { NextFunction, Response, Router } from 'express';
+import { z } from 'zod';
 import {
   createAppointment,
   getAppointments,
   updateAppointmentStatus,
 } from './appointments.controller';
-import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
+import { authenticateJWT, requirePermission, AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { createAppointmentSchema, updateAppointmentStatusSchema } from './appointments.validation';
 
 const router = Router();
+
+const validate = (schema: z.ZodType) => {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ message: 'بيانات الطلب غير صالحة', errors: result.error });
+    }
+    req.body = result.data;
+    return next();
+  };
+};
 
 // تطبيق التوثيق (JWT) على جميع مسارات المواعيد
 router.use(authenticateJWT);
@@ -15,6 +28,7 @@ router.use(authenticateJWT);
 router.post(
   '/', 
   requirePermission('MANAGE_APPOINTMENTS'), 
+  validate(createAppointmentSchema),
   createAppointment
 );
 
@@ -29,6 +43,7 @@ router.get(
 router.patch(
   '/:id/status', 
   requirePermission('MANAGE_APPOINTMENTS'), 
+  validate(updateAppointmentStatusSchema),
   updateAppointmentStatus
 );
 
