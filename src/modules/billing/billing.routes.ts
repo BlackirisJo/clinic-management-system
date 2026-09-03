@@ -6,6 +6,8 @@ import {
   getMonthlyFinancialKPIs,
 } from './billing.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
+import { validateBody } from '../../middlewares/validate.middleware';
+import { expenseSchema, invoiceSchema, serviceSchema } from '../../validations/business.validation';
 
 const router = Router();
 
@@ -13,11 +15,11 @@ const router = Router();
 router.use(authenticateJWT);
 
 // خدمات العيادات
-router.post('/services', requirePermission('MANAGE_SERVICES'), createClinicService);
+router.post('/services', requirePermission('MANAGE_SERVICES'), validateBody(serviceSchema), createClinicService);
 
 // إصدار الفواتير والمصروفات
-router.post('/invoices', requirePermission('CREATE_INVOICE'), createInvoice);
-router.post('/expenses', requirePermission('CREATE_EXPENSE'), createExpense);
+router.post('/invoices', requirePermission('CREATE_INVOICE'), validateBody(invoiceSchema), createInvoice);
+router.post('/expenses', requirePermission('CREATE_EXPENSE'), validateBody(expenseSchema), createExpense);
 
 // التقارير المالية
 router.get('/reports/kpis', requirePermission('VIEW_FINANCIAL_REPORTS'), getMonthlyFinancialKPIs);

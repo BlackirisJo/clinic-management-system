@@ -4,6 +4,8 @@ import {
 	sharePatientRecord, listPatientShares, revokePatientShare, getUnifiedMedicalRecord,
 } from './patients.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware'; // <-- التأكد من وجود ../../
+import { validateBody } from '../../middlewares/validate.middleware';
+import { patientSchema, visitSchema } from '../../validations/business.validation';
 
 const router = Router();
 
@@ -11,11 +13,11 @@ const router = Router();
 router.use(authenticateJWT);
 
 // مسارات إدارة المرضى
-router.post('/', requirePermission('CREATE_PATIENT'), createPatient);
+router.post('/', requirePermission('CREATE_PATIENT'), validateBody(patientSchema), createPatient);
 router.get('/', requirePermission('VIEW_PATIENTS'), getPatients);
 
 // مسارات إدارة الزيارات الطبية
-router.post('/visits', requirePermission('CREATE_VISIT'), createVisit);
+router.post('/visits', requirePermission('CREATE_VISIT'), validateBody(visitSchema), createVisit);
 router.get('/:patientId/visits', requirePermission('VIEW_PATIENTS'), getPatientVisits);
 router.get('/:patientId/record', requirePermission('VIEW_SHARED_PATIENT_RECORDS'), getUnifiedMedicalRecord);
 router.post('/:patientId/shares', requirePermission('SHARE_PATIENT_RECORDS'), sharePatientRecord);

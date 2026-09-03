@@ -6,6 +6,8 @@ import {
   getPrescriptionById,
 } from './prescriptions.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
+import { validateBody } from '../../middlewares/validate.middleware';
+import { prescriptionSchema } from '../../validations/business.validation';
 
 const router = Router();
 
@@ -17,7 +19,7 @@ router.post('/medications', requirePermission('MANAGE_MEDICATIONS'), createMedic
 router.get('/medications', requirePermission('VIEW_MEDICATIONS'), getMedications);
 
 // مسارات الروشتة الطبية
-router.post('/', requirePermission('CREATE_PRESCRIPTION'), createPrescription);
+router.post('/', requirePermission('CREATE_PRESCRIPTION'), validateBody(prescriptionSchema), createPrescription);
 router.get('/:id', requirePermission('VIEW_PRESCRIPTIONS'), getPrescriptionById);
 
 export default router;
