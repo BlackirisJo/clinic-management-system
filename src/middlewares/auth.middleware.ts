@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../config/database';
 
@@ -26,9 +26,15 @@ export const authenticateJWT = async (
 
   const token = authHeader.split(' ')[1];
 
+  if (!token) {
+    return res.status(401).json({ message: 'رمز التوكن غير موجود' });
+  }
+
   try {
     const JWT_SECRET = process.env.JWT_SECRET || 'default_secret';
-    const decoded = jwt.verify(token, JWT_SECRET) as {
+    
+    // استخدام التحويل إلى unknown أولاً لتجنب خطأ TS2352
+    const decoded = jwt.verify(token, JWT_SECRET) as unknown as {
       userId: number;
       roleId: number;
       clinicId: number | null;
@@ -48,10 +54,10 @@ export const authenticateJWT = async (
       return res.status(403).json({ message: 'الدور الخاص بك غير معرف بالنظام' });
     }
 
-    const roleName = roleAndPermissionsQuery.rows[0].role_name;
+    const roleName = roleAndPermissionsQuery.rows[0]?.role_name;
     const permissions = roleAndPermissionsQuery.rows
       .map((row) => row.permission_key)
-      .filter((key) => key !== null);
+      .filter((key): key is string => key !== null && key !== undefined);
 
     req.user = {
       userId: decoded.userId,
@@ -61,7 +67,7 @@ export const authenticateJWT = async (
       permissions,
     };
 
-    next();
+    return next();
   } catch (error) {
     return res.status(403).json({ message: 'رمز التوكن غير صالح أو منتهي الصلاحية' });
   }
@@ -74,8 +80,9 @@ export const requirePermission = (requiredPermission: string) => {
       return res.status(401).json({ message: 'المستخدم غير موثق' });
     }
 
-    // مدير النظام يملك صلاحية كاملة لتجاوز الفحص
+    // السماح لكل من SUPER_ADMIN و SYSTEM_ADMIN بتجاوز الفحص
     if (
+      req.user.roleName === 'SUPER_ADMIN' ||
       req.user.roleName === 'SYSTEM_ADMIN' ||
       (req.user.permissions && req.user.permissions.includes(requiredPermission))
     ) {

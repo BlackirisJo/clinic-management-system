@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { createPatient, getPatients, createVisit, getPatientVisits } from './patients.controller';
-import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
+import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware'; // <-- التأكد من وجود ../../
 
 const router = Router();
 

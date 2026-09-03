@@ -1,6 +1,6 @@
 -- 1. أنواع البيانات المخصصة (ENUMS)
 CREATE TYPE account_status AS ENUM ('ACTIVE', 'SUSPENDED', 'PASSWORD_RESET_REQUIRED');
-CREATE TYPE backup_status AS ENUM ('IN_PROGRESS', 'COMPLETED', 'FAILED', 'RESTORED');
+CREATE TYPE backup_status AS ENUM ('IN_PROGRESS', 'SUCCESS', 'FAILED', 'RESTORED');
 CREATE TYPE payment_method AS ENUM ('CASH', 'CARD', 'INSURANCE', 'SPLIT');
 
 -- 2. الأدوار والصلاحيات (RBAC)
@@ -24,7 +24,7 @@ CREATE TABLE role_permissions (
     PRIMARY KEY (role_id, permission_id)
 );
 
--- 3. العيادات والمستخدمين (الأطباء، المحاسبين، الآدمن)
+-- 3. العيادات والمستخدمين (الأطباء، المحاسبين، الأدمن)
 CREATE TABLE clinics (
     clinic_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     clinic_name VARCHAR(150) NOT NULL,
@@ -143,17 +143,16 @@ CREATE TABLE expenses (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 7. سجل النسخ الاحتياطي المشفر
-CREATE TABLE database_backups (
+-- 7. سجل النسخ الاحتياطي المشفر (متوافق مع محرك Node.js)
+CREATE TABLE backup_logs (
     backup_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    admin_id INT NOT NULL REFERENCES users(user_id),
-    file_name VARCHAR(255) NOT NULL,
     file_path TEXT NOT NULL,
     file_size_bytes BIGINT NOT NULL,
-    checksum_sha256 VARCHAR(64) NOT NULL,
-    encryption_algorithm VARCHAR(50) DEFAULT 'AES-256-GCM',
+    checksum VARCHAR(255) NOT NULL,
+    iv VARCHAR(255),
+    auth_tag VARCHAR(255),
     status backup_status DEFAULT 'IN_PROGRESS',
-    notes TEXT,
+    created_by_user_id INT REFERENCES users(user_id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
