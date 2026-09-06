@@ -114,6 +114,10 @@ export const api = {
     list: () => request('/api/clinics'),
     create: (body) => request('/api/clinics', { method: 'POST', body }),
     update: (id, body) => request(`/api/clinics/${id}`, { method: 'PUT', body }),
+    staff: (id) => request(`/api/clinics/${id}/staff`),
+    addStaff: (id, body) => request(`/api/clinics/${id}/staff`, { method: 'POST', body }),
+    updateStaff: (id, userId, body) => request(`/api/clinics/${id}/staff/${userId}`, { method: 'PUT', body }),
+    removeStaff: (id, userId) => request(`/api/clinics/${id}/staff/${userId}`, { method: 'DELETE' }),
   },
   users: {
     list: (params) => request('/api/users', { params }),

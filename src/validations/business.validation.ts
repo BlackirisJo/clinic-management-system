@@ -25,6 +25,19 @@ const CONDITION_KEYS = ['DIABETES', 'HYPERTENSION', 'ASTHMA', 'HEART_DISEASE', '
 const SEVERITY_LEVELS = ['MILD', 'MODERATE', 'SEVERE', 'GESTATIONAL', 'TRANSIENT', 'UNSPECIFIED'] as const;
 
 export const clinicSchema = z.object({ clinic_name: z.string().trim().min(2).max(150), is_active: z.boolean().optional() });
+export const clinicStaffSchema = z.object({
+  full_name: z.string().trim().min(3).max(150),
+  username: z.string().trim().min(3).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+  password: z.string().min(12).max(128),
+  role_name: z.enum(['DOCTOR', 'NURSE', 'RECEPTIONIST', 'ACCOUNTANT']),
+  sub_specialty: z.string().trim().max(200).optional(),
+});
+export const clinicStaffUpdateSchema = z.object({
+  full_name: z.string().trim().min(3).max(150).optional(),
+  sub_specialty: z.string().trim().max(200).optional(),
+  status: z.enum(['ACTIVE', 'SUSPENDED', 'PASSWORD_RESET_REQUIRED']).optional(),
+  password: z.string().min(12).max(128).optional(),
+});
 export const medicalProfileSchema = z.object({
   blood_type: z.enum(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).optional(),
   current_medications: z.string().trim().max(5000).optional(),

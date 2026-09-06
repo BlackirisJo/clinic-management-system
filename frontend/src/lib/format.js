@@ -78,6 +78,7 @@ export const ROLE_LABELS = {
   SUPER_ADMIN: 'مدير النظام',
   SYSTEM_ADMIN: 'مدير النظام',
   DOCTOR: 'طبيب',
+  NURSE: 'ممرض/ة',
   ACCOUNTANT: 'محاسب',
   RECEPTIONIST: 'استقبال',
 }

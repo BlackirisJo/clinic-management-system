@@ -4,7 +4,7 @@ import { ROLE_LABELS, USER_STATUS, fmtDate } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
 
 const LIMIT = 10
-const ROLES = ['DOCTOR', 'ACCOUNTANT', 'RECEPTIONIST', 'SYSTEM_ADMIN', 'SUPER_ADMIN']
+const ROLES = ['DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST', 'SYSTEM_ADMIN', 'SUPER_ADMIN']
 
 export default function UsersView() {
   const [rows, setRows] = useState([])

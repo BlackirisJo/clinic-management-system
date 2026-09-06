@@ -4,8 +4,8 @@ import { todayLabel, ROLE_LABELS } from '../lib/format'
 // عناصر القائمة مع الأدوار المسموح لها بكل قسم — مدير النظام (SUPER_ADMIN/SYSTEM_ADMIN) يرى كل شيء
 export const NAV_ITEMS = [
   { id: 'overview', label: 'نظرة عامة', icon: '⌂', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
-  { id: 'patients', label: 'المرضى', icon: '◉', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'ACCOUNTANT', 'RECEPTIONIST'] },
-  { id: 'appointments', label: 'المواعيد', icon: '◷', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'RECEPTIONIST'] },
+  { id: 'patients', label: 'المرضى', icon: '◉', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST'] },
+  { id: 'appointments', label: 'المواعيد', icon: '◷', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'] },
   { id: 'prescriptions', label: 'الروشتات والأدوية', icon: '✎', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR'] },
   { id: 'billing', label: 'الفواتير والمالية', icon: '◈', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
   { id: 'reports', label: 'التقارير', icon: '▥', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },

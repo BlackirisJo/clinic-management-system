@@ -42,12 +42,14 @@ const ROLES = [
   { name: 'SUPER_ADMIN', desc: 'مدير النظام مع كافة الصلاحيات' },
   { name: 'SYSTEM_ADMIN', desc: 'مدير نظام (إدارة كاملة للعيادات والمستخدمين)' },
   { name: 'DOCTOR', desc: 'طبيب العيادة (المواعيد، الروشتات، ومرضى عيادته والمشتركين)' },
+  { name: 'NURSE', desc: 'ممرض/ممرضة العيادة (متابعة المرضى والمواعيد)' },
   { name: 'ACCOUNTANT', desc: 'المحاسب (الشؤون المالية والتقارير حصرياً)' },
   { name: 'RECEPTIONIST', desc: 'موظف الاستقبال (تسجيل المرضى والزيارات والمواعيد)' },
 ];
 
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   DOCTOR: ['VIEW_PATIENTS', 'EDIT_PATIENT_MEDICAL', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_PRESCRIPTION', 'VIEW_PRESCRIPTIONS', 'VIEW_MEDICATIONS', 'VIEW_SHARED_PATIENT_RECORDS'],
+  NURSE: ['VIEW_PATIENTS', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'VIEW_SHARED_PATIENT_RECORDS'],
   ACCOUNTANT: ['VIEW_PATIENTS', 'MANAGE_SERVICES', 'CREATE_INVOICE', 'VIEW_INVOICES', 'CREATE_EXPENSE', 'VIEW_FINANCIAL_REPORTS', 'VIEW_REPORTS'],
   RECEPTIONIST: ['VIEW_PATIENTS', 'CREATE_PATIENT', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'VIEW_SHARED_PATIENT_RECORDS'],
 };
