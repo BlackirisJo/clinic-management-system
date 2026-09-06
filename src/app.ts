@@ -12,6 +12,7 @@ import backupsRoutes from './modules/backups/backups.routes';
 import appointmentRoutes from './modules/appointments/appointments.routes';
 import usersRoutes from './modules/users/users.routes';
 import reportsRoutes from './modules/reports/reports.routes';
+import clinicsRoutes from './modules/clinics/clinics.routes';
 
 const app: Application = express();
 
@@ -49,6 +50,7 @@ app.use('/api/backups', backupsRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/clinics', clinicsRoutes);
 
 // معالجة المسارات غير الموجودة (404 Not Found)
 app.use((req: Request, res: Response) => {

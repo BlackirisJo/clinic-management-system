@@ -24,6 +24,7 @@ const ALLERGEN_KEYS = ['PENICILLIN', 'ASPIRIN', 'SULFA', 'LATEX', 'FOOD', 'POLLE
 const CONDITION_KEYS = ['DIABETES', 'HYPERTENSION', 'ASTHMA', 'HEART_DISEASE', 'KIDNEY_DISEASE', 'THYROID', 'ANEMIA', 'OTHER'] as const;
 const SEVERITY_LEVELS = ['MILD', 'MODERATE', 'SEVERE', 'GESTATIONAL', 'TRANSIENT', 'UNSPECIFIED'] as const;
 
+export const clinicSchema = z.object({ clinic_name: z.string().trim().min(2).max(150), is_active: z.boolean().optional() });
 export const medicalProfileSchema = z.object({
   blood_type: z.enum(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).optional(),
   current_medications: z.string().trim().max(5000).optional(),

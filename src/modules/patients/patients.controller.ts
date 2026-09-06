@@ -43,15 +43,26 @@ export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
   const offset = (page - 1) * limit;
 
   try {
-    let query = 'SELECT * FROM patients WHERE clinic_id = $1';
+    // مرضى العيادة + المرضى المشاركين من عيادات أخرى إلى عيادة المستخدم
+    let query = `SELECT p.*, EXISTS (
+      SELECT 1 FROM patient_clinic_shares s
+      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $1
+        AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+    ) AS is_shared
+    FROM patients p
+    WHERE p.clinic_id = $1 OR EXISTS (
+      SELECT 1 FROM patient_clinic_shares s
+      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $1
+        AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+    )`;
     const params: any[] = [req.user?.clinicId];
 
     if (search) {
-      query += ` AND (full_name ILIKE $2 OR phone ILIKE $2 OR national_id ILIKE $2 OR document_number ILIKE $2)`;
+      query += ` AND (p.full_name ILIKE $2 OR p.phone ILIKE $2 OR p.national_id ILIKE $2 OR p.document_number ILIKE $2)`;
       params.push(`%${search}%`);
     }
 
-    query += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    query += ` ORDER BY p.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(limit, offset);
 
     const result = await pool.query(query, params);
@@ -117,7 +128,11 @@ export const getPatientVisits = async (req: AuthenticatedRequest, res: Response)
        FROM visits v
        JOIN clinics c ON v.clinic_id = c.clinic_id
        JOIN users u ON v.doctor_id = u.user_id
-      WHERE v.patient_id = $1 AND v.clinic_id = $2
+       WHERE v.patient_id = $1 AND (v.clinic_id = $2 OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares s
+         WHERE s.patient_id = v.patient_id AND s.target_clinic_id = $2
+           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+       ))
        ORDER BY v.visit_date DESC`,
       [patientId, req.user?.clinicId]
     );

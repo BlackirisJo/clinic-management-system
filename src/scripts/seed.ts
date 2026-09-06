@@ -40,15 +40,16 @@ const PERMISSIONS = [
 
 const ROLES = [
   { name: 'SUPER_ADMIN', desc: 'مدير النظام مع كافة الصلاحيات' },
-  { name: 'DOCTOR', desc: 'طبيب العيادة (المرضى، الزيارات، الروشتات)' },
-  { name: 'ACCOUNTANT', desc: 'المحاسب (الفواتير، المصاريف، والتقارير)' },
-  { name: 'RECEPTIONIST', desc: 'موظف الاستقبال (تسجيل المرضى والزيارات والفواتير)' },
+  { name: 'SYSTEM_ADMIN', desc: 'مدير نظام (إدارة كاملة للعيادات والمستخدمين)' },
+  { name: 'DOCTOR', desc: 'طبيب العيادة (المواعيد، الروشتات، ومرضى عيادته والمشتركين)' },
+  { name: 'ACCOUNTANT', desc: 'المحاسب (الشؤون المالية والتقارير حصرياً)' },
+  { name: 'RECEPTIONIST', desc: 'موظف الاستقبال (تسجيل المرضى والزيارات والمواعيد)' },
 ];
 
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   DOCTOR: ['VIEW_PATIENTS', 'EDIT_PATIENT_MEDICAL', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_PRESCRIPTION', 'VIEW_PRESCRIPTIONS', 'VIEW_MEDICATIONS', 'VIEW_SHARED_PATIENT_RECORDS'],
   ACCOUNTANT: ['VIEW_PATIENTS', 'MANAGE_SERVICES', 'CREATE_INVOICE', 'VIEW_INVOICES', 'CREATE_EXPENSE', 'VIEW_FINANCIAL_REPORTS', 'VIEW_REPORTS'],
-  RECEPTIONIST: ['VIEW_PATIENTS', 'CREATE_PATIENT', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_INVOICE', 'VIEW_INVOICES', 'VIEW_SHARED_PATIENT_RECORDS'],
+  RECEPTIONIST: ['VIEW_PATIENTS', 'CREATE_PATIENT', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'VIEW_SHARED_PATIENT_RECORDS'],
 };
 
 const seedDatabase = async () => {
@@ -87,29 +88,40 @@ const seedDatabase = async () => {
       );
     }
 
-    // 3. ربط دور SUPER_ADMIN بكافة الصلاحيات الموجودة
-    console.log('3. منح كافة الصلاحيات لدور SUPER_ADMIN...');
-    const superAdminRole = await client.query(`SELECT role_id FROM roles WHERE role_name = 'SUPER_ADMIN'`);
-    const superAdminRoleId = superAdminRole.rows[0].role_id;
+    // 3. ربط أدوار الإدارة (SUPER_ADMIN و SYSTEM_ADMIN) بكافة الصلاحيات الموجودة
+    console.log('3. منح كافة الصلاحيات لأدوار الإدارة...');
+    const adminRoles = await client.query(`SELECT role_id FROM roles WHERE role_name IN ('SUPER_ADMIN', 'SYSTEM_ADMIN')`);
 
     const allPermissions = await client.query(`SELECT permission_id FROM permissions`);
-    for (const pRow of allPermissions.rows) {
-      await client.query(
-        `INSERT INTO role_permissions (role_id, permission_id)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING;`,
-        [superAdminRoleId, pRow.permission_id]
-      );
+    for (const roleRow of adminRoles.rows) {
+      for (const pRow of allPermissions.rows) {
+        await client.query(
+          `INSERT INTO role_permissions (role_id, permission_id)
+           VALUES ($1, $2)
+           ON CONFLICT DO NOTHING;`,
+          [roleRow.role_id, pRow.permission_id]
+        );
+      }
     }
 
     for (const [roleName, permissionKeys] of Object.entries(ROLE_PERMISSIONS)) {
       const roleResult = await client.query('SELECT role_id FROM roles WHERE role_name = $1', [roleName]);
+      const roleId = roleResult.rows[0]?.role_id;
+      if (!roleId) continue;
+      // مزامنة صلاحيات الدور: حذف أي صلاحية لم تعد مدرجة في المصفوفة أعلاه
+      await client.query(
+        `DELETE FROM role_permissions rp
+         USING permissions p
+         WHERE rp.permission_id = p.permission_id AND rp.role_id = $1
+           AND NOT (p.permission_key = ANY($2::text[]))`,
+        [roleId, permissionKeys]
+      );
       for (const permissionKey of permissionKeys) {
         await client.query(
           `INSERT INTO role_permissions (role_id, permission_id)
            SELECT $1, permission_id FROM permissions WHERE permission_key = $2
            ON CONFLICT DO NOTHING`,
-          [roleResult.rows[0]?.role_id, permissionKey]
+          [roleId, permissionKey]
         );
       }
     }
@@ -131,11 +143,13 @@ const seedDatabase = async () => {
     console.log('5. إنشاء حساب الأدمن الرئيسي...');
     const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
     
+    const superAdminRole = await client.query(`SELECT role_id FROM roles WHERE role_name = 'SUPER_ADMIN'`);
+
     await client.query(
       `INSERT INTO users (role_id, clinic_id, full_name, username, password_hash, status)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (username) DO NOTHING;`,
-      [superAdminRoleId, defaultClinicId, 'Super Admin', adminUsername, adminPasswordHash, 'ACTIVE']
+      [superAdminRole.rows[0].role_id, defaultClinicId, 'Super Admin', adminUsername, adminPasswordHash, 'ACTIVE']
     );
 
     await client.query('COMMIT');

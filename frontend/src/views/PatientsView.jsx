@@ -54,7 +54,7 @@ export default function PatientsView() {
               <tbody>
                 {rows.map((p) => (
                   <tr key={p.patient_id}>
-                    <td><span className="table-avatar">{p.full_name?.[0] || 'م'}</span>{p.full_name}</td>
+                    <td><span className="table-avatar">{p.full_name?.[0] || 'م'}</span>{p.full_name}{p.is_shared ? <span className="badge shared-chip">مشترك</span> : null}</td>
                     <td dir="ltr">{p.national_id || '—'}</td>
                     <td dir="ltr">{p.phone}</td>
                     <td>{GENDER_LABELS[p.gender] || p.gender}</td>

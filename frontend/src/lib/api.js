@@ -110,6 +110,11 @@ export const api = {
     createExpense: (body) => request('/api/billing/expenses', { method: 'POST', body }),
     monthlyKpis: (params) => request('/api/billing/reports/kpis', { params }),
   },
+  clinics: {
+    list: () => request('/api/clinics'),
+    create: (body) => request('/api/clinics', { method: 'POST', body }),
+    update: (id, body) => request(`/api/clinics/${id}`, { method: 'PUT', body }),
+  },
   users: {
     list: (params) => request('/api/users', { params }),
     create: (body) => request('/api/users', { method: 'POST', body }),

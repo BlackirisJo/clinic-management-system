@@ -47,6 +47,7 @@
 .med-sev{flex:0 0 106px;border:1px solid #dbe5e2;border-radius:8px;padding:7px 6px;font-size:12px;background:#fff;outline:0;color:#536467}
 .med-sev:disabled{background:#f1f5f4;color:#9aa8a7}
 @media (max-width:720px){.med-grid{grid-template-columns:1fr}}
+.shared-chip{margin-inline-start:8px}
 .danger{color:#ae5e54!important}
 .calc-value{font-size:13px;color:var(--teal);font-weight:700;padding-top:8px;display:inline-block}
 .calc-total{display:flex;justify-content:space-between;align-items:center;background:#eef5f3;border-radius:10px;padding:12px 15px;font-size:13px;color:#376864}.calc-total strong{font-size:18px;color:var(--teal)}
