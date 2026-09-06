@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
-import { fmtDate, fmtDateTime, GENDER_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/format'
+import { fmtDate, fmtDateTime, GENDER_LABELS, DOCUMENT_TYPE_LABELS, ALLERGEN_LABELS, ALLERGEN_KEYS, CHRONIC_CONDITION_LABELS, CHRONIC_CONDITION_KEYS, CONDITION_SEVERITY_LABELS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
 
 const LIMIT = 10
@@ -161,30 +161,42 @@ function PatientDetailModal({ patient, user, onClose }) {
 function MedicalProfileTab({ patient, user }) {
   const canEdit = ['DOCTOR', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user?.roleName) || (user?.permissions || []).includes('EDIT_PATIENT_MEDICAL')
   const [profile, setProfile] = useState(null)
-  const [form, setForm] = useState({ blood_type: '', allergies: '', chronic_diseases: '', current_medications: '', medical_notes: '' })
+  const [allergySel, setAllergySel] = useState({})
+  const [condSel, setCondSel] = useState({})
+  const [extras, setExtras] = useState({ blood_type: '', current_medications: '', medical_notes: '' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+
+  const applyResult = useCallback((result) => {
+    const p = result.profile
+    setProfile(p)
+    setExtras({
+      blood_type: p?.blood_type || '',
+      current_medications: p?.current_medications || '',
+      medical_notes: p?.medical_notes || '',
+    })
+    setAllergySel(Object.fromEntries(ALLERGEN_KEYS.map((k) => {
+      const row = (result.allergies || []).find((a) => a.allergen_key === k)
+      return [k, { checked: Boolean(row), notes: row?.notes || '' }]
+    })))
+    setCondSel(Object.fromEntries(CHRONIC_CONDITION_KEYS.map((k) => {
+      const row = (result.chronic_conditions || []).find((c) => c.condition_key === k)
+      return [k, { checked: Boolean(row), severity: row?.severity || 'UNSPECIFIED', notes: row?.notes || '' }]
+    })))
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
       const result = await api.patients.medicalProfile(patient.patient_id)
-      const p = result.profile
-      setProfile(p)
-      setForm({
-        blood_type: p?.blood_type || '',
-        allergies: p?.allergies || '',
-        chronic_diseases: p?.chronic_diseases || '',
-        current_medications: p?.current_medications || '',
-        medical_notes: p?.medical_notes || '',
-      })
+      applyResult(result)
     } catch (err) {
       setError(err.message || 'تعذر تحميل البيانات الطبية')
     } finally { setLoading(false) }
-  }, [patient.patient_id])
+  }, [patient.patient_id, applyResult])
 
   useEffect(() => { load() }, [load])
 
@@ -195,13 +207,13 @@ function MedicalProfileTab({ patient, user }) {
     setDone(false)
     try {
       const result = await api.patients.saveMedicalProfile(patient.patient_id, {
-        blood_type: form.blood_type || undefined,
-        allergies: form.allergies.trim() || undefined,
-        chronic_diseases: form.chronic_diseases.trim() || undefined,
-        current_medications: form.current_medications.trim() || undefined,
-        medical_notes: form.medical_notes.trim() || undefined,
+        blood_type: extras.blood_type || undefined,
+        current_medications: extras.current_medications.trim() || undefined,
+        medical_notes: extras.medical_notes.trim() || undefined,
+        allergies: ALLERGEN_KEYS.filter((k) => allergySel[k]?.checked).map((k) => ({ allergen_key: k, notes: allergySel[k].notes.trim() || undefined })),
+        chronic_conditions: CHRONIC_CONDITION_KEYS.filter((k) => condSel[k]?.checked).map((k) => ({ condition_key: k, severity: condSel[k].severity || undefined, notes: condSel[k].notes.trim() || undefined })),
       })
-      setProfile(result.profile)
+      applyResult(result)
       setDone(true)
     } catch (err) {
       setError(err.message || 'تعذر حفظ البيانات الطبية')
@@ -215,32 +227,47 @@ function MedicalProfileTab({ patient, user }) {
       <form className="patient-form" onSubmit={submit}>
         <div className="form-row">
           <Field label="فصيلة الدم">
-            <select value={form.blood_type} disabled={!canEdit} onChange={(e) => setForm({ ...form, blood_type: e.target.value })}>
+            <select value={extras.blood_type} disabled={!canEdit} onChange={(e) => setExtras({ ...extras, blood_type: e.target.value })}>
               <option value="">غير محددة</option>
-              <option value="A+">A+</option>
-              <option value="A-">A-</option>
-              <option value="B+">B+</option>
-              <option value="B-">B-</option>
-              <option value="AB+">AB+</option>
-              <option value="AB-">AB-</option>
-              <option value="O+">O+</option>
-              <option value="O-">O-</option>
+              {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
             </select>
           </Field>
-          <Field label="الحساسيات" hint="حساسيات الأدوية أو الأطعمة أو مواد أخرى">
-            <textarea rows="3" disabled={!canEdit} placeholder="مثال: البنسلين، حبوب اللقاح..." value={form.allergies} onChange={(e) => setForm({ ...form, allergies: e.target.value })} />
+          <Field label="الأدوية الحالية" hint="الأدوية التي يتناولها المريض حالياً">
+            <textarea rows="2" disabled={!canEdit} value={extras.current_medications} onChange={(e) => setExtras({ ...extras, current_medications: e.target.value })} />
           </Field>
         </div>
-        <div className="form-row">
-          <Field label="الأمراض المزمنة">
-            <textarea rows="3" disabled={!canEdit} placeholder="مثال: السكري، ارتفاع ضغط الدم..." value={form.chronic_diseases} onChange={(e) => setForm({ ...form, chronic_diseases: e.target.value })} />
-          </Field>
-          <Field label="الأدوية الحالية">
-            <textarea rows="3" disabled={!canEdit} placeholder="الأدوية التي يتناولها المريض حالياً..." value={form.current_medications} onChange={(e) => setForm({ ...form, current_medications: e.target.value })} />
-          </Field>
+
+        <div className="med-section">
+          <h4>الحساسيات</h4>
+          {ALLERGEN_KEYS.map((key) => (
+            <div className="med-choice" key={key}>
+              <label className="med-check">
+                <input type="checkbox" disabled={!canEdit} checked={Boolean(allergySel[key]?.checked)} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], checked: e.target.checked } })} />
+                <span>{ALLERGEN_LABELS[key]}</span>
+              </label>
+              <input className="med-note" placeholder="نوع/تفاصيل الحساسية (اختياري)" disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
+            </div>
+          ))}
         </div>
+
+        <div className="med-section">
+          <h4>الأمراض المزمنة</h4>
+          {CHRONIC_CONDITION_KEYS.map((key) => (
+            <div className="med-choice" key={key}>
+              <label className="med-check">
+                <input type="checkbox" disabled={!canEdit} checked={Boolean(condSel[key]?.checked)} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], checked: e.target.checked } })} />
+                <span>{CHRONIC_CONDITION_LABELS[key]}</span>
+              </label>
+              <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label="شدة المرض">
+                {Object.entries(CONDITION_SEVERITY_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+              </select>
+              <input className="med-note" placeholder="تفاصيل إضافية (اختياري)" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
+            </div>
+          ))}
+        </div>
+
         <Field label="ملاحظات طبية عامة">
-          <textarea rows="3" disabled={!canEdit} value={form.medical_notes} onChange={(e) => setForm({ ...form, medical_notes: e.target.value })} />
+          <textarea rows="3" disabled={!canEdit} value={extras.medical_notes} onChange={(e) => setExtras({ ...extras, medical_notes: e.target.value })} />
         </Field>
         <Notice kind="error">{error}</Notice>
         {done && <Notice kind="success">تم حفظ البيانات الطبية بنجاح</Notice>}

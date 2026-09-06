@@ -252,7 +252,7 @@ export const getUnifiedMedicalRecord = async (req: AuthenticatedRequest, res: Re
   }
 };
 
-// 9. جلب ملف البيانات الطبية التكميلية للمريض (الحساسيات وغيرها)
+// 9. جلب ملف البيانات الطبية التكميلية للمريض (الحساسيات والأمراض المزمنة وغيرها)
 export const getMedicalProfile = async (req: AuthenticatedRequest, res: Response) => {
   const patientId = req.params.patientId;
   const clinicId = req.user?.clinicId;
@@ -276,36 +276,48 @@ export const getMedicalProfile = async (req: AuthenticatedRequest, res: Response
     );
     if (!access.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
 
-    const result = await pool.query(
-      `SELECT mp.profile_id, mp.patient_id, mp.blood_type, mp.allergies, mp.chronic_diseases,
-              mp.current_medications, mp.medical_notes, mp.updated_by, mp.updated_at,
-              u.full_name AS updated_by_name
+    const profile = await pool.query(
+      `SELECT mp.profile_id, mp.patient_id, mp.blood_type, mp.current_medications, mp.medical_notes,
+              mp.updated_by, mp.updated_at, u.full_name AS updated_by_name
        FROM patient_medical_profiles mp
        LEFT JOIN users u ON u.user_id = mp.updated_by
        WHERE mp.patient_id = $1`,
       [patientId]
     );
-    return res.status(200).json({ profile: result.rows[0] || null });
+    const allergies = await pool.query(
+      `SELECT allergen_key, notes FROM patient_allergies WHERE patient_id = $1 ORDER BY allergy_id`,
+      [patientId]
+    );
+    const conditions = await pool.query(
+      `SELECT condition_key, severity, notes FROM patient_chronic_conditions WHERE patient_id = $1 ORDER BY condition_id`,
+      [patientId]
+    );
+    return res.status(200).json({
+      profile: profile.rows[0] || null,
+      allergies: allergies.rows,
+      chronic_conditions: conditions.rows,
+    });
   } catch (error) {
     console.error('Get Medical Profile Error:', error);
     return res.status(500).json({ message: 'حدث خطأ في الخادم عند جلب البيانات الطبية' });
   }
 };
 
-// 10. حفظ/تحديث ملف البيانات الطبية التكميلية (يكمله الطبيب)
+// 10. حفظ/تحديث ملف البيانات الطبية (يكمله الطبيب) — يستبدل الحساسيات والأمراض المزمنة بالكامل حسب مربعات التفعيل
 export const saveMedicalProfile = async (req: AuthenticatedRequest, res: Response) => {
   const patientId = req.params.patientId;
   const clinicId = req.user?.clinicId;
   const userId = req.user?.userId;
-  const { blood_type, allergies, chronic_diseases, current_medications, medical_notes } = req.body;
+  const { blood_type, current_medications, medical_notes, allergies, chronic_conditions } = req.body;
 
   if (clinicId === null || clinicId === undefined || userId === undefined) {
     return res.status(403).json({ message: 'الحساب غير مرتبط بعيادة' });
   }
 
+  const client = await pool.connect();
   try {
     // يُسمح بالتعديل للعيادة المالكة أو عيادة لديها مشاركة كتابة نشطة
-    const access = await pool.query(
+    const access = await client.query(
       `SELECT 1 FROM patients p
        WHERE p.patient_id = $1 AND (
          p.clinic_id = $2 OR EXISTS (
@@ -316,30 +328,81 @@ export const saveMedicalProfile = async (req: AuthenticatedRequest, res: Respons
        )`,
       [patientId, clinicId]
     );
-    if (!access.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية تعديل البيانات الطبية' });
+    if (!access.rowCount) {
+      client.release();
+      return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية تعديل البيانات الطبية' });
+    }
 
-    const result = await pool.query(
-      `INSERT INTO patient_medical_profiles (patient_id, blood_type, allergies, chronic_diseases, current_medications, medical_notes, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO patient_medical_profiles (patient_id, blood_type, current_medications, medical_notes, updated_by)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (patient_id) DO UPDATE SET
          blood_type = EXCLUDED.blood_type,
-         allergies = EXCLUDED.allergies,
-         chronic_diseases = EXCLUDED.chronic_diseases,
          current_medications = EXCLUDED.current_medications,
          medical_notes = EXCLUDED.medical_notes,
          updated_by = EXCLUDED.updated_by,
-         updated_at = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [patientId, blood_type ?? null, allergies ?? null, chronic_diseases ?? null, current_medications ?? null, medical_notes ?? null, userId]
+         updated_at = CURRENT_TIMESTAMP`,
+      [patientId, blood_type ?? null, current_medications ?? null, medical_notes ?? null, userId]
     );
-    await pool.query(
+
+    // الحساسيات: تُستبدل بالكامل (وجود الصف = مربع التفعيل ✓)
+    await client.query('DELETE FROM patient_allergies WHERE patient_id = $1', [patientId]);
+    for (const allergy of allergies ?? []) {
+      await client.query(
+        `INSERT INTO patient_allergies (patient_id, allergen_key, notes, created_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (patient_id, allergen_key) DO UPDATE SET notes = EXCLUDED.notes`,
+        [patientId, allergy.allergen_key, allergy.notes ?? null, userId]
+      );
+    }
+
+    // الأمراض المزمنة: تُستبدل بالكامل مع شدة كل مرض
+    await client.query('DELETE FROM patient_chronic_conditions WHERE patient_id = $1', [patientId]);
+    for (const condition of chronic_conditions ?? []) {
+      await client.query(
+        `INSERT INTO patient_chronic_conditions (patient_id, condition_key, severity, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (patient_id, condition_key) DO UPDATE SET severity = EXCLUDED.severity, notes = EXCLUDED.notes`,
+        [patientId, condition.condition_key, condition.severity ?? 'UNSPECIFIED', condition.notes ?? null, userId]
+      );
+    }
+
+    await client.query(
       `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
        VALUES ($1, $2, 'PATIENT_MEDICAL_PROFILE_UPDATED', 'PATIENT', $3)`,
       [userId, clinicId, patientId]
     );
-    return res.status(200).json({ message: 'تم حفظ البيانات الطبية بنجاح', profile: result.rows[0] });
+    await client.query('COMMIT');
+
+    const profile = await client.query(
+      `SELECT mp.profile_id, mp.patient_id, mp.blood_type, mp.current_medications, mp.medical_notes,
+              mp.updated_by, mp.updated_at, u.full_name AS updated_by_name
+       FROM patient_medical_profiles mp
+       LEFT JOIN users u ON u.user_id = mp.updated_by
+       WHERE mp.patient_id = $1`,
+      [patientId]
+    );
+    const allergyRows = await client.query(
+      `SELECT allergen_key, notes FROM patient_allergies WHERE patient_id = $1 ORDER BY allergy_id`,
+      [patientId]
+    );
+    const conditionRows = await client.query(
+      `SELECT condition_key, severity, notes FROM patient_chronic_conditions WHERE patient_id = $1 ORDER BY condition_id`,
+      [patientId]
+    );
+
+    return res.status(200).json({
+      message: 'تم حفظ البيانات الطبية بنجاح',
+      profile: profile.rows[0],
+      allergies: allergyRows.rows,
+      chronic_conditions: conditionRows.rows,
+    });
   } catch (error) {
+    try { await client.query('ROLLBACK'); } catch { /* الجلسة قد تكون مغلقة بالفعل */ }
     console.error('Save Medical Profile Error:', error);
     return res.status(500).json({ message: 'حدث خطأ في الخادم عند حفظ البيانات الطبية' });
+  } finally {
+    client.release();
   }
 };

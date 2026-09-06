@@ -35,6 +35,14 @@
 .nowrap{white-space:nowrap}
 .muted-small{color:#9aa8a7;font-size:11px}
 .profile-meta{margin:2px 0 0;color:#9aa8a7;font-size:11px}
+.med-section{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#f8fbfa}.med-section h4{margin:0 0 10px;font-size:13px;color:var(--ink)}
+.med-choice{display:flex;align-items:center;gap:10px;padding:5px 0;flex-wrap:wrap}
+.med-check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink);cursor:pointer;min-width:130px;font-weight:600}
+.med-check input{width:15px;height:15px;accent-color:var(--teal);cursor:pointer}
+.med-note{flex:1;min-width:180px;border:1px solid #dbe5e2;border-radius:8px;padding:7px 10px;font-size:12px;background:#fff;outline:0;box-sizing:border-box}
+.med-note:focus{border-color:var(--teal)}
+.med-note:disabled{background:#f1f5f4;color:#9aa8a7}
+.med-sev{border:1px solid #dbe5e2;border-radius:8px;padding:7px 8px;font-size:12px;background:#fff;outline:0;color:#536467}
 .danger{color:#ae5e54!important}
 .calc-value{font-size:13px;color:var(--teal);font-weight:700;padding-top:8px;display:inline-block}
 .calc-total{display:flex;justify-content:space-between;align-items:center;background:#eef5f3;border-radius:10px;padding:12px 15px;font-size:13px;color:#376864}.calc-total strong{font-size:18px;color:var(--teal)}

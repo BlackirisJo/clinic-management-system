@@ -51,6 +51,14 @@ export const GENDER_LABELS = { MALE: 'ذكر', FEMALE: 'أنثى' }
 
 export const DOCUMENT_TYPE_LABELS = { NATIONAL_ID: 'بطاقة شخصية', PASSPORT: 'جواز سفر', OTHER: 'أخرى' }
 
+export const ALLERGEN_LABELS = { PENICILLIN: 'البنسلين', ASPIRIN: 'الأسبرين', SULFA: 'السلفا', LATEX: 'اللاتكس', FOOD: 'الأطعمة', POLLEN: 'حبوب اللقاح', INSECT_STING: 'لسعات الحشرات', OTHER: 'أخرى' }
+export const ALLERGEN_KEYS = Object.keys(ALLERGEN_LABELS)
+
+export const CHRONIC_CONDITION_LABELS = { DIABETES: 'السكري', HYPERTENSION: 'ضغط الدم', ASTHMA: 'الربو', HEART_DISEASE: 'أمراض القلب', KIDNEY_DISEASE: 'أمراض الكلى', THYROID: 'الغدة الدرقية', ANEMIA: 'فقر الدم', OTHER: 'أخرى' }
+export const CHRONIC_CONDITION_KEYS = Object.keys(CHRONIC_CONDITION_LABELS)
+
+export const CONDITION_SEVERITY_LABELS = { MILD: 'خفيف', MODERATE: 'متوسط', SEVERE: 'شديد', GESTATIONAL: 'حملي', TRANSIENT: 'عرضي / مؤقت', UNSPECIFIED: 'غير محدد' }
+
 export const APPOINTMENT_STATUS = {
   SCHEDULED: { label: 'مجدول', cls: 'scheduled' },
   CONFIRMED: { label: 'مؤكد', cls: 'confirmed' },
