@@ -304,8 +304,8 @@ function VisitsTab({ patient, user }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    api.users.list({ limit: 100 })
-      .then((result) => setDoctors((result.users || []).filter((u) => u.role_name === 'DOCTOR')))
+    api.users.doctors()
+      .then((result) => setDoctors(result.doctors || []))
       .catch(() => setDoctors([]))
   }, [])
 
@@ -363,14 +363,16 @@ function AddVisitModal({ patient, user, doctors, onClose, onSaved }) {
   return (
     <Modal title={`تسجيل زيارة لـ ${patient.full_name}`} subtitle="الزيارات الطبية" onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label="العيادة" required>
-          <input type="number" required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })} />
+        <Field label="العيادة" required hint="عيادتك الحالية">
+          <input required value={form.clinic_id} readOnly />
         </Field>
-        <Field label="الطبيب" required hint={doctors === null ? 'لم نتمكن من جلب قائمة الأطباء، أدخل رقم الطبيب يدوياً' : undefined}>
-          {doctors && doctors.length > 0 ? (
+        <Field label="الطبيب" required hint={doctors !== null && doctors.length === 0 ? 'لا يوجد أطباء نشطون في العيادة بعد' : undefined}>
+          {doctors === null ? (
+            <select disabled><option>جارِ تحميل الأطباء...</option></select>
+          ) : doctors.length > 0 ? (
             <select required value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}>
               <option value="">اختر الطبيب...</option>
-              {doctors.map((d) => <option key={d.user_id} value={d.user_id}>{d.full_name}</option>)}
+              {doctors.map((d) => <option key={d.user_id} value={d.user_id}>{d.full_name}{d.sub_specialty ? ` — ${d.sub_specialty}` : ''}</option>)}
             </select>
           ) : (
             <input type="number" required placeholder="رقم الطبيب" value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })} />

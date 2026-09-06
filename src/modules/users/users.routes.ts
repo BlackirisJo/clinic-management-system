@@ -1,7 +1,7 @@
 import { NextFunction, Response, Router } from 'express';
 import { z } from 'zod';
 import { authenticateJWT, AuthenticatedRequest, requirePermission } from '../../middlewares/auth.middleware';
-import { createUser, listUsers, updateUser } from './users.controller';
+import { createUser, listUsers, updateUser, listDoctors } from './users.controller';
 import { createUserSchema, updateUserSchema } from './users.validation';
 
 const router = Router();
@@ -12,9 +12,13 @@ const validate = (schema: z.ZodType) => (req: AuthenticatedRequest, res: Respons
   return next();
 };
 
-router.use(authenticateJWT, requirePermission('MANAGE_USERS'));
-router.get('/', listUsers);
-router.post('/', validate(createUserSchema), createUser);
-router.patch('/:id', validate(updateUserSchema), updateUser);
+// التوثيق مطلوب لجميع مسارات المستخدمين
+router.use(authenticateJWT);
+// قائمة الأطباء لحجز المواعيد — متاحة لكل من يملك صلاحية عرض المواعيد (استقبال/طبيب/ممرض)
+router.get('/doctors', requirePermission('VIEW_APPOINTMENTS'), listDoctors);
+// بقية مسارات إدارة المستخدمين — تتطلب صلاحية إدارة المستخدمين (إدارة النظام فقط)
+router.get('/', requirePermission('MANAGE_USERS'), listUsers);
+router.post('/', requirePermission('MANAGE_USERS'), validate(createUserSchema), createUser);
+router.patch('/:id', requirePermission('MANAGE_USERS'), validate(updateUserSchema), updateUser);
 
 export default router;

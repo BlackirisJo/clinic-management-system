@@ -114,15 +114,22 @@ function CreateAppointmentModal({ user, onClose, onSaved }) {
   const [doctors, setDoctors] = useState(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const isGlobal = ['SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user?.roleName)
 
   useEffect(() => {
     api.patients.list({ limit: 100 })
       .then((r) => setPatients(r.patients || []))
       .catch(() => setPatients([]))
-    api.users.list({ limit: 100 })
-      .then((r) => setDoctors((r.users || []).filter((u) => u.role_name === 'DOCTOR')))
+    api.users.doctors()
+      .then((r) => setDoctors(r.doctors || []))
       .catch(() => setDoctors([]))
   }, [])
+
+  // عند اختيار الطبيب تُعتمد عيادته تلقائياً (مهم لمدير النظام متعدد العيادات)
+  function selectDoctor(doctorId) {
+    const doctor = (doctors || []).find((d) => d.user_id === Number(doctorId))
+    setForm((prev) => ({ ...prev, doctor_id: doctorId, clinic_id: doctor?.clinic_id || prev.clinic_id }))
+  }
 
   async function submit(e) {
     e.preventDefault()
@@ -149,7 +156,9 @@ function CreateAppointmentModal({ user, onClose, onSaved }) {
     <Modal title="حجز موعد جديد" subtitle="المواعيد" onClose={onClose} wide>
       <form className="patient-form" onSubmit={submit}>
         <div className="form-row">
-          <Field label="العيادة" required><input type="number" required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })} /></Field>
+          <Field label="العيادة" required hint="تُحدَّد تلقائياً حسب عيادة الطبيب المختار">
+            <input required value={form.clinic_id} readOnly />
+          </Field>
           <Field label="المريض" required>
             <select required value={form.patient_id} onChange={(e) => setForm({ ...form, patient_id: e.target.value })}>
               <option value="">اختر المريض...</option>
@@ -157,11 +166,13 @@ function CreateAppointmentModal({ user, onClose, onSaved }) {
             </select>
           </Field>
         </div>
-        <Field label="الطبيب" required hint={doctors === null ? 'أدخل رقم الطبيب يدوياً' : undefined}>
-          {doctors && doctors.length > 0 ? (
-            <select required value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}>
+        <Field label="الطبيب" required hint={doctors !== null && doctors.length === 0 ? 'لا يوجد أطباء نشطون في العيادة بعد' : undefined}>
+          {doctors === null ? (
+            <select disabled><option>جارِ تحميل الأطباء...</option></select>
+          ) : doctors.length > 0 ? (
+            <select required value={form.doctor_id} onChange={(e) => selectDoctor(e.target.value)}>
               <option value="">اختر الطبيب...</option>
-              {doctors.map((d) => <option key={d.user_id} value={d.user_id}>{d.full_name}</option>)}
+              {doctors.map((d) => <option key={d.user_id} value={d.user_id}>{d.full_name}{isGlobal && d.clinic_name ? ` — ${d.clinic_name}` : ''}</option>)}
             </select>
           ) : (
             <input type="number" required placeholder="رقم الطبيب" value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })} />

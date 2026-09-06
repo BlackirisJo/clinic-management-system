@@ -26,6 +26,36 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
+// قائمة الأطباء المتاحين لحجز المواعيد — أطباء عيادة المستخدم، وللمدير كل الأطباء (أو حسب العيادة المطلوبة)
+export const listDoctors = async (req: AuthenticatedRequest, res: Response) => {
+  const isGlobal = canManageAllClinics(req);
+  const requestedClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
+  try {
+    const params: any[] = [];
+    let where = `u.status = 'ACTIVE'`;
+    if (!isGlobal) {
+      params.push(req.user?.clinicId);
+      where += ` AND u.clinic_id = $${params.length}`;
+    } else if (requestedClinic) {
+      params.push(requestedClinic);
+      where += ` AND u.clinic_id = $${params.length}`;
+    }
+    const result = await pool.query(
+      `SELECT u.user_id, u.full_name, u.sub_specialty, u.clinic_id, c.clinic_name
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN clinics c ON c.clinic_id = u.clinic_id
+       WHERE r.role_name = 'DOCTOR' AND ${where}
+       ORDER BY u.full_name ASC`,
+      params
+    );
+    return res.status(200).json({ doctors: result.rows });
+  } catch (error) {
+    console.error('List Doctors Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم عند جلب قائمة الأطباء' });
+  }
+};
+
 export const createUser = async (req: AuthenticatedRequest, res: Response) => {
   const { full_name, username, password, role_name, clinic_id, phone, medical_license_no, sub_specialty, direct_phone } = req.body;
   const managerIsGlobal = canManageAllClinics(req);

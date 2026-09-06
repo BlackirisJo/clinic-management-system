@@ -120,6 +120,7 @@ export const api = {
     removeStaff: (id, userId) => request(`/api/clinics/${id}/staff/${userId}`, { method: 'DELETE' }),
   },
   users: {
+    doctors: () => request('/api/users/doctors'),
     list: (params) => request('/api/users', { params }),
     create: (body) => request('/api/users', { method: 'POST', body }),
     update: (id, body) => request(`/api/users/${id}`, { method: 'PATCH', body }),
