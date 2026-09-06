@@ -239,31 +239,35 @@ function MedicalProfileTab({ patient, user }) {
 
         <div className="med-section">
           <h4>الحساسيات</h4>
-          {ALLERGEN_KEYS.map((key) => (
-            <div className="med-choice" key={key}>
-              <label className="med-check">
-                <input type="checkbox" disabled={!canEdit} checked={Boolean(allergySel[key]?.checked)} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], checked: e.target.checked } })} />
-                <span>{ALLERGEN_LABELS[key]}</span>
-              </label>
-              <input className="med-note" placeholder="نوع/تفاصيل الحساسية (اختياري)" disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
-            </div>
-          ))}
+          <div className="med-grid">
+            {ALLERGEN_KEYS.map((key) => (
+              <div className="med-item" key={key}>
+                <label className="med-check">
+                  <input type="checkbox" disabled={!canEdit} checked={Boolean(allergySel[key]?.checked)} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], checked: e.target.checked } })} />
+                  <span>{ALLERGEN_LABELS[key]}</span>
+                </label>
+                <input className="med-note" placeholder="نوع/تفاصيل (اختياري)" disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="med-section">
           <h4>الأمراض المزمنة</h4>
-          {CHRONIC_CONDITION_KEYS.map((key) => (
-            <div className="med-choice" key={key}>
-              <label className="med-check">
-                <input type="checkbox" disabled={!canEdit} checked={Boolean(condSel[key]?.checked)} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], checked: e.target.checked } })} />
-                <span>{CHRONIC_CONDITION_LABELS[key]}</span>
-              </label>
-              <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label="شدة المرض">
-                {Object.entries(CONDITION_SEVERITY_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
-              </select>
-              <input className="med-note" placeholder="تفاصيل إضافية (اختياري)" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
-            </div>
-          ))}
+          <div className="med-grid">
+            {CHRONIC_CONDITION_KEYS.map((key) => (
+              <div className="med-item" key={key}>
+                <label className="med-check">
+                  <input type="checkbox" disabled={!canEdit} checked={Boolean(condSel[key]?.checked)} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], checked: e.target.checked } })} />
+                  <span>{CHRONIC_CONDITION_LABELS[key]}</span>
+                </label>
+                <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label="شدة المرض">
+                  {Object.entries(CONDITION_SEVERITY_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                </select>
+                <input className="med-note" placeholder="تفاصيل (اختياري)" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
+              </div>
+            ))}
+          </div>
         </div>
 
         <Field label="ملاحظات طبية عامة">
