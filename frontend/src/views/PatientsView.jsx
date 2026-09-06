@@ -143,15 +143,117 @@ function PatientDetailModal({ patient, user, onClose }) {
       </div>
       <div className="tabs">
         <button className={tab === 'visits' ? 'tab active' : 'tab'} onClick={() => setTab('visits')}>الزيارات</button>
+        <button className={tab === 'medical' ? 'tab active' : 'tab'} onClick={() => setTab('medical')}>البيانات الطبية</button>
         <button className={tab === 'record' ? 'tab active' : 'tab'} onClick={() => setTab('record')}>السجل الطبي الموحد</button>
         <button className={tab === 'shares' ? 'tab active' : 'tab'} onClick={() => setTab('shares')}>المشاركات</button>
       </div>
       <div className="tab-content">
         {tab === 'visits' && <VisitsTab patient={patient} user={user} />}
+        {tab === 'medical' && <MedicalProfileTab patient={patient} user={user} />}
         {tab === 'record' && <MedicalRecordTab patient={patient} />}
         {tab === 'shares' && <SharesTab patient={patient} />}
       </div>
     </Modal>
+  )
+}
+
+// تبويب البيانات الطبية التكميلية — الطبيب يكمل ويحدّث، والبقية عرض فقط
+function MedicalProfileTab({ patient, user }) {
+  const canEdit = ['DOCTOR', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user?.roleName) || (user?.permissions || []).includes('EDIT_PATIENT_MEDICAL')
+  const [profile, setProfile] = useState(null)
+  const [form, setForm] = useState({ blood_type: '', allergies: '', chronic_diseases: '', current_medications: '', medical_notes: '' })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const result = await api.patients.medicalProfile(patient.patient_id)
+      const p = result.profile
+      setProfile(p)
+      setForm({
+        blood_type: p?.blood_type || '',
+        allergies: p?.allergies || '',
+        chronic_diseases: p?.chronic_diseases || '',
+        current_medications: p?.current_medications || '',
+        medical_notes: p?.medical_notes || '',
+      })
+    } catch (err) {
+      setError(err.message || 'تعذر تحميل البيانات الطبية')
+    } finally { setLoading(false) }
+  }, [patient.patient_id])
+
+  useEffect(() => { load() }, [load])
+
+  async function submit(e) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    setDone(false)
+    try {
+      const result = await api.patients.saveMedicalProfile(patient.patient_id, {
+        blood_type: form.blood_type || undefined,
+        allergies: form.allergies.trim() || undefined,
+        chronic_diseases: form.chronic_diseases.trim() || undefined,
+        current_medications: form.current_medications.trim() || undefined,
+        medical_notes: form.medical_notes.trim() || undefined,
+      })
+      setProfile(result.profile)
+      setDone(true)
+    } catch (err) {
+      setError(err.message || 'تعذر حفظ البيانات الطبية')
+    } finally { setSaving(false) }
+  }
+
+  if (loading) return <Loading text="جارِ تحميل البيانات الطبية" />
+
+  return (
+    <div className="tab-inner">
+      <form className="patient-form" onSubmit={submit}>
+        <div className="form-row">
+          <Field label="فصيلة الدم">
+            <select value={form.blood_type} disabled={!canEdit} onChange={(e) => setForm({ ...form, blood_type: e.target.value })}>
+              <option value="">غير محددة</option>
+              <option value="A+">A+</option>
+              <option value="A-">A-</option>
+              <option value="B+">B+</option>
+              <option value="B-">B-</option>
+              <option value="AB+">AB+</option>
+              <option value="AB-">AB-</option>
+              <option value="O+">O+</option>
+              <option value="O-">O-</option>
+            </select>
+          </Field>
+          <Field label="الحساسيات" hint="حساسيات الأدوية أو الأطعمة أو مواد أخرى">
+            <textarea rows="3" disabled={!canEdit} placeholder="مثال: البنسلين، حبوب اللقاح..." value={form.allergies} onChange={(e) => setForm({ ...form, allergies: e.target.value })} />
+          </Field>
+        </div>
+        <div className="form-row">
+          <Field label="الأمراض المزمنة">
+            <textarea rows="3" disabled={!canEdit} placeholder="مثال: السكري، ارتفاع ضغط الدم..." value={form.chronic_diseases} onChange={(e) => setForm({ ...form, chronic_diseases: e.target.value })} />
+          </Field>
+          <Field label="الأدوية الحالية">
+            <textarea rows="3" disabled={!canEdit} placeholder="الأدوية التي يتناولها المريض حالياً..." value={form.current_medications} onChange={(e) => setForm({ ...form, current_medications: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="ملاحظات طبية عامة">
+          <textarea rows="3" disabled={!canEdit} value={form.medical_notes} onChange={(e) => setForm({ ...form, medical_notes: e.target.value })} />
+        </Field>
+        <Notice kind="error">{error}</Notice>
+        {done && <Notice kind="success">تم حفظ البيانات الطبية بنجاح</Notice>}
+        {canEdit ? (
+          <div className="modal-actions">
+            <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'حفظ البيانات الطبية'}</button>
+          </div>
+        ) : (
+          <p className="profile-meta">عرض فقط — تعديل البيانات الطبية متاح للطبيب المعالج</p>
+        )}
+        {profile?.updated_at ? <p className="profile-meta">آخر تحديث: {fmtDateTime(profile.updated_at)}{profile.updated_by_name ? ` — بواسطة ${profile.updated_by_name}` : ''}</p> : null}
+      </form>
+    </div>
   )
 }
 

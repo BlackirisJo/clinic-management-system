@@ -20,3 +20,10 @@ export const invoiceSchema = z.object({
   items: z.array(z.object({ clinic_id: id, doctor_id: id.optional(), service_id: id.optional(), price: money })).min(1).max(100),
 });
 export const expenseSchema = z.object({ clinic_id: id, category: z.string().trim().min(2).max(100), amount: money, description: z.string().max(5000).optional() });
+export const medicalProfileSchema = z.object({
+  blood_type: z.enum(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).optional(),
+  allergies: z.string().trim().max(5000).optional(),
+  chronic_diseases: z.string().trim().max(5000).optional(),
+  current_medications: z.string().trim().max(5000).optional(),
+  medical_notes: z.string().trim().max(5000).optional(),
+});

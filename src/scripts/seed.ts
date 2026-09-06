@@ -11,6 +11,7 @@ const PERMISSIONS = [
   { key: 'VIEW_PATIENTS', group: 'Patients', desc: 'عرض ملفات المرضى' },
   { key: 'CREATE_PATIENT', group: 'Patients', desc: 'إضافة مريض جديد' },
   { key: 'EDIT_PATIENTS', group: 'Patients', desc: 'تعديل بيانات المرضى' },
+  { key: 'EDIT_PATIENT_MEDICAL', group: 'Patients', desc: 'إكمال وتحديث البيانات الطبية للمريض (الحساسيات والأمراض المزمنة)' },
   { key: 'CREATE_VISIT', group: 'Visits', desc: 'تسجيل زيارة جديدة للمريض' },
   { key: 'SHARE_PATIENT_RECORDS', group: 'Patients', desc: 'مشاركة السجلات الطبية مع عيادات أخرى' },
   { key: 'VIEW_SHARED_PATIENT_RECORDS', group: 'Patients', desc: 'عرض السجلات الطبية المشتركة' },
@@ -45,7 +46,7 @@ const ROLES = [
 ];
 
 const ROLE_PERMISSIONS: Record<string, string[]> = {
-  DOCTOR: ['VIEW_PATIENTS', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_PRESCRIPTION', 'VIEW_PRESCRIPTIONS', 'VIEW_MEDICATIONS', 'VIEW_SHARED_PATIENT_RECORDS'],
+  DOCTOR: ['VIEW_PATIENTS', 'EDIT_PATIENT_MEDICAL', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_PRESCRIPTION', 'VIEW_PRESCRIPTIONS', 'VIEW_MEDICATIONS', 'VIEW_SHARED_PATIENT_RECORDS'],
   ACCOUNTANT: ['VIEW_PATIENTS', 'MANAGE_SERVICES', 'CREATE_INVOICE', 'VIEW_INVOICES', 'CREATE_EXPENSE', 'VIEW_FINANCIAL_REPORTS', 'VIEW_REPORTS'],
   RECEPTIONIST: ['VIEW_PATIENTS', 'CREATE_PATIENT', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_INVOICE', 'VIEW_INVOICES', 'VIEW_SHARED_PATIENT_RECORDS'],
 };

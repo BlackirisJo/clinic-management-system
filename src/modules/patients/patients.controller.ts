@@ -251,3 +251,95 @@ export const getUnifiedMedicalRecord = async (req: AuthenticatedRequest, res: Re
     return res.status(500).json({ message: 'حدث خطأ أثناء جلب السجل الطبي الموحد' });
   }
 };
+
+// 9. جلب ملف البيانات الطبية التكميلية للمريض (الحساسيات وغيرها)
+export const getMedicalProfile = async (req: AuthenticatedRequest, res: Response) => {
+  const patientId = req.params.patientId;
+  const clinicId = req.user?.clinicId;
+
+  if (clinicId === null || clinicId === undefined) {
+    return res.status(403).json({ message: 'الحساب غير مرتبط بعيادة' });
+  }
+
+  try {
+    // العيادة المالكة أو أي مشاركة نشطة (قراءة/كتابة)
+    const access = await pool.query(
+      `SELECT 1 FROM patients p
+       WHERE p.patient_id = $1 AND (
+         p.clinic_id = $2 OR EXISTS (
+           SELECT 1 FROM patient_clinic_shares s
+           WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
+             AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+         )
+       )`,
+      [patientId, clinicId]
+    );
+    if (!access.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
+
+    const result = await pool.query(
+      `SELECT mp.profile_id, mp.patient_id, mp.blood_type, mp.allergies, mp.chronic_diseases,
+              mp.current_medications, mp.medical_notes, mp.updated_by, mp.updated_at,
+              u.full_name AS updated_by_name
+       FROM patient_medical_profiles mp
+       LEFT JOIN users u ON u.user_id = mp.updated_by
+       WHERE mp.patient_id = $1`,
+      [patientId]
+    );
+    return res.status(200).json({ profile: result.rows[0] || null });
+  } catch (error) {
+    console.error('Get Medical Profile Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم عند جلب البيانات الطبية' });
+  }
+};
+
+// 10. حفظ/تحديث ملف البيانات الطبية التكميلية (يكمله الطبيب)
+export const saveMedicalProfile = async (req: AuthenticatedRequest, res: Response) => {
+  const patientId = req.params.patientId;
+  const clinicId = req.user?.clinicId;
+  const userId = req.user?.userId;
+  const { blood_type, allergies, chronic_diseases, current_medications, medical_notes } = req.body;
+
+  if (clinicId === null || clinicId === undefined || userId === undefined) {
+    return res.status(403).json({ message: 'الحساب غير مرتبط بعيادة' });
+  }
+
+  try {
+    // يُسمح بالتعديل للعيادة المالكة أو عيادة لديها مشاركة كتابة نشطة
+    const access = await pool.query(
+      `SELECT 1 FROM patients p
+       WHERE p.patient_id = $1 AND (
+         p.clinic_id = $2 OR EXISTS (
+           SELECT 1 FROM patient_clinic_shares s
+           WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
+             AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+         )
+       )`,
+      [patientId, clinicId]
+    );
+    if (!access.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية تعديل البيانات الطبية' });
+
+    const result = await pool.query(
+      `INSERT INTO patient_medical_profiles (patient_id, blood_type, allergies, chronic_diseases, current_medications, medical_notes, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (patient_id) DO UPDATE SET
+         blood_type = EXCLUDED.blood_type,
+         allergies = EXCLUDED.allergies,
+         chronic_diseases = EXCLUDED.chronic_diseases,
+         current_medications = EXCLUDED.current_medications,
+         medical_notes = EXCLUDED.medical_notes,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [patientId, blood_type ?? null, allergies ?? null, chronic_diseases ?? null, current_medications ?? null, medical_notes ?? null, userId]
+    );
+    await pool.query(
+      `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
+       VALUES ($1, $2, 'PATIENT_MEDICAL_PROFILE_UPDATED', 'PATIENT', $3)`,
+      [userId, clinicId, patientId]
+    );
+    return res.status(200).json({ message: 'تم حفظ البيانات الطبية بنجاح', profile: result.rows[0] });
+  } catch (error) {
+    console.error('Save Medical Profile Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم عند حفظ البيانات الطبية' });
+  }
+};

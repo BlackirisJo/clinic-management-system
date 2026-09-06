@@ -34,6 +34,7 @@
 .mini-select{border:1px solid #dbe5e2;border-radius:8px;padding:6px 8px;font-size:11px;background:#fff;color:#536467;outline:0}
 .nowrap{white-space:nowrap}
 .muted-small{color:#9aa8a7;font-size:11px}
+.profile-meta{margin:2px 0 0;color:#9aa8a7;font-size:11px}
 .danger{color:#ae5e54!important}
 .calc-value{font-size:13px;color:var(--teal);font-weight:700;padding-top:8px;display:inline-block}
 .calc-total{display:flex;justify-content:space-between;align-items:center;background:#eef5f3;border-radius:10px;padding:12px 15px;font-size:13px;color:#376864}.calc-total strong{font-size:18px;color:var(--teal)}
