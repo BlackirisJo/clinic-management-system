@@ -4,19 +4,19 @@ import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
 
 // 1. إضافة مريض جديد
 export const createPatient = async (req: AuthenticatedRequest, res: Response) => {
-  const { full_name, national_id, phone, gender, date_of_birth } = req.body;
+  const { full_name, national_id, document_type, document_number, phone, gender, date_of_birth } = req.body;
   const clinicId = req.user?.clinicId;
 
-  if (!full_name || !phone || !gender || !date_of_birth || clinicId === null || clinicId === undefined) {
-    return res.status(400).json({ message: 'الرجاء تقديم كافة البيانات المطلوبة للمريض' });
+  if (!full_name || !phone || !gender || !date_of_birth || !document_type || !document_number || clinicId === null || clinicId === undefined) {
+    return res.status(400).json({ message: 'الرجاء تقديم كافة البيانات المطلوبة للمريض (نوع الوثيقة ورقمها إلزاميان)' });
   }
 
   try {
     const result = await pool.query(
-      `INSERT INTO patients (clinic_id, full_name, national_id, phone, gender, date_of_birth)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO patients (clinic_id, full_name, national_id, document_type, document_number, phone, gender, date_of_birth)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [clinicId, full_name, national_id || null, phone, gender, date_of_birth]
+      [clinicId, full_name, national_id || null, document_type, document_number, phone, gender, date_of_birth]
     );
 
     return res.status(201).json({
@@ -24,7 +24,10 @@ export const createPatient = async (req: AuthenticatedRequest, res: Response) =>
       patient: result.rows[0],
     });
   } catch (error: any) {
-    if (error.code === '23505') { // Unique constraint error (e.g., national_id)
+    if (error.code === '23505') { // Unique constraint error
+      if (error.constraint === 'idx_patients_document_identity') {
+        return res.status(409).json({ message: 'رقم الوثيقة مسجل مسبقاً لمريض آخر بنفس نوع الوثيقة' });
+      }
       return res.status(409).json({ message: 'الرقم الوطني مسجل لمريض آخر بالفعل' });
     }
     console.error('Create Patient Error:', error);
@@ -44,7 +47,7 @@ export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
     const params: any[] = [req.user?.clinicId];
 
     if (search) {
-      query += ` AND (full_name ILIKE $2 OR phone ILIKE $2 OR national_id ILIKE $2)`;
+      query += ` AND (full_name ILIKE $2 OR phone ILIKE $2 OR national_id ILIKE $2 OR document_number ILIKE $2)`;
       params.push(`%${search}%`);
     }
 
@@ -214,7 +217,7 @@ export const getUnifiedMedicalRecord = async (req: AuthenticatedRequest, res: Re
   const clinicId = req.user?.clinicId;
   try {
     const access = await pool.query(
-      `SELECT p.patient_id, p.full_name, p.national_id, p.phone, p.gender, p.date_of_birth
+      `SELECT p.patient_id, p.full_name, p.national_id, p.document_type, p.document_number, p.phone, p.gender, p.date_of_birth
        FROM patients p
        WHERE p.patient_id = $1 AND (
          p.clinic_id = $2 OR EXISTS (

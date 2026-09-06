@@ -5,6 +5,8 @@ const money = z.coerce.number().finite().nonnegative();
 
 export const patientSchema = z.object({
   full_name: z.string().trim().min(3).max(150), national_id: z.string().max(50).optional(),
+  document_type: z.enum(['NATIONAL_ID', 'PASSPORT', 'OTHER']),
+  document_number: z.string().trim().min(1).max(100),
   phone: z.string().min(7).max(20), gender: z.enum(['MALE', 'FEMALE']), date_of_birth: z.string().date(),
 });
 export const visitSchema = z.object({ patient_id: id, clinic_id: id, doctor_id: id, notes: z.string().max(5000).optional() });

@@ -49,6 +49,8 @@ export const todayLabel = () => {
 // خرائط الحالات إلى العبارات العربية
 export const GENDER_LABELS = { MALE: 'ذكر', FEMALE: 'أنثى' }
 
+export const DOCUMENT_TYPE_LABELS = { NATIONAL_ID: 'بطاقة شخصية', PASSPORT: 'جواز سفر', OTHER: 'أخرى' }
+
 export const APPOINTMENT_STATUS = {
   SCHEDULED: { label: 'مجدول', cls: 'scheduled' },
   CONFIRMED: { label: 'مؤكد', cls: 'confirmed' },

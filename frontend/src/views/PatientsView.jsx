@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
-import { fmtDate, fmtDateTime, GENDER_LABELS } from '../lib/format'
+import { fmtDate, fmtDateTime, GENDER_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
 
 const LIMIT = 10
@@ -39,7 +39,7 @@ export default function PatientsView() {
       </div>
 
       <div className="toolbar">
-        <input className="input" placeholder="ابحث بالاسم أو الهاتف أو الرقم الوطني..." value={search}
+        <input className="input" placeholder="ابحث بالاسم أو الهاتف أو رقم الوثيقة..." value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
       </div>
 
@@ -77,7 +77,7 @@ export default function PatientsView() {
 }
 
 function AddPatientModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ full_name: '', national_id: '', phone: '', gender: 'MALE', date_of_birth: '' })
+  const [form, setForm] = useState({ full_name: '', document_type: 'NATIONAL_ID', document_number: '', national_id: '', phone: '', gender: 'MALE', date_of_birth: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -99,6 +99,16 @@ function AddPatientModal({ onClose, onSaved }) {
         <Field label="الاسم الكامل" required>
           <input required minLength={3} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
         </Field>
+        <div className="form-row">
+          <Field label="نوع الوثيقة" required>
+            <select value={form.document_type} onChange={(e) => setForm({ ...form, document_type: e.target.value })}>
+              <option value="NATIONAL_ID">بطاقة شخصية</option>
+              <option value="PASSPORT">جواز سفر</option>
+              <option value="OTHER">أخرى</option>
+            </select>
+          </Field>
+          <Field label="رقم الوثيقة" required><input required maxLength={100} value={form.document_number} onChange={(e) => setForm({ ...form, document_number: e.target.value })} /></Field>
+        </div>
         <div className="form-row">
           <Field label="الرقم الوطني"><input value={form.national_id} onChange={(e) => setForm({ ...form, national_id: e.target.value })} /></Field>
           <Field label="رقم الهاتف" required><input required minLength={7} dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
@@ -127,6 +137,7 @@ function PatientDetailModal({ patient, user, onClose }) {
       <div className="detail-summary">
         <span>{GENDER_LABELS[patient.gender] || patient.gender}</span>
         <span dir="ltr">{patient.phone}</span>
+        {patient.document_type ? <span>{DOCUMENT_TYPE_LABELS[patient.document_type] || patient.document_type}: <span dir="ltr">{patient.document_number}</span></span> : null}
         {patient.national_id ? <span dir="ltr">{patient.national_id}</span> : null}
         <span>{fmtDate(patient.date_of_birth, true)}</span>
       </div>
