@@ -2,7 +2,7 @@
 
 export const fmtMoney = (value) => {
   const n = Number(value) || 0
-  return new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 2 }).format(n) + ' ر.س'
+  return new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 2 }).format(n) + ' د.أ'
 }
 
 export const fmtNumber = (value) => {
