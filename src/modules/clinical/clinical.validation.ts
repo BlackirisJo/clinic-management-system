@@ -88,16 +88,18 @@ export const referralSchema = z.object({
 });
 
 // ===== الحمل =====
+// قيمة فارغة '' تعامل كـ null (النماذج ترسلها للحقول غير المعبأة)
+const emptyToNull = (schema: z.ZodType) => z.preprocess((v) => (v === '' ? null : v), schema);
 export const pregnancySchema = z.object({
-  lmp_date: z.string().date().optional().nullable(),
-  edd_date: z.string().date().optional().nullable(),
+  lmp_date: emptyToNull(z.string().date().optional().nullable()),
+  edd_date: emptyToNull(z.string().date().optional().nullable()),
   gravida: int(1, 30),
   para: int(0, 30),
   abortions: int(0, 30),
   living_children: int(0, 30),
   previous_pregnancies: longText(3000),
-  blood_group: z.enum(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).optional().nullable(),
-  rh_factor: z.enum(['POSITIVE', 'NEGATIVE']).optional().nullable(),
+  blood_group: emptyToNull(z.enum(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).optional().nullable()),
+  rh_factor: emptyToNull(z.enum(['POSITIVE', 'NEGATIVE']).optional().nullable()),
   risk_level: z.enum(['NORMAL', 'HIGH']).default('NORMAL'),
   risk_factors: longText(2000),
   notes: longText(3000),

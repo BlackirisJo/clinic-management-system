@@ -9,6 +9,7 @@
     "build": "tsc",
     "migrate": "node dist/scripts/migrate.js",
     "seed": "tsx src/scripts/seed.ts",
+    "seed:medications": "tsx src/scripts/importMedications.ts",
     "test": "npm run build && node --test dist/tests/*.test.js"
   },
   "keywords": [],

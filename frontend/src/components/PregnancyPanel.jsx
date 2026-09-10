@@ -101,10 +101,9 @@ function CreatePregnancyForm({ patientId, onClose, onSaved, setError }) {
     e.preventDefault()
     setSaving(true); setError('')
     try {
-      const payload = { ...form }
-      if (!form.blood_group) delete payload.blood_group
-      if (!form.rh_factor) delete payload.rh_factor
-      const result = await api.clinical.createPregnancy({ ...payload, patient_id: patientId })
+      // تجريد الحقول الفارغة: '' غير مقبول في مخطط التحقق (تواريخ/أنواع) — تُرسل كحقول محذوفة
+      const cleaned = Object.fromEntries(Object.entries(form).filter(([, v]) => v !== '' && v !== null && v !== undefined))
+      const result = await api.clinical.createPregnancy({ ...cleaned, patient_id: patientId })
       onSaved(result)
     } catch (err) { setError(err.message) }
     finally { setSaving(false) }
