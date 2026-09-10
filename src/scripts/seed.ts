@@ -154,6 +154,58 @@ const seedDatabase = async () => {
       [superAdminRole.rows[0].role_id, defaultClinicId, 'Super Admin', adminUsername, adminPasswordHash, 'ACTIVE']
     );
 
+
+    // 6. إنشاء أطباء تجريبيين للعيادة
+    console.log('6. إنشاء أطباء تجريبيين...');
+    const doctorRole = await client.query('SELECT role_id FROM roles WHERE role_name = \'DOCTOR\'');
+    const doctorPasswordHash = await bcrypt.hash('doctor123', 12);
+
+    const doctors = [
+      { name: 'د. أحمد محمد', username: 'ahmed', specialty: 'طب باطنية' },
+      { name: 'د. فاطمة علي', username: 'fatima', specialty: 'طب أطفال' },
+      { name: 'د. محمود حسن', username: 'mahmoud', specialty: 'جراحة عامة' },
+      { name: 'د. سارة خالد', username: 'sara', specialty: 'نسائية وتوليد' },
+    ];
+
+    for (const doc of doctors) {
+      await client.query(
+        'INSERT INTO users (role_id, clinic_id, full_name, username, password_hash, sub_specialty, status) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (username) DO NOTHING;',
+        [doctorRole.rows[0].role_id, defaultClinicId, doc.name, doc.username, doctorPasswordHash, doc.specialty, 'ACTIVE']
+      );
+    }
+
+    // 7. إنشاء ممرضات تجريبيات
+    console.log('7. إنشاء ممرضات تجريبيات...');
+    const nurseRole = await client.query('SELECT role_id FROM roles WHERE role_name = \'NURSE\'');
+    const nursePasswordHash = await bcrypt.hash('nurse123', 12);
+
+    const nurses = [
+      { name: 'نورة أحمد', username: 'noura' },
+      { name: 'ليلى محمود', username: 'layla' },
+    ];
+
+    for (const nurse of nurses) {
+      await client.query(
+        'INSERT INTO users (role_id, clinic_id, full_name, username, password_hash, status) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (username) DO NOTHING;',
+        [nurseRole.rows[0].role_id, defaultClinicId, nurse.name, nurse.username, nursePasswordHash, 'ACTIVE']
+      );
+    }
+
+    // 8. إنشاء موظفي استقبال تجريبيين
+    console.log('8. إنشاء موظفي استقبال تجريبيين...');
+    const receptionistRole = await client.query('SELECT role_id FROM roles WHERE role_name = \'RECEPTIONIST\'');
+    const receptionistPasswordHash = await bcrypt.hash('reception123', 12);
+
+    const receptionists = [
+      { name: 'محمد علي', username: 'mohamed' },
+    ];
+
+    for (const rec of receptionists) {
+      await client.query(
+        'INSERT INTO users (role_id, clinic_id, full_name, username, password_hash, status) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (username) DO NOTHING;',
+        [receptionistRole.rows[0].role_id, defaultClinicId, rec.name, rec.username, receptionistPasswordHash, 'ACTIVE']
+      );
+    }
     await client.query('COMMIT');
     console.log('✅ تم إكمال زرع البيانات بنجاح!');
     console.log('------------------------------------');

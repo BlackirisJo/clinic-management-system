@@ -59,3 +59,46 @@
 @media (max-width:900px){.tab-grid.two{grid-template-columns:1fr}.report-grid{grid-template-columns:repeat(2,1fr)}}
 @media (max-width:600px){.toolbar .input{width:100%;min-width:0}.report-grid{grid-template-columns:1fr}.paper-head{flex-direction:column;align-items:flex-start;gap:6px}}
 /* ===== نهاية الأنماط الجديدة ===== */
+
+/* ===== ?????? ????? ????? ???????? ===== */
+.visit-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.badge-open{background:#e0f2ec}
+.tab-bar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:16px}
+.tab-item{border:1px solid var(--line);background:#fff;color:#536467;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600}
+.tab-item.active{background:var(--teal);color:#fff;border-color:var(--teal)}
+.tab-inner{display:grid;gap:14px}.tab-inner h4{margin:8px 0 4px;color:var(--ink)}
+.chip{display:inline-flex;align-items:center;background:#eef4f2;border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:11px;color:#536467}
+.chip.small{font-size:10px;padding:2px 8px}.chip-warn{background:#fdf0e3;border-color:#ecd3b0;color:#8a5a1d}
+.workflow-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.specialty-workflow{background:#f2f8f6;border:1px solid #d5e8e2;border-radius:9px;padding:11px 13px;font-size:12px;color:#536467}
+.specialty-workflow strong{color:var(--ink);font-size:12px}
+.staff-picker{border:1px solid var(--line);border-radius:10px;padding:13px;display:grid;gap:9px}
+.staff-picker h4{margin:0;color:var(--ink)}
+.staff-picker-list{max-height:190px;overflow-y:auto;display:grid;gap:4px}
+.staff-option{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;background:#fff}
+.staff-option.selected{border-color:var(--teal);background:#eef7f4}
+.staff-option-name{font-weight:600;color:var(--ink)}
+.assign-box{border:1px solid var(--line);border-radius:10px;padding:15px;margin-top:14px;display:grid;gap:8px}
+.form-row.four{grid-template-columns:repeat(4,1fr)}
+.lab-orders{display:grid;gap:11px}.lab-order-card{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:9px;background:#fdfefe}
+.lab-order-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.lab-order-head strong{color:var(--ink)}.spacer{flex:1}
+.results-editor{border-top:1px dashed var(--line);padding-top:11px;display:grid;gap:9px}
+.pregnancy-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.pregnancy-list{display:grid;gap:8px}
+.pregnancy-card{display:grid;gap:5px;text-align:right;border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:#fff;font-size:12px;color:#536467}
+.pregnancy-card.selected{border-color:var(--teal);background:#eef7f4}
+.pregnancy-card strong{color:var(--ink);margin-left:8px}
+.pregnancy-details{border:1px solid var(--line);border-radius:11px;padding:14px;display:grid;gap:13px;background:#fbfdfc}
+.pregnancy-summary{display:grid;gap:7px}
+.summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.summary-grid>div{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+.summary-grid span{display:block;font-size:10px;color:var(--muted)}
+.summary-grid strong{font-size:13px;color:var(--ink)}.risk-high{color:#b3541e}
+.pregnancy-timeline{display:grid;gap:0;position:relative;padding-right:14px}
+.timeline-item{display:flex;gap:12px;position:relative;padding-bottom:15px}
+.timeline-item::before{content:'';position:absolute;right:4px;top:16px;bottom:0;width:2px;background:#d8e7e2}
+.timeline-item:last-child::before{display:none}
+.timeline-dot{width:10px;height:10px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-top:5px}
+.timeline-content{flex:1;border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:#fff;display:grid;gap:7px}
+.timeline-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.timeline-head strong{color:var(--ink)}
+.timeline-body{display:grid;gap:5px}
+.timeline-vitals{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:#536467;background:#f2f7f5;border-radius:8px;padding:7px 10px}

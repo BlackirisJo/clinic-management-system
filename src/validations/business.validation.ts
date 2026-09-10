@@ -3,11 +3,21 @@ import { z } from 'zod';
 const id = z.coerce.number().int().positive();
 const money = z.coerce.number().finite().nonnegative();
 
+// العيادة: الاسم + التخصص الطبي + الطاقم (أطباء وممرضون من المستخدمين الموجودين)
+export const clinicSchema = z.object({
+  clinic_name: z.string().trim().min(2).max(150).optional(),
+  specialty_id: z.coerce.number().int().positive().optional().nullable(),
+  is_active: z.boolean().optional(),
+  doctor_ids: z.array(id).max(200).optional(),
+  nurse_ids: z.array(id).max(200).optional(),
+});
+
 export const patientSchema = z.object({
   full_name: z.string().trim().min(3).max(150), national_id: z.string().max(50).optional(),
   document_type: z.enum(['NATIONAL_ID', 'PASSPORT', 'OTHER']),
   document_number: z.string().trim().min(1).max(100),
   phone: z.string().min(7).max(20), gender: z.enum(['MALE', 'FEMALE']), date_of_birth: z.string().date(),
+  clinic_id: z.coerce.number().int().positive().optional(),
 });
 export const visitSchema = z.object({ patient_id: id, clinic_id: id, doctor_id: id, notes: z.string().max(5000).optional() });
 export const prescriptionSchema = z.object({
@@ -24,13 +34,18 @@ const ALLERGEN_KEYS = ['PENICILLIN', 'ASPIRIN', 'SULFA', 'LATEX', 'FOOD', 'POLLE
 const CONDITION_KEYS = ['DIABETES', 'HYPERTENSION', 'ASTHMA', 'HEART_DISEASE', 'KIDNEY_DISEASE', 'THYROID', 'ANEMIA', 'OTHER'] as const;
 const SEVERITY_LEVELS = ['MILD', 'MODERATE', 'SEVERE', 'GESTATIONAL', 'TRANSIENT', 'UNSPECIFIED'] as const;
 
-export const clinicSchema = z.object({ clinic_name: z.string().trim().min(2).max(150), is_active: z.boolean().optional() });
 export const clinicStaffSchema = z.object({
-  full_name: z.string().trim().min(3).max(150),
-  username: z.string().trim().min(3).max(100).regex(/^[A-Za-z0-9_.-]+$/),
-  password: z.string().min(12).max(128),
-  role_name: z.enum(['DOCTOR', 'NURSE', 'RECEPTIONIST', 'ACCOUNTANT']),
+  user_id: z.coerce.number().int().positive().optional(),
+  full_name: z.string().trim().min(3).max(150).optional(),
+  username: z.string().trim().min(3).max(100).regex(/^[A-Za-z0-9_.-]+$/).optional(),
+  password: z.string().min(12).max(128).optional(),
+  role_name: z.enum(['DOCTOR', 'NURSE', 'RECEPTIONIST', 'ACCOUNTANT']).optional(),
   sub_specialty: z.string().trim().max(200).optional(),
+}).refine((data) => {
+  if (data.user_id) return true
+  return data.full_name && data.username && data.password && data.role_name
+}, {
+  message: 'إما اختيار مستخدم موجود (user_id) أو إدخال بيانات المستخدم الجديد كاملة',
 });
 export const clinicStaffUpdateSchema = z.object({
   full_name: z.string().trim().min(3).max(150).optional(),

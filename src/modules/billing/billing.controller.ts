@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, accessibleClinicIds } from '../../middlewares/auth.middleware';
 
 // 1. إضافة خدمة عيادة جديدة وتحديد سعرها ونسبة الطبيب
 export const createClinicService = async (req: AuthenticatedRequest, res: Response) => {
@@ -10,8 +10,9 @@ export const createClinicService = async (req: AuthenticatedRequest, res: Respon
   if (!clinic_id || !service_name || price === undefined) {
     return res.status(400).json({ message: 'الرجاء توفير بيانات الخدمة كاملة (العيادة، الاسم، السعر)' });
   }
-  if (userClinicId !== null && userClinicId !== clinic_id) {
-    return res.status(403).json({ message: 'لا يمكنك إنشاء خدمة في عيادة أخرى' });
+  const canManage = req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN';
+  if (!canManage && userClinicId !== clinic_id && !(req.user?.clinicIds ?? []).includes(Number(clinic_id))) {
+    return res.status(403).json({ message: 'لا يمكنك إنشاء خدمة في عيادة غير مسندة لك' });
   }
   if (!Number.isFinite(Number(price)) || Number(price) < 0 || Number(doctor_percentage ?? 0) < 0 || Number(doctor_percentage ?? 0) > 100) {
     return res.status(400).json({ message: 'السعر أو نسبة الطبيب غير صالحة' });
@@ -39,9 +40,10 @@ export const createClinicService = async (req: AuthenticatedRequest, res: Respon
 export const createInvoice = async (req: AuthenticatedRequest, res: Response) => {
   const { patient_id, visit_id, items, discount_amount, payment_type } = req.body;
   const receptionist_id = req.user?.userId;
-  const userClinicId = req.user?.clinicId;
+  const allowedClinics = accessibleClinicIds(req); // null = مدير يرى الجميع
+  const isAdmin = allowedClinics === null;
 
-  if (!patient_id || !receptionist_id || userClinicId === null || userClinicId === undefined || !Array.isArray(items) || items.length === 0) {
+  if (!patient_id || !receptionist_id || (!isAdmin && !(allowedClinics ?? []).length) || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'بيانات الفاتورة غير مكتملة أو لا تحتوي على عناصر' });
   }
 
@@ -52,12 +54,13 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
     await client.query('BEGIN');
     transactionActive = true;
 
+    // التحقق من ملكية المريض لأحد عيادات المستخدم المسندة (أو أي عيادة للمدير)
     const patientOwnership = await client.query(
-      'SELECT 1 FROM patients WHERE patient_id = $1 AND clinic_id = $2',
-      [patient_id, userClinicId]
+      `SELECT 1 FROM patients WHERE patient_id = $1 AND ($2::int[] IS NULL OR clinic_id = ANY($2::int[]))`,
+      [patient_id, allowedClinics]
     );
     if (patientOwnership.rows.length !== 1) {
-      throw new Error('المريض لا ينتمي إلى عيادة المستخدم');
+      throw new Error('المريض لا ينتمي إلى أي من عياداتك المسندة');
     }
 
     // حساب المبالغ الكلية والإجمالية
@@ -73,8 +76,10 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
     for (const item of items) {
       const { clinic_id, doctor_id, service_id, price } = item;
 
-      if (!clinic_id || clinic_id !== userClinicId || price === undefined || !Number.isFinite(Number(price)) || Number(price) < 0) {
-        throw new Error('بيانات عنصر الفاتورة غير مكتملة');
+      // عيادة العنصر يجب أن تكون من العيادات المسندة للمستخدم (أو أي عيادة للمدير)
+      const itemClinicAllowed = isAdmin || (clinic_id && (allowedClinics ?? []).includes(Number(clinic_id)));
+      if (!clinic_id || !itemClinicAllowed || price === undefined || !Number.isFinite(Number(price)) || Number(price) < 0) {
+        throw new Error('بيانات عنصر الفاتورة غير مكتملة أو عيادة غير مسندة لك');
       }
 
       let doctorShare = 0;
@@ -151,7 +156,7 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
       await pool.query(
         `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
          VALUES ($1, $2, 'INVOICE_CREATED', 'INVOICE', $3, $4)`,
-        [receptionist_id, userClinicId, invoiceId, JSON.stringify({ total: totalAmount, net: netAmount })]
+        [receptionist_id, processedItems[0]?.clinic_id ?? req.user?.clinicId, invoiceId, JSON.stringify({ total: totalAmount, net: netAmount })]
       );
     } catch (auditError) {
       console.error('Invoice audit failed after commit:', auditError);
@@ -175,10 +180,12 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
 export const createExpense = async (req: AuthenticatedRequest, res: Response) => {
   const { clinic_id, category, amount, description } = req.body;
   const spent_by_user_id = req.user?.userId;
-  const userClinicId = req.user?.clinicId;
+  const allowedClinics = accessibleClinicIds(req);
+  const isAdmin = allowedClinics === null;
 
-  if (!category || amount === undefined || !spent_by_user_id || userClinicId === null || userClinicId === undefined || clinic_id !== userClinicId) {
-    return res.status(400).json({ message: 'بيانات المصروف غير مكتملة' });
+  const clinicAllowed = isAdmin || (clinic_id && (allowedClinics ?? []).includes(Number(clinic_id)));
+  if (!category || amount === undefined || !spent_by_user_id || !clinicAllowed) {
+    return res.status(400).json({ message: 'بيانات المصروف غير مكتملة أو العيادة غير مسندة لك' });
   }
   if (!Number.isFinite(Number(amount)) || Number(amount) < 0) {
     return res.status(400).json({ message: 'قيمة المصروف غير صالحة' });
@@ -195,7 +202,7 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
       await pool.query(
         `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
          VALUES ($1, $2, 'EXPENSE_CREATED', 'EXPENSE', $3)`,
-        [spent_by_user_id, userClinicId, result.rows[0].expense_id]
+        [spent_by_user_id, clinic_id ?? req.user?.clinicId, result.rows[0].expense_id]
       );
     } catch (auditError) {
       console.error('Expense audit failed after commit:', auditError);

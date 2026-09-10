@@ -27,7 +27,7 @@ services:
     environment:
       - PORT=${PORT}
       - DB_HOST=postgres_db
-      - DB_PORT=${DB_PORT}
+      - DB_PORT=5432
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
@@ -39,6 +39,7 @@ services:
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
     volumes:
       - ./backups:/app/backups
+      - ./uploads:/app/uploads
     depends_on:
       postgres_db:
         condition: service_healthy

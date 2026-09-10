@@ -75,8 +75,15 @@ function CreateUserModal({ onClose, onSaved }) {
     full_name: '', username: '', password: '', role_name: 'DOCTOR', clinic_id: '',
     phone: '', medical_license_no: '', sub_specialty: '', direct_phone: '',
   })
+  const [clinics, setClinics] = useState([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.clinics.directory()
+      .then((r) => setClinics(r.clinics || []))
+      .catch(() => setClinics([]))
+  }, [])
 
   async function submit(e) {
     e.preventDefault()
@@ -116,7 +123,12 @@ function CreateUserModal({ onClose, onSaved }) {
           </Field>
         </div>
         <div className="form-row">
-          <Field label="رقم العيادة" hint="اختياري للمدير العام"><input type="number" value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })} /></Field>
+          <Field label="العيادة الأساسية" hint="اختر العيادة بالاسم — اختياري للمدير العام">
+            <select value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
+              <option value="">بدون عيادة (تُسند لاحقاً)</option>
+              {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
+            </select>
+          </Field>
           <Field label="الهاتف"><input dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
         </div>
         <div className="form-row">
@@ -139,11 +151,18 @@ function EditUserModal({ user, onClose, onSaved }) {
     phone: user.phone || '',
     status: user.status || 'ACTIVE',
     role_name: user.role_name || 'DOCTOR',
-    clinic_id: user.clinic_id || '',
+    clinic_id: user.clinic_id != null ? String(user.clinic_id) : '',
     password: '',
   })
+  const [clinics, setClinics] = useState([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.clinics.directory()
+      .then((r) => setClinics(r.clinics || []))
+      .catch(() => setClinics([]))
+  }, [])
 
   async function submit(e) {
     e.preventDefault()
@@ -171,7 +190,12 @@ function EditUserModal({ user, onClose, onSaved }) {
         <Field label="الاسم الكامل" required><input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></Field>
         <div className="form-row">
           <Field label="الهاتف"><input dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
-          <Field label="رقم العيادة"><input type="number" value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })} /></Field>
+          <Field label="العيادة الأساسية" hint="اختر العيادة بالاسم">
+            <select value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
+              <option value="">بدون عيادة</option>
+              {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
+            </select>
+          </Field>
         </div>
         <div className="form-row">
           <Field label="الدور" required>

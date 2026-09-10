@@ -16,3 +16,7 @@ backups/
 *.log
 .DS_Store
 .vscode/
+
+# Temporary scripts & SQL
+tmp_*.js
+tmp_*.sql

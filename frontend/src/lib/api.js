@@ -112,6 +112,8 @@ export const api = {
   },
   clinics: {
     list: () => request('/api/clinics'),
+    directory: () => request('/api/clinics/directory'),
+    get: (id) => request(`/api/clinics/${id}`),
     create: (body) => request('/api/clinics', { method: 'POST', body }),
     update: (id, body) => request(`/api/clinics/${id}`, { method: 'PUT', body }),
     staff: (id) => request(`/api/clinics/${id}/staff`),
@@ -119,8 +121,58 @@ export const api = {
     updateStaff: (id, userId, body) => request(`/api/clinics/${id}/staff/${userId}`, { method: 'PUT', body }),
     removeStaff: (id, userId) => request(`/api/clinics/${id}/staff/${userId}`, { method: 'DELETE' }),
   },
+  clinical: {
+    specialties: () => request('/api/clinical/specialties'),
+    visit: (visitId) => request(`/api/clinical/visits/${visitId}`),
+    updateVisit: (visitId, body) => request(`/api/clinical/visits/${visitId}`, { method: 'PATCH', body }),
+    addVitals: (visitId, body) => request(`/api/clinical/visits/${visitId}/vitals`, { method: 'POST', body }),
+    deleteVitals: (visitId, vitalId) => request(`/api/clinical/visits/${visitId}/vitals/${vitalId}`, { method: 'DELETE' }),
+    addDiagnosis: (visitId, body) => request(`/api/clinical/visits/${visitId}/diagnoses`, { method: 'POST', body }),
+    deleteDiagnosis: (visitId, id) => request(`/api/clinical/visits/${visitId}/diagnoses/${id}`, { method: 'DELETE' }),
+    addLabOrder: (visitId, body) => request(`/api/clinical/visits/${visitId}/lab-orders`, { method: 'POST', body }),
+    updateLabOrder: (visitId, orderId, body) => request(`/api/clinical/visits/${visitId}/lab-orders/${orderId}`, { method: 'PATCH', body }),
+    saveLabResults: (visitId, orderId, body) => request(`/api/clinical/visits/${visitId}/lab-orders/${orderId}/results`, { method: 'PUT', body }),
+    addImaging: (visitId, body) => request(`/api/clinical/visits/${visitId}/imaging`, { method: 'POST', body }),
+    updateImaging: (visitId, imagingId, body) => request(`/api/clinical/visits/${visitId}/imaging/${imagingId}`, { method: 'PATCH', body }),
+    addReferral: (visitId, body) => request(`/api/clinical/visits/${visitId}/referrals`, { method: 'POST', body }),
+    uploadAttachment: (visitId, file, kind) => {
+      const body = new FormData()
+      body.append('file', file)
+      if (kind) body.append('kind', kind)
+      return request(`/api/clinical/visits/${visitId}/attachments`, { method: 'POST', body, isForm: true })
+    },
+    deleteAttachment: (attachmentId) => request(`/api/clinical/attachments/${attachmentId}`, { method: 'DELETE' }),
+    downloadAttachment: async (attachmentId) => {
+      const res = await fetch(`${API_URL}/api/clinical/attachments/${attachmentId}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message || 'تعذّر تنزيل المرفق')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'attachment'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    },
+    pregnancies: (patientId) => request('/api/clinical/pregnancies', { params: patientId ? { patient_id: patientId } : {} }),
+    pregnancy: (id) => request(`/api/clinical/pregnancies/${id}`),
+    createPregnancy: (body) => request('/api/clinical/pregnancies', { method: 'POST', body }),
+    updatePregnancy: (id, body) => request(`/api/clinical/pregnancies/${id}`, { method: 'PATCH', body }),
+    addPregnancyVisit: (id, body) => request(`/api/clinical/pregnancies/${id}/visits`, { method: 'POST', body }),
+    updatePregnancyVisit: (id, pvId, body) => request(`/api/clinical/pregnancies/${id}/visits/${pvId}`, { method: 'PATCH', body }),
+    deletePregnancyVisit: (id, pvId) => request(`/api/clinical/pregnancies/${id}/visits/${pvId}`, { method: 'DELETE' }),
+    addUltrasound: (id, body) => request(`/api/clinical/pregnancies/${id}/ultrasounds`, { method: 'POST', body }),
+    updateUltrasound: (id, usId, body) => request(`/api/clinical/pregnancies/${id}/ultrasounds/${usId}`, { method: 'PATCH', body }),
+    deleteUltrasound: (id, usId) => request(`/api/clinical/pregnancies/${id}/ultrasounds/${usId}`, { method: 'DELETE' }),
+  },
   users: {
-    doctors: () => request('/api/users/doctors'),
+        doctors: (params) => request('/api/users/doctors', { params }),
     list: (params) => request('/api/users', { params }),
     create: (body) => request('/api/users', { method: 'POST', body }),
     update: (id, body) => request(`/api/users/${id}`, { method: 'PATCH', body }),

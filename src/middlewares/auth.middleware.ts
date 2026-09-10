@@ -12,9 +12,39 @@ export interface AuthenticatedRequest extends Request {
     clinicId: number | null;
     roleName?: string;
     permissions?: string[];
+    /** جميع العيادات المسند للمستخدم (الأساسية + الإسنادات الإضافية) — تُحمّل من قاعدة البيانات عند كل طلب */
+    clinicIds?: number[];
   };
   patient?: { patientId: number; jti: string };
 }
+
+const isAdminRole = (roleName?: string) => roleName === 'SUPER_ADMIN' || roleName === 'SYSTEM_ADMIN';
+
+// هل المستخدم مسند (أساسي أو إسناد إضافي) إلى عيادة معينة؟
+export const isAssignedToClinic = (req: AuthenticatedRequest, clinicId: number): boolean => {
+  if (req.user?.clinicIds?.length) return req.user.clinicIds.includes(clinicId);
+  return req.user?.clinicId === clinicId;
+};
+
+// هل يملك المستخدم وصولاً إدارياً شاملاً لكل العيادات؟
+export const canManageAllClinics = (req: AuthenticatedRequest): boolean => isAdminRole(req.user?.roleName);
+
+// قائمة العيادات التي يمكن للمستخدم الوصول إليها (null = كل العيادات للمدراء)
+export const accessibleClinicIds = (req: AuthenticatedRequest): number[] | null => {
+  if (isAdminRole(req.user?.roleName)) return null;
+  return req.user?.clinicIds ?? (req.user?.clinicId !== null && req.user?.clinicId !== undefined ? [req.user.clinicId] : []);
+};
+
+// تحميل جميع العيادات المسند إليها المستخدم (الأساسية + جدول العلاقة clinic_staff)
+const loadUserClinicIds = async (userId: number, primaryClinicId: number | null): Promise<number[]> => {
+  const result = await pool.query(
+    `SELECT clinic_id FROM clinic_staff WHERE user_id = $1`,
+    [userId]
+  );
+  const ids = new Set<number>(result.rows.map((row) => Number(row.clinic_id)));
+  if (primaryClinicId !== null && primaryClinicId !== undefined) ids.add(Number(primaryClinicId));
+  return [...ids];
+};
 
 // 1. التحقق من صحة توكن JWT (Authentication)
 export const authenticateJWT = async (
@@ -82,6 +112,7 @@ export const authenticateJWT = async (
       clinicId: decoded.clinicId,
       roleName,
       permissions,
+      clinicIds: await loadUserClinicIds(decoded.userId, decoded.clinicId),
     };
     req.authToken = { jti: decoded.jti };
 

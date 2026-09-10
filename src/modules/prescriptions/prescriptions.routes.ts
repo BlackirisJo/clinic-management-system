@@ -20,6 +20,7 @@ router.get('/medications', requirePermission('VIEW_MEDICATIONS'), getMedications
 
 // مسارات الروشتة الطبية
 router.post('/', requirePermission('CREATE_PRESCRIPTION'), validateBody(prescriptionSchema), createPrescription);
-router.get('/:id', requirePermission('VIEW_PRESCRIPTIONS'), getPrescriptionById);
+// العرض من داخل ملف المريض متاح لأي دور يملك عرض المرضى (طبيب/ممرض/استقبال)، مع فحص العيادة داخل الكنترولر
+router.get('/:id', requirePermission('VIEW_PATIENTS'), getPrescriptionById);
 
 export default router;

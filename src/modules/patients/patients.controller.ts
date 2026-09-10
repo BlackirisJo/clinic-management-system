@@ -1,11 +1,17 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, accessibleClinicIds, canManageAllClinics } from '../../middlewares/auth.middleware';
 
 // 1. إضافة مريض جديد
 export const createPatient = async (req: AuthenticatedRequest, res: Response) => {
   const { full_name, national_id, document_type, document_number, phone, gender, date_of_birth } = req.body;
-  const clinicId = req.user?.clinicId;
+  // العيادة الأساسية للمستخدم، أو أول عيادة مسندة له، أو عيادة محددة من المدير
+  let clinicId: number | null | undefined = req.user?.clinicId;
+  if (canManageAllClinics(req) && req.body?.clinic_id) {
+    clinicId = Number(req.body.clinic_id);
+  } else if ((clinicId === null || clinicId === undefined) && req.user?.clinicIds?.length) {
+    clinicId = req.user.clinicIds[0];
+  }
 
   if (!full_name || !phone || !gender || !date_of_birth || !document_type || !document_number || clinicId === null || clinicId === undefined) {
     return res.status(400).json({ message: 'الرجاء تقديم كافة البيانات المطلوبة للمريض (نوع الوثيقة ورقمها إلزاميان)' });
@@ -43,19 +49,28 @@ export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
   const offset = (page - 1) * limit;
 
   try {
-    // مرضى العيادة + المرضى المشاركين من عيادات أخرى إلى عيادة المستخدم
+    const clinicIds = accessibleClinicIds(req);
+    // مرضى العيادات المسندة للمستخدم + المرضى المشاركين إليها + المرضى المرتبطين بموعد/زيارة في عيادات المستخدم
+    // (حتى لو أُسس المريض في عيادة أخرى، فحجز موعد له في عيادتك يُظهره في قائمة مرضاك)
     let query = `SELECT p.*, EXISTS (
       SELECT 1 FROM patient_clinic_shares s
-      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $1
+      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($1::int[])
         AND s.status = 'ACTIVE' AND s.expires_at > NOW()
     ) AS is_shared
     FROM patients p
-    WHERE p.clinic_id = $1 OR EXISTS (
+    WHERE $1::int[] IS NULL OR p.clinic_id = ANY($1::int[]) OR EXISTS (
       SELECT 1 FROM patient_clinic_shares s
-      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $1
+      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($1::int[])
         AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+    ) OR EXISTS (
+      SELECT 1 FROM appointments a
+      WHERE a.patient_id = p.patient_id AND a.clinic_id = ANY($1::int[])
+        AND a.status NOT IN ('CANCELLED')
+    ) OR EXISTS (
+      SELECT 1 FROM visits v
+      WHERE v.patient_id = p.patient_id AND v.clinic_id = ANY($1::int[])
     )`;
-    const params: any[] = [req.user?.clinicId];
+    const params: any[] = [clinicIds];
 
     if (search) {
       query += ` AND (p.full_name ILIKE $2 OR p.phone ILIKE $2 OR p.national_id ILIKE $2 OR p.document_number ILIKE $2)`;
@@ -80,24 +95,40 @@ export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
 // 3. تسجيل زيارة جديدة للمريض
 export const createVisit = async (req: AuthenticatedRequest, res: Response) => {
   const { patient_id, clinic_id, doctor_id, notes } = req.body;
-  const userClinicId = req.user?.clinicId;
+  const userClinicIds = accessibleClinicIds(req);
 
-  if (!patient_id || !clinic_id || !doctor_id || (userClinicId !== null && userClinicId !== clinic_id)) {
+  if (!patient_id || !clinic_id || !doctor_id) {
     return res.status(400).json({ message: 'بيانات الزيارة غير مكتملة (المريض، العيادة، الطبيب)' });
+  }
+  // المستخدم يجب أن يكون مسنداً لعيادة الزيارة (أو مديراً)
+  if (userClinicIds !== null && !userClinicIds.includes(Number(clinic_id))) {
+    return res.status(403).json({ message: 'لا يمكنك تسجيل زيارة في عيادة غير مسندة لك' });
   }
 
   try {
+    // الطبيب يجب أن يكون مسنداً لعيادة الزيارة (أساسي أو إسناد إضافي)
+    const doctorMembership = await pool.query(
+      `SELECT 1 FROM users u
+       WHERE u.user_id = $1 AND u.status = 'ACTIVE' AND (
+         u.clinic_id = $2 OR EXISTS (SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $2)
+       )`,
+      [doctor_id, clinic_id]
+    );
+    if (!doctorMembership.rowCount) {
+      return res.status(400).json({ message: 'الطبيب المحدد غير مسند لهذه العيادة' });
+    }
+
     const ownership = await pool.query(
       `SELECT p.clinic_id AS owner_clinic_id,
               EXISTS (SELECT 1 FROM patient_clinic_shares s
                       WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
                         AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()) AS can_write
-       FROM patients p JOIN users u ON u.user_id = $3 AND u.clinic_id = $2
+       FROM patients p
        WHERE p.patient_id = $1`,
-      [patient_id, clinic_id, doctor_id]
+      [patient_id, clinic_id]
     );
     const patientAccess = ownership.rows[0];
-    const canUsePatient = patientAccess && (patientAccess.owner_clinic_id === clinic_id || patientAccess.can_write);
+    const canUsePatient = patientAccess && (patientAccess.owner_clinic_id === Number(clinic_id) || patientAccess.can_write);
     if (!canUsePatient || ownership.rows.length !== 1) {
       return res.status(403).json({ message: 'بيانات الزيارة لا تنتمي إلى العيادة المحددة' });
     }
@@ -121,20 +152,23 @@ export const createVisit = async (req: AuthenticatedRequest, res: Response) => {
 // 4. استرجاع السجل الطبي لزيارات مريض معين
 export const getPatientVisits = async (req: AuthenticatedRequest, res: Response) => {
   const { patientId } = req.params;
+  const clinicIds = accessibleClinicIds(req);
 
   try {
     const result = await pool.query(
-      `SELECT v.visit_id, v.visit_date, v.notes, c.clinic_name, u.full_name AS doctor_name
+      `SELECT v.visit_id, v.visit_date, v.notes, v.visit_status, v.chief_complaint,
+              c.clinic_name, c.clinic_id, s.name_ar AS specialty_name, u.full_name AS doctor_name
        FROM visits v
        JOIN clinics c ON v.clinic_id = c.clinic_id
+       LEFT JOIN specialties s ON s.specialty_id = c.specialty_id
        JOIN users u ON v.doctor_id = u.user_id
-       WHERE v.patient_id = $1 AND (v.clinic_id = $2 OR EXISTS (
-         SELECT 1 FROM patient_clinic_shares s
-         WHERE s.patient_id = v.patient_id AND s.target_clinic_id = $2
-           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+       WHERE v.patient_id = $1 AND ($2::int[] IS NULL OR v.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares sh
+         WHERE sh.patient_id = v.patient_id AND sh.target_clinic_id = ANY($2::int[])
+           AND sh.status = 'ACTIVE' AND sh.expires_at > NOW()
        ))
        ORDER BY v.visit_date DESC`,
-      [patientId, req.user?.clinicId]
+      [patientId, clinicIds]
     );
 
     return res.status(200).json({

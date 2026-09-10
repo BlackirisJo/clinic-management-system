@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, accessibleClinicIds, canManageAllClinics } from '../../middlewares/auth.middleware';
 
 // 1. إضافة دواء جديد إلى الدليل الشامل للأدوية
 export const createMedication = async (req: AuthenticatedRequest, res: Response) => {
@@ -126,25 +126,48 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
-// 4. جلب تفاصيل الروشتة للطباعة والمراجعة
+// 4. جلب تفاصيل الروشتة للطباعة والمراجعة (من داخل ملف المريض)
 export const getPrescriptionById = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
   try {
+    // السماح بالوصول إن كانت زيارة الروشتة ضمن عيادات المستخدم أو عيادة مشارك لها المريض
+    const allowedClinics = accessibleClinicIds(req);
     const prescriptionQuery = await pool.query(
-      `SELECT p.prescription_id, p.created_at, p.notes,
+      `SELECT p.prescription_id, p.visit_id, p.patient_id, p.created_at, p.notes,
               pt.full_name AS patient_name, pt.gender, pt.date_of_birth,
-              u.full_name AS doctor_name, u.sub_specialty, u.medical_license_no
+              pt.clinic_id AS patient_clinic_id,
+              u.full_name AS doctor_name, u.sub_specialty, u.medical_license_no,
+              v.clinic_id AS visit_clinic_id,
+              c.clinic_name AS clinic_name
        FROM prescriptions p
        JOIN patients pt ON p.patient_id = pt.patient_id
        JOIN users u ON p.doctor_id = u.user_id
-      JOIN visits v ON p.visit_id = v.visit_id
-      WHERE p.prescription_id = $1 AND v.clinic_id = $2`,
-          [id, req.user?.clinicId]
+       JOIN visits v ON p.visit_id = v.visit_id
+       LEFT JOIN clinics c ON c.clinic_id = v.clinic_id
+       WHERE p.prescription_id = $1`,
+      [id]
     );
 
     if (prescriptionQuery.rows.length === 0) {
       return res.status(404).json({ message: 'الروشتة المطلوبة غير موجودة' });
+    }
+
+    const row = prescriptionQuery.rows[0];
+    if (!canManageAllClinics(req)) {
+      const ids = allowedClinics ?? [];
+      const directAccess = ids.includes(Number(row.visit_clinic_id)) || ids.includes(Number(row.patient_clinic_id));
+      if (!directAccess) {
+        const shared = await pool.query(
+          `SELECT 1 FROM patient_clinic_shares s
+           WHERE s.patient_id = $1 AND s.target_clinic_id = ANY($2::int[])
+             AND s.status = 'ACTIVE' AND s.expires_at > NOW()`,
+          [row.patient_id, ids]
+        );
+        if (!shared.rowCount) {
+          return res.status(404).json({ message: 'الروشتة المطلوبة غير موجودة' });
+        }
+      }
     }
 
     const itemsQuery = await pool.query(

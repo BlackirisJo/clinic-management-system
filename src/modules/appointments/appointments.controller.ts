@@ -1,35 +1,40 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, accessibleClinicIds } from '../../middlewares/auth.middleware';
 
 // 1. حجز موعد جديد
 export const createAppointment = async (req: AuthenticatedRequest, res: Response) => {
   const { clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, reason, notes } = req.body;
-  const userClinicId = req.user?.clinicId;
+  const userClinicIds = accessibleClinicIds(req);
 
-  // التحقق المبدئي من حقول البيانات الأساسية
-  if (!clinic_id || !patient_id || !doctor_id || !appointment_date || !start_time || !end_time) {
-    return res.status(400).json({ 
-      message: 'الرجاء توفير جميع البيانات الأساسية للحجز (العيادة، المريض، الطبيب، التاريخ، ووقت بداية ونهاية الموعد)' 
+    // التحقق المبدئي من حقول البيانات الأساسية
+  if (!clinic_id || !patient_id || !doctor_id || !appointment_date) {
+    return res.status(400).json({
+      message: 'الرجاء توفير جميع البيانات الأساسية للحجز (العيادة، المريض، الطبيب، التاريخ)'
     });
   }
 
-  if (userClinicId !== null && userClinicId !== clinic_id) {
-    return res.status(403).json({ message: 'لا يمكنك إنشاء موعد في عيادة أخرى' });
+  // المستخدم المسند لعيادات متعددة يستطيع الحجز في أيٍّ منها (أو مديراً)
+  if (userClinicIds !== null && !userClinicIds.includes(Number(clinic_id))) {
+    return res.status(403).json({ message: 'لا يمكنك إنشاء موعد في عيادة غير مسندة لك' });
   }
 
-  if (end_time <= start_time) {
+  // فحص ترتيب الأوقات فقط إذا تم توفيرهما معاً
+  if (start_time && end_time && end_time <= start_time) {
     return res.status(400).json({ message: 'وقت نهاية الموعد يجب أن يكون بعد وقت البداية' });
   }
 
   try {
-    // التحقق من عدم وجود تعارض في مواعيد الطبيب لنفس اليوم والوقت (Overlapping Check)
+        // التحقق من عدم وجود تعارض في مواعيد الطبيب لنفس اليوم والوقت (Overlapping Check)
+    // يُنفَّذ فقط إذا تم توفير أوقات البداية والنهاية معاً
+    if (start_time && end_time) {
     const conflictCheck = await pool.query(
-      `SELECT appointment_id FROM appointments 
-       WHERE doctor_id = $1 
+      `SELECT appointment_id FROM appointments
+       WHERE doctor_id = $1
         AND clinic_id = $2
         AND appointment_date = $3
          AND status NOT IN ('CANCELLED')
+        AND start_time IS NOT NULL AND end_time IS NOT NULL
         AND start_time < $5 AND end_time > $4`,
       [doctor_id, clinic_id, appointment_date, start_time, end_time]
     );
@@ -37,13 +42,14 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
     if (conflictCheck.rows.length > 0) {
       return res.status(409).json({ message: 'الطبيب لديه موعد آخر محجوز يتداخل مع هذا الوقت' });
     }
+    }
 
     // إدراج الحجز الجديد في قاعدة البيانات
     const result = await pool.query(
       `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, reason, notes, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SCHEDULED')
        RETURNING *`,
-      [clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, reason || null, notes || null]
+      [clinic_id, patient_id, doctor_id, appointment_date, start_time || null, end_time || null, reason || null, notes || null]
     );
 
     return res.status(201).json({
@@ -64,8 +70,9 @@ export const getAppointments = async (req: AuthenticatedRequest, res: Response) 
   const offset = (page - 1) * limit;
 
   try {
+    const clinicIds = accessibleClinicIds(req);
     let queryText = `
-      SELECT 
+      SELECT
         a.*,
         p.full_name as patient_name,
         p.phone as patient_phone,
@@ -75,13 +82,13 @@ export const getAppointments = async (req: AuthenticatedRequest, res: Response) 
       JOIN patients p ON a.patient_id = p.patient_id
       JOIN users u ON a.doctor_id = u.user_id
       JOIN clinics c ON a.clinic_id = c.clinic_id
-      WHERE ($1::int IS NULL OR a.clinic_id = $1)
+      WHERE ($1::int[] IS NULL OR a.clinic_id = ANY($1::int[]))
     `;
 
-    const queryParams: any[] = [req.user?.clinicId];
+    const queryParams: any[] = [clinicIds];
     let paramIndex = 2;
 
-    if (clinic_id && (req.user?.clinicId === null || Number(clinic_id) === req.user?.clinicId)) {
+    if (clinic_id && (clinicIds === null || clinicIds.includes(Number(clinic_id)))) {
       queryText += ` AND a.clinic_id = $${paramIndex++}`;
       queryParams.push(clinic_id);
     }
@@ -125,7 +132,7 @@ export const getAppointments = async (req: AuthenticatedRequest, res: Response) 
 export const updateAppointmentStatus = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { status, cancellation_reason } = req.body;
-  const userClinicId = req.user?.clinicId;
+  const clinicIds = accessibleClinicIds(req);
 
   const validStatuses = ['SCHEDULED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'];
 
@@ -135,13 +142,13 @@ export const updateAppointmentStatus = async (req: AuthenticatedRequest, res: Re
 
   try {
     const result = await pool.query(
-      `UPDATE appointments 
-       SET status = $1, 
+      `UPDATE appointments
+       SET status = $1,
            cancellation_reason = COALESCE($2, cancellation_reason),
            updated_at = NOW()
-      WHERE appointment_id = $3 AND ($4::int IS NULL OR clinic_id = $4)
+      WHERE appointment_id = $3 AND ($4::int[] IS NULL OR clinic_id = ANY($4::int[]))
        RETURNING *`,
-          [status, cancellation_reason || null, id, userClinicId]
+          [status, cancellation_reason || null, id, clinicIds]
     );
 
     if (result.rows.length === 0) {
@@ -151,7 +158,7 @@ export const updateAppointmentStatus = async (req: AuthenticatedRequest, res: Re
       await pool.query(
         `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
          VALUES ($1, $2, 'APPOINTMENT_STATUS_UPDATED', 'APPOINTMENT', $3, $4)`,
-        [req.user?.userId, userClinicId, id, JSON.stringify({ status })]
+        [req.user?.userId, req.user?.clinicId, id, JSON.stringify({ status })]
       );
     } catch (auditError) {
       console.error('Appointment audit failed after commit:', auditError);

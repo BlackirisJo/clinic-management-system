@@ -1,10 +1,90 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
 import { fmtDate, fmtDateTime, GENDER_LABELS, DOCUMENT_TYPE_LABELS, ALLERGEN_LABELS, ALLERGEN_KEYS, CHRONIC_CONDITION_LABELS, CHRONIC_CONDITION_KEYS, CONDITION_SEVERITY_LABELS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
+import VisitModal from '../components/VisitModal'
 
 const LIMIT = 10
+
+// دليل العيادات بالاسم — يُستخدم في كل نماذج الاختيار بالاسم بدل إدخال رقم العيادة
+function useClinicDirectory(enabled = true) {
+  const [clinics, setClinics] = useState([])
+  const [loading, setLoading] = useState(enabled)
+  useEffect(() => {
+    if (!enabled) {
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    api.clinics.directory()
+      .then((result) => { if (!cancelled) setClinics(result.clinics || []) })
+      .catch(() => { if (!cancelled) setClinics([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [enabled])
+  return { clinics, loading }
+}
+
+const clinicNameById = (clinics, clinicId) => {
+  const id = Number(clinicId)
+  if (!id) return ''
+  return clinics.find((c) => Number(c.clinic_id) === id)?.clinic_name || ''
+}
+
+// مودال موحد لعرض محتوى أدوية الروشتة (يُستخدم في ملف المريض)
+export function PrescriptionItemsModal({ prescriptionId, onClose }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    setError('')
+    api.prescriptions.get(prescriptionId)
+      .then((result) => { if (!cancelled) setData(result) })
+      .catch((err) => { if (!cancelled) setError(err.message || 'تعذر تحميل محتوى الروشتة') })
+    return () => { cancelled = true }
+  }, [prescriptionId])
+  const rx = data?.prescription || {}
+  const items = data?.items || []
+  return (
+    <Modal title="محتوى الروشتة الطبية" subtitle={rx.clinic_name ? `إحالة مباشرة إلى: ${rx.clinic_name}` : `روشتة رقم ${rx.prescription_id || prescriptionId}`} onClose={onClose} wide>
+      <Notice kind="error">{error}</Notice>
+      {!data && !error ? <Loading text="جارِ تحميل الأدوية" /> : data ? (
+        <div className="prescription-paper" dir="rtl">
+          <div className="paper-head">
+            <div><strong>روشتة طبية</strong><span>{rx.doctor_name || 'طبيب'}</span></div>
+            <div className="paper-date">{fmtDateTime(rx.created_at)}</div>
+          </div>
+          <div className="paper-patient">
+            <span><b>المريض:</b> {rx.patient_name || '—'}</span>
+            {rx.clinic_name ? <span><b>العيادة:</b> {rx.clinic_name}</span> : null}
+          </div>
+          {rx.notes ? <div className="paper-notes"><b>ملاحظات:</b> {rx.notes}</div> : null}
+          {items.length === 0 ? <Empty text="لا توجد أدوية مسجلة في هذه الروشتة" /> : (
+            <table>
+              <thead><tr><th>#</th><th>الدواء</th><th>الجرعة</th><th>التردد</th><th>المدة</th><th>تعليمات التوقيت</th><th>التكرار</th></tr></thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={it.item_id ?? i}>
+                    <td>{i + 1}</td>
+                    <td>{it.trade_name}{it.scientific_name ? ` (${it.scientific_name})` : ''}</td>
+                    <td>{it.dosage}</td><td>{it.frequency}</td><td>{it.duration}</td>
+                    <td>{it.timing_instructions || '—'}</td><td>{it.repeats_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="paper-actions">
+            <button className="primary-button compact" onClick={() => window.print()}>طباعة</button>
+            <button className="secondary-button compact" onClick={onClose}>إغلاق</button>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  )
+}
 
 export default function PatientsView() {
   const { user } = useAuth()
@@ -76,17 +156,41 @@ export default function PatientsView() {
   )
 }
 
-function AddPatientModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ full_name: '', document_type: 'NATIONAL_ID', document_number: '', national_id: '', phone: '', gender: 'MALE', date_of_birth: '' })
+function AddPatientModal({ user, onClose, onSaved }) {
+  const isGlobal = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
+  const { clinics, loading: clinicsLoading } = useClinicDirectory(true)
+  const userClinicLabel = clinicNameById(clinics, user?.clinicId) || (user?.clinicId ? `العيادة #${user.clinicId}` : '')
+  const defaultClinic = useMemo(() => {
+    const mine = Number(user?.clinicId)
+    if (mine) return String(mine)
+    if (!isGlobal && user?.clinicIds?.length) return String(user.clinicIds[0])
+    return ''
+  }, [user, isGlobal])
+  const [form, setForm] = useState({ full_name: '', document_type: 'NATIONAL_ID', document_number: '', national_id: '', phone: '', gender: 'MALE', date_of_birth: '', clinic_id: defaultClinic })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // عند اكتمال تحميل الدليل، تأكد أن النموذج يحتوي على قيمة عيادة صالحة
+  useEffect(() => {
+    if (!defaultClinic) return
+    setForm((prev) => ({ ...prev, clinic_id: defaultClinic }))
+  }, [defaultClinic])
+
+  // إذا كان المستخدم غير مدير ودليل العيادات جاهز، تأكد أن العيادة الافتراضية مختارة بالاسم
+  useEffect(() => {
+    if (isGlobal || clinicsLoading || !user?.clinicId) return
+    const mine = clinics.find((c) => Number(c.clinic_id) === Number(user.clinicId))
+    if (mine && (!form.clinic_id || form.clinic_id === '')) {
+      setForm((prev) => ({ ...prev, clinic_id: String(mine.clinic_id) }))
+    }
+  }, [clinics, clinicsLoading, user?.clinicId, form.clinic_id])
 
   async function submit(e) {
     e.preventDefault()
     setSaving(true)
     setError('')
     try {
-      await api.patients.create({ ...form, national_id: form.national_id || undefined })
+      await api.patients.create({ ...form, national_id: form.national_id || undefined, clinic_id: form.clinic_id ? Number(form.clinic_id) : undefined })
       onSaved()
     } catch (err) {
       setError(err.message || 'تعذر حفظ بيانات المريض')
@@ -99,15 +203,32 @@ function AddPatientModal({ onClose, onSaved }) {
         <Field label="الاسم الكامل" required>
           <input required minLength={3} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
         </Field>
-        <div className="form-row">
-          <Field label="نوع الوثيقة" required>
-            <select value={form.document_type} onChange={(e) => setForm({ ...form, document_type: e.target.value })}>
-              <option value="NATIONAL_ID">بطاقة شخصية</option>
-              <option value="PASSPORT">جواز سفر</option>
-              <option value="OTHER">أخرى</option>
+        <Field label="العيادة المختصة" required
+          hint={clinicsLoading ? 'جارِ تحميل قائمة العيادات...' : (isGlobal ? 'اختر العيادة بالاسم — يُحال إليها المريض مباشرة' : 'ستُحال إلى العيادات المسندة إليك بالاسم')}>
+          {clinicsLoading ? (
+            <select disabled><option>جارِ تحميل العيادات...</option></select>
+          ) : isGlobal ? (
+            <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
+              <option value="">اختر العيادة بالاسم...</option>
+              {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
             </select>
-          </Field>
-          <Field label="رقم الوثيقة" required><input required maxLength={100} value={form.document_number} onChange={(e) => setForm({ ...form, document_number: e.target.value })} /></Field>
+          ) : (
+            <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
+              <option value="">عياداتي المسندة...</option>
+              {clinics
+                .filter((c) => (user?.clinicIds || (user?.clinicId ? [user.clinicId] : [])).map(Number).includes(Number(c.clinic_id)))
+                .map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
+            </select>
+          )}
+        </Field>
+        <div className="form-row"><Field label="نوع الوثيقة" required>
+          <select value={form.document_type} onChange={(e) => setForm({ ...form, document_type: e.target.value })}>
+            <option value="NATIONAL_ID">بطاقة شخصية</option>
+            <option value="PASSPORT">جواز سفر</option>
+            <option value="OTHER">أخرى</option>
+          </select>
+        </Field>
+        <Field label="رقم الوثيقة" required><input required maxLength={100} value={form.document_number} onChange={(e) => setForm({ ...form, document_number: e.target.value })} /></Field>
         </div>
         <div className="form-row">
           <Field label="الرقم الوطني"><input value={form.national_id} onChange={(e) => setForm({ ...form, national_id: e.target.value })} /></Field>
@@ -290,8 +411,11 @@ function MedicalProfileTab({ patient, user }) {
 
 function VisitsTab({ patient, user }) {
   const [visits, setVisits] = useState(null)
+  const [prescriptions, setPrescriptions] = useState([]) // فارغة افتراضياً
   const [doctors, setDoctors] = useState(null) // null = غير متاح
   const [showAdd, setShowAdd] = useState(false)
+  const [openVisitId, setOpenVisitId] = useState(null)
+  const [openPrescriptionId, setOpenPrescriptionId] = useState(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -299,6 +423,11 @@ function VisitsTab({ patient, user }) {
       const result = await api.patients.visits(patient.patient_id)
       setVisits(result.visits || [])
     } catch (err) { setError(err.message); setVisits([]) }
+    // الروشتات تأتي من السجل الموحد (لا تعتمد على صلاحيات إضافية عند فشلها)
+    try {
+      const rec = await api.patients.record(patient.patient_id)
+      setPrescriptions(rec.prescriptions || [])
+    } catch { /* لا صلاحية للسجل الموحد — نكتفي بالزيارات */ }
   }, [patient.patient_id])
 
   useEffect(() => { load() }, [load])
@@ -318,43 +447,90 @@ function VisitsTab({ patient, user }) {
       {visits === null ? <Loading /> : visits.length === 0 ? <Empty text="لا توجد زيارات مسجلة" /> : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>التاريخ</th><th>العيادة</th><th>الطبيب</th><th>الملاحظات</th></tr></thead>
+            <thead><tr><th>التاريخ</th><th>العيادة</th><th>التخصص</th><th>الطبيب</th><th>الحالة</th><th>الملاحظات</th><th></th></tr></thead>
             <tbody>
               {visits.map((v) => (
                 <tr key={v.visit_id}>
-                  <td>{fmtDateTime(v.visit_date)}</td><td>{v.clinic_name || '—'}</td><td>{v.doctor_name || '—'}</td><td>{v.notes || '—'}</td>
+                  <td>{fmtDateTime(v.visit_date)}</td><td>{v.clinic_name || '—'}</td><td>{v.specialty_name || '—'}</td><td>{v.doctor_name || '—'}</td>
+                  <td>{v.visit_status === 'OPEN' ? <span className="badge">مفتوحة</span> : v.visit_status === 'COMPLETED' ? <span className="muted-small">مكتملة</span> : <span className="muted-small">ملغاة</span>}</td>
+                  <td>{v.notes || '—'}</td>
+                  <td><button className="text-button" onClick={() => setOpenVisitId(v.visit_id)}>سجل الزيارة ←</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {showAdd && <AddVisitModal patient={patient} user={user} doctors={doctors} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load() }} />}
+
+      <div className="record-block" style={{ marginTop: 16 }}>
+        <h4>الروشتات الطبية</h4>
+        {prescriptions.length === 0 ? <Empty text="لا توجد روشتات لهذا المريض" /> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>الطبيب</th><th>الملاحظات</th><th>التاريخ</th><th></th></tr></thead>
+              <tbody>
+                {prescriptions.map((rx) => (
+                  <tr key={rx.prescription_id}>
+                    <td>{rx.doctor_name || '—'}</td>
+                    <td>{rx.notes || '—'}</td>
+                    <td>{fmtDateTime(rx.created_at)}</td>
+                    <td><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showAdd && <AddVisitModal patient={patient} user={user} doctors={doctors} onClose={() => setShowAdd(false)} onSaved={(newVisitId) => { setShowAdd(false); load(); if (newVisitId) setOpenVisitId(newVisitId) }} />}
+      {openVisitId && <VisitModal visitId={openVisitId} onClose={() => { setOpenVisitId(null); load() }} />}
+      {openPrescriptionId && <PrescriptionItemsModal prescriptionId={openPrescriptionId} onClose={() => setOpenPrescriptionId(null)} />}
     </div>
   )
 }
 
-function AddVisitModal({ patient, user, doctors, onClose, onSaved }) {
+function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSaved }) {
+  const isGlobal = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
+  const { clinics, loading: clinicsLoading } = useClinicDirectory(true)
+  const userClinicLabel = clinicNameById(clinics, user?.clinicId) || (user?.clinicId ? `العيادة #${user.clinicId}` : '')
   const [form, setForm] = useState({
-    clinic_id: user?.clinicId || '',
+    clinic_id: isGlobal ? '' : (user?.clinicId || ''),
     doctor_id: '',
     notes: '',
   })
+  const [doctors, setDoctors] = useState(initialDoctors || [])
+  const [loadingDoctors, setLoadingDoctors] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // تحميل الأطباء المسندين للعيادة المختارة فقط (وليس كل الأطباء)
+  useEffect(() => {
+    const clinicId = isGlobal ? form.clinic_id : (user?.clinicId || '')
+    if (!clinicId) {
+      setDoctors([])
+      setLoadingDoctors(false)
+      return
+    }
+    setLoadingDoctors(true)
+    api.users.doctors({ clinic_id: Number(clinicId) })
+      .then((result) => setDoctors(result.doctors || []))
+      .catch(() => setDoctors([]))
+      .finally(() => setLoadingDoctors(false))
+  }, [form.clinic_id, user?.clinicId, isGlobal])
 
   async function submit(e) {
     e.preventDefault()
     setSaving(true)
     setError('')
     try {
-      await api.patients.createVisit({
+      const result = await api.patients.createVisit({
         patient_id: patient.patient_id,
         clinic_id: Number(form.clinic_id) || user?.clinicId,
         doctor_id: Number(form.doctor_id),
         notes: form.notes || undefined,
       })
-      onSaved()
+      onSaved(result?.visit?.visit_id || null)
     } catch (err) {
       setError(err.message || 'تعذر تسجيل الزيارة')
     } finally { setSaving(false) }
@@ -363,11 +539,19 @@ function AddVisitModal({ patient, user, doctors, onClose, onSaved }) {
   return (
     <Modal title={`تسجيل زيارة لـ ${patient.full_name}`} subtitle="الزيارات الطبية" onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label="العيادة" required hint="عيادتك الحالية">
-          <input required value={form.clinic_id} readOnly />
+        <Field label="العيادة المختصة" required hint={isGlobal ? 'اختر العيادة بالاسم — يُحال إليها المريض مباشرة' : `عيادتك الحالية: ${userClinicLabel || '—'}`}>
+          {isGlobal ? (
+            <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value, doctor_id: '' })}>
+              <option value="">اختر العيادة بالاسم...</option>
+              {clinicsLoading ? <option disabled>جارِ تحميل العيادات...</option> : null}
+              {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
+            </select>
+          ) : (
+            <input required value={userClinicLabel} readOnly />
+          )}
         </Field>
-        <Field label="الطبيب" required hint={doctors !== null && doctors.length === 0 ? 'لا يوجد أطباء نشطون في العيادة بعد' : undefined}>
-          {doctors === null ? (
+        <Field label="الطبيب" required hint={loadingDoctors ? 'جارِ تحميل الأطباء...' : (doctors.length === 0 ? 'لا يوجد أطباء مسندون لهذه العيادة — أدخل رقم الطبيب يدوياً أو أضف طبيباً من شاشة إدارة العيادات' : undefined)}>
+          {loadingDoctors ? (
             <select disabled><option>جارِ تحميل الأطباء...</option></select>
           ) : doctors.length > 0 ? (
             <select required value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}>
@@ -391,6 +575,7 @@ function AddVisitModal({ patient, user, doctors, onClose, onSaved }) {
 function MedicalRecordTab({ patient }) {
   const [record, setRecord] = useState(null)
   const [error, setError] = useState('')
+  const [openPrescriptionId, setOpenPrescriptionId] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -425,16 +610,17 @@ function MedicalRecordTab({ patient }) {
         {record.prescriptions?.length === 0 ? <Empty text="لا توجد روشتات" /> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>الطبيب</th><th>الملاحظات</th><th>التاريخ</th></tr></thead>
+              <thead><tr><th>الطبيب</th><th>الملاحظات</th><th>التاريخ</th><th></th></tr></thead>
               <tbody>
                 {record.prescriptions.map((rx) => (
-                  <tr key={rx.prescription_id}><td>{rx.doctor_name || '—'}</td><td>{rx.notes || '—'}</td><td>{fmtDateTime(rx.created_at)}</td></tr>
+                  <tr key={rx.prescription_id}><td>{rx.doctor_name || '—'}</td><td>{rx.notes || '—'}</td><td>{fmtDateTime(rx.created_at)}</td><td><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td></tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+      {openPrescriptionId && <PrescriptionItemsModal prescriptionId={openPrescriptionId} onClose={() => setOpenPrescriptionId(null)} />}
     </div>
   )
 }
@@ -497,6 +683,7 @@ function SharesTab({ patient }) {
 }
 
 function AddShareModal({ patient, onClose, onSaved }) {
+  const { clinics } = useClinicDirectory(true)
   const [form, setForm] = useState({ target_clinic_id: '', access_level: 'READ', expires_at: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -518,7 +705,12 @@ function AddShareModal({ patient, onClose, onSaved }) {
   return (
     <Modal title="مشاركة سجل طبي" subtitle="المشاركات" onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label="رقم العيادة المستهدفة" required><input type="number" required value={form.target_clinic_id} onChange={(e) => setForm({ ...form, target_clinic_id: e.target.value })} /></Field>
+        <Field label="العيادة المستهدفة" required hint="اختر العيادة بالاسم — تُحال إليها مباشرة">
+          <select required value={form.target_clinic_id} onChange={(e) => setForm({ ...form, target_clinic_id: e.target.value })}>
+            <option value="">اختر العيادة بالاسم...</option>
+            {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
+          </select>
+        </Field>
         <Field label="مستوى الوصول" required>
           <select value={form.access_level} onChange={(e) => setForm({ ...form, access_level: e.target.value })}>
             <option value="READ">قراءة فقط</option><option value="WRITE">قراءة وكتابة</option>

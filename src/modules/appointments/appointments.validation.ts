@@ -6,12 +6,18 @@ export const createAppointmentSchema = z.object({
   patient_id: z.coerce.number().int().positive(),
   doctor_id: z.coerce.number().int().positive(),
   appointment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'صيغة التاريخ يجب أن تكون YYYY-MM-DD'),
-  start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'صيغة وقت البداية غير صحيحة'),
-  end_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'صيغة وقت النهاية غير صحيحة'),
+    start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'صيغة وقت البداية غير صحيحة').optional(),
+  end_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'صيغة وقت النهاية غير صحيحة').optional(),
   reason: z.string().optional(),
   notes: z.string().optional(),
-}).refine((data) => data.end_time > data.start_time, {
-  message: 'وقت النهاية يجب أن يكون بعد وقت البداية',
+}).refine((data) => {
+  // فقط فحص الترتيب إذا تم توفير كلا الوقتين
+  if (data.start_time && data.end_time) {
+    return data.end_time > data.start_time;
+  }
+  return !data.start_time && !data.end_time;
+}, {
+  message: 'يجب تقديم وقتَي البداية والنهاية معاً (أو تركهما معاً), على أن تكون النهاية بعد البداية',
   path: ['end_time'],
 });
 

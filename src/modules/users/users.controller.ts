@@ -6,19 +6,66 @@ import { hashPassword } from '../../utils/auth';
 const canManageAllClinics = (req: AuthenticatedRequest) => req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN';
 
 export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
-  const clinicId = canManageAllClinics(req) && req.query.clinic_id ? Number(req.query.clinic_id) : req.user?.clinicId;
+  const isGlobal = canManageAllClinics(req);
+  const requestedClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
   const offset = (page - 1) * limit;
+  const role = typeof req.query.role === 'string' ? req.query.role : null;
+  const search = typeof req.query.search === 'string' && req.query.search.trim() ? req.query.search.trim() : null;
+  const status = typeof req.query.status === 'string' ? req.query.status : null;
   try {
+    const params: unknown[] = [];
+    let where = 'TRUE';
+
+    // نطاق العيادات:
+    // - المدير العام: يرى كل المستخدمين ما لم يحدد عيادة صراحة (ويتضمن وقتها الإسنادات الإضافية clinic_staff)
+    // - الموظف العادي: يرى مستخدمي عياداته المسندة فقط (الأساسية + الإسنادات الإضافية)
+    if (isGlobal) {
+      if (requestedClinic) {
+        params.push(requestedClinic);
+        where = `(u.clinic_id = $${params.length} OR EXISTS (
+          SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $${params.length}
+        ))`;
+      }
+    } else {
+      const ids = req.user?.clinicIds ?? (req.user?.clinicId !== null && req.user?.clinicId !== undefined ? [req.user.clinicId] : []);
+      if (requestedClinic) {
+        if (!ids.includes(requestedClinic)) return res.status(403).json({ message: 'لا يمكنك عرض مستخدمي عيادة غير مسندة لك' });
+        params.push(requestedClinic);
+        where = `(u.clinic_id = $${params.length} OR EXISTS (
+          SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $${params.length}
+        ))`;
+      } else if (ids.length > 0) {
+        params.push(ids);
+        where = `(u.clinic_id = ANY($${params.length}::int[]) OR EXISTS (
+          SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = ANY($${params.length}::int[])
+        ))`;
+      }
+    }
+
+    // فلترة اختيارية حسب الدور/الحالة/البحث لدعم شاشات إسناد الطاقم
+    if (role) {
+      params.push(role);
+      where += ` AND r.role_name = $${params.length}`;
+    }
+    if (status) {
+      params.push(status);
+      where += ` AND u.status = $${params.length}`;
+    }
+    if (search) {
+      params.push(`%${search}%`);
+      where += ` AND (u.full_name ILIKE $${params.length} OR u.username ILIKE $${params.length})`;
+    }
+    params.push(limit, offset);
     const result = await pool.query(
       `SELECT u.user_id, u.full_name, u.username, u.phone, u.status, u.is_force_password_change,
               u.medical_license_no, u.sub_specialty, u.direct_phone, u.last_login_at,
               u.created_at, r.role_name, c.clinic_id, c.clinic_name
        FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN clinics c ON c.clinic_id = u.clinic_id
-       WHERE ($1::int IS NULL OR u.clinic_id = $1)
-       ORDER BY u.created_at DESC LIMIT $2 OFFSET $3`, [clinicId, limit, offset]);
+       WHERE ${where}
+       ORDER BY u.full_name ASC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
      return res.status(200).json({ users: result.rows, pagination: { page, limit, returned: result.rows.length } });
   } catch (error) {
     console.error('List Users Error:', error);
@@ -26,22 +73,39 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// قائمة الأطباء المتاحين لحجز المواعيد — أطباء عيادة المستخدم، وللمدير كل الأطباء (أو حسب العيادة المطلوبة)
+// قائمة الأطباء المتاحين لحجز المواعيد — أطباء عيادات المستخدم المسندة (الأساسية أو clinic_staff)
+// وللمدير كل الأطباء (أو حسب العيادة المطلوبة)
 export const listDoctors = async (req: AuthenticatedRequest, res: Response) => {
   const isGlobal = canManageAllClinics(req);
   const requestedClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   try {
-    const params: any[] = [];
+    const params: unknown[] = [];
     let where = `u.status = 'ACTIVE'`;
     if (!isGlobal) {
-      params.push(req.user?.clinicId);
-      where += ` AND u.clinic_id = $${params.length}`;
+      const ids = req.user?.clinicIds ?? (req.user?.clinicId !== null && req.user?.clinicId !== undefined ? [req.user.clinicId] : []);
+      if (requestedClinic) {
+        if (!ids.includes(requestedClinic)) return res.status(403).json({ message: 'لا يمكنك عرض أطباء عيادة غير مسندة لك' });
+        params.push(requestedClinic);
+        where += ` AND EXISTS (
+          SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $${params.length}
+          UNION SELECT 1 FROM users u2 WHERE u2.user_id = u.user_id AND u2.clinic_id = $${params.length}
+        )`;
+      } else {
+        params.push(ids);
+        where += ` AND EXISTS (
+          SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = ANY($${params.length}::int[])
+          UNION SELECT 1 FROM users u2 WHERE u2.user_id = u.user_id AND u2.clinic_id = ANY($${params.length}::int[])
+        )`;
+      }
     } else if (requestedClinic) {
       params.push(requestedClinic);
-      where += ` AND u.clinic_id = $${params.length}`;
+      where += ` AND EXISTS (
+        SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $${params.length}
+        UNION SELECT 1 FROM users u2 WHERE u2.user_id = u.user_id AND u2.clinic_id = $${params.length}
+      )`;
     }
     const result = await pool.query(
-      `SELECT u.user_id, u.full_name, u.sub_specialty, u.clinic_id, c.clinic_name
+      `SELECT DISTINCT u.user_id, u.full_name, u.sub_specialty, u.clinic_id, c.clinic_name
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN clinics c ON c.clinic_id = u.clinic_id
