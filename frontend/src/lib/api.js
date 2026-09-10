@@ -106,8 +106,11 @@ export const api = {
   },
   billing: {
     createService: (body) => request('/api/billing/services', { method: 'POST', body }),
+    listServices: (params) => request('/api/billing/services', { params }),
     createInvoice: (body) => request('/api/billing/invoices', { method: 'POST', body }),
+    listInvoices: (params) => request('/api/billing/invoices', { params }),
     createExpense: (body) => request('/api/billing/expenses', { method: 'POST', body }),
+    listExpenses: (params) => request('/api/billing/expenses', { params }),
     monthlyKpis: (params) => request('/api/billing/reports/kpis', { params }),
   },
   clinics: {

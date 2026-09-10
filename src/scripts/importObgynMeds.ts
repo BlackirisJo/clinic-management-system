@@ -7,7 +7,7 @@ const FILE = path.resolve(process.cwd(), 'jordan_obgyn_medications_1000.txt');
 async function main() {
   const raw = fs.readFileSync(FILE, 'utf8');
   const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const header = lines[0].split('|').map((h) => h.trim().toLowerCase());
+  const header = (lines[0] ?? '').split('|').map((h) => h.trim().toLowerCase());
   const idx = (name: string) => header.indexOf(name);
   const iT = idx('trade_name'), iS = idx('scientific_name'), iD = idx('default_dosage'), iI = idx('instructions');
 

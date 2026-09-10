@@ -15,8 +15,8 @@ const CHUNK_SIZE = 50;
 interface MedicationRow {
   trade_name: string;
   scientific_name: string;
-  default_dosage: string;
-  instructions: string;
+  default_dosage: string | null;
+  instructions: string | null;
 }
 
 function parseFile(): MedicationRow[] {
@@ -28,7 +28,7 @@ function parseFile(): MedicationRow[] {
     const cols = line.split('|').map((c) => c.trim());
     if (cols.length < 4) continue;
     // تخطي سطر العناوين
-    if (cols[0].toLowerCase() === 'trade_name') continue;
+    if ((cols[0] ?? '').toLowerCase() === 'trade_name') continue;
     const [trade_name, scientific_name, default_dosage, ...rest] = cols;
     if (!trade_name || !scientific_name) continue;
     // التعليمات قد تحتوي على '|' داخلها — نعيد دمج البقية
@@ -74,7 +74,7 @@ async function importMedications() {
        RETURNING medication_id`,
       values
     );
-    inserted += result.rowCount;
+    inserted += result.rowCount ?? 0;
     console.log(`  ⤷ دفعة ${Math.floor(i / CHUNK_SIZE) + 1}: ${result.rowCount} دواء`);
   }
 
