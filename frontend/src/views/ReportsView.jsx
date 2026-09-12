@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import { fmtMoney, fmtNumber, fmtDateTime, PAYMENT_TYPES } from '../lib/format'
+import { fmtMoney, fmtNumber, fmtDateTime, fmtDate, fmtTime, PAYMENT_TYPES, APPOINTMENT_STATUS } from '../lib/format'
 import { Loading, Empty, Notice, downloadCSV } from '../components/ui'
+import { useAuth } from '../auth/AuthContext'
 
 const REPORT_TABS = [
   { id: 'overview', label: 'الشامل' },
@@ -12,11 +13,24 @@ const REPORT_TABS = [
 ]
 
 export default function ReportsView() {
+  const { user } = useAuth()
   const [tab, setTab] = useState('overview')
   const [filters, setFilters] = useState({ date_from: '', date_to: '', clinic_id: '' })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [clinics, setClinics] = useState([])
+  const [clinicsError, setClinicsError] = useState('')
+
+  // تحميل قائمة العيادات للفلتر (الدليل المالي للأدوار المركزية، وإلا العيادة المسندة)
+  useEffect(() => {
+    const loader = (user?.permissions?.includes('MANAGE_SERVICES') || user?.permissions?.includes('CREATE_EXPENSE'))
+      ? api.clinics.financialDirectory()
+      : api.clinics.directory()
+    loader
+      .then((r) => setClinics(r.clinics || []))
+      .catch((err) => { setClinicsError(err.message); setClinics([]) })
+  }, [user])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -55,8 +69,12 @@ export default function ReportsView() {
         <input type="date" className="input" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
         <span className="muted-small">إلى</span>
         <input type="date" className="input" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
-        <input type="number" className="input sm" placeholder="رقم العيادة" value={filters.clinic_id} onChange={(e) => setFilters({ ...filters, clinic_id: e.target.value })} />
+        <select className="input" value={filters.clinic_id} onChange={(e) => setFilters({ ...filters, clinic_id: e.target.value })}>
+          <option value="">جميع العيادات</option>
+          {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}</option>)}
+        </select>
       </div>
+      {clinicsError && <Notice kind="error">{clinicsError}</Notice>}
 
       <div className="tabs">
         {REPORT_TABS.map((t) => (
@@ -70,7 +88,7 @@ export default function ReportsView() {
           {tab === 'overview' && <OverviewTab data={data.overview || {}} />}
           {tab === 'financial' && <FinancialTab data={data} />}
           {tab === 'clinical' && <ClinicalTab data={data} />}
-          {tab === 'appointments' && <AppointmentsTab data={data.statuses || []} />}
+          {tab === 'appointments' && <AppointmentsTab statuses={data.statuses || []} rows={data.appointments || []} />}
           {tab === 'patients' && <PatientsTab rows={data.patients || []} />}
         </div>
       )}
@@ -236,19 +254,42 @@ function ClinicalTab({ data }) {
     </div>
   )
 }
-function AppointmentsTab({ rows }) {
+function AppointmentsTab({ statuses, rows }) {
   return (
     <div className="tab-stack">
       <div className="record-block">
-        <h4>توزيع حالات المواعيد</h4>
-        {rows.length === 0 ? <Empty text="لا بيانات" /> : (
+        <h4>ملخص حالات المواعيد</h4>
+        {statuses.length === 0 ? <Empty text="لا بيانات" /> : (
+          <div className="report-grid">
+            {statuses.map((s, i) => {
+              const st = APPOINTMENT_STATUS[s.status] || { label: s.status, cls: '' }
+              return (
+                <div className="report-cell" key={i}><span>{st.label}</span><strong>{fmtNumber(s.total)}</strong></div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+      <div className="record-block">
+        <h4>سجل المواعيد ({fmtNumber(rows.length)})</h4>
+        {rows.length === 0 ? <Empty text="لا توجد مواعيد ضمن هذه الفترة" /> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>الحالة</th><th>العدد</th></tr></thead>
+              <thead><tr><th>التاريخ</th><th>الوقت</th><th>المريض</th><th>العيادة</th><th>الطبيب</th><th>الحالة</th></tr></thead>
               <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i}><td>{r.status}</td><td>{fmtNumber(r.total)}</td></tr>
-                ))}
+                {rows.map((a) => {
+                  const st = APPOINTMENT_STATUS[a.status] || { label: a.status, cls: '' }
+                  return (
+                    <tr key={a.appointment_id}>
+                      <td>{fmtDate(a.appointment_date)}</td>
+                      <td>{fmtTime(a.start_time)}</td>
+                      <td>{a.patient_name}</td>
+                      <td>{a.clinic_name}</td>
+                      <td>{a.doctor_name || '—'}</td>
+                      <td><span className={`status ${st.cls}`}>{st.label}</span></td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

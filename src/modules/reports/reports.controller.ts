@@ -77,8 +77,16 @@ export const getAppointmentsReport = async (req: AuthenticatedRequest, res: Resp
   const clinicId = getScope(req, query);
   const { from, to } = dateBounds(query);
   try {
-    const result = await pool.query(`SELECT status, COUNT(*)::int AS total FROM appointments WHERE ($1::int IS NULL OR clinic_id = $1) AND appointment_date BETWEEN $2 AND $3 GROUP BY status ORDER BY total DESC`, [clinicId, from, to]);
-    return res.status(200).json({ period: { from, to }, statuses: result.rows });
+    const result = await pool.query(`SELECT a.appointment_id, a.appointment_date, a.start_time, a.status,
+            p.full_name AS patient_name, c.clinic_name, COALESCE(u.full_name, '—') AS doctor_name
+       FROM appointments a
+       JOIN patients p ON p.patient_id = a.patient_id
+       JOIN clinics c ON c.clinic_id = a.clinic_id
+       LEFT JOIN users u ON u.user_id = a.doctor_id
+       WHERE ($1::int IS NULL OR a.clinic_id = $1) AND a.appointment_date BETWEEN $2 AND $3
+       ORDER BY a.appointment_date DESC, a.start_time DESC NULLS LAST`, [clinicId, from, to]);
+    const summary = await pool.query(`SELECT status, COUNT(*)::int AS total FROM appointments WHERE ($1::int IS NULL OR clinic_id = $1) AND appointment_date BETWEEN $2 AND $3 GROUP BY status ORDER BY total DESC`, [clinicId, from, to]);
+    return res.status(200).json({ period: { from, to }, appointments: result.rows, statuses: summary.rows });
   } catch (error) {
     console.error('Appointments Report Error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء إنشاء تقرير المواعيد' });
