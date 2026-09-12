@@ -1,10 +1,11 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
 import { ReportQuery } from './reports.validation';
 
 const getScope = (req: AuthenticatedRequest, query: ReportQuery) => {
-  const global = req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN';
+  // المالية المركزية (مدير/محاسب) ترى كل العيادات أو تستخدم فلتر العيادة من الاستعلام
+  const global = isGlobalFinanceRole(req);
   return global && query.clinic_id ? query.clinic_id : req.user?.clinicId;
 };
 
