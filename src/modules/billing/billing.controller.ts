@@ -1,15 +1,10 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest, accessibleClinicIds } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, accessibleClinicIds, financeClinicScope, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
 
 // المحاسب دور مالي مركزي: يتعامل مع كل العيادات النشطة دون تقييد بالإسناد.
 // (المدير SUPER/SYSTEM_ADMIN يبقى شاملاً أيضاً)
-const isFinanceUnrestricted = (req: AuthenticatedRequest): boolean => {
-  if (req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN') return true;
-  if (req.user?.roleName === 'ACCOUNTANT') return true;
-  const perms = req.user?.permissions ?? [];
-  return perms.includes('MANAGE_SERVICES') || perms.includes('CREATE_EXPENSE');
-};
+// نطاق العمليات المالية موحّد عبر financeClinicScope من auth.middleware.ts
 
 // التحقق أن العيادة موجودة ونشطة قبل إنشاء خدمة/مصروف فيها
 const ensureActiveClinic = async (clinicId: number): Promise<boolean> => {
@@ -26,7 +21,7 @@ export const createClinicService = async (req: AuthenticatedRequest, res: Respon
     return res.status(400).json({ message: 'الرجاء توفير بيانات الخدمة كاملة (العيادة، الاسم، السعر)' });
   }
   // لغير المالية المركزية: يجب أن تكون العيادة مسندة للمستخدم
-  if (!isFinanceUnrestricted(req)) {
+  if (!isGlobalFinanceRole(req)) {
     const userClinicId = req.user?.clinicId;
     const assigned: number[] = req.user?.clinicIds ?? [];
     const ok = (userClinicId !== null && userClinicId !== undefined && Number(userClinicId) === targetClinicId)
@@ -63,7 +58,7 @@ export const createClinicService = async (req: AuthenticatedRequest, res: Respon
 // 1ب. قائمة خدمات العيادات مع اسم العيادة (بدل رقمها فقط)
 export const listClinicServices = async (req: AuthenticatedRequest, res: Response) => {
   // المالية المركزية (محاسب/إدارة) ترى كل الخدمات؛ غيرهم مقيد بعياداته المسندة
-  const allowedClinics = isFinanceUnrestricted(req) ? null : accessibleClinicIds(req); // null = يرى الجميع
+  const allowedClinics = financeClinicScope(req); // null = يرى الجميع
   const filterClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   const search = typeof req.query.search === 'string' && req.query.search.trim() ? `%${req.query.search.trim()}%` : null;
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -98,7 +93,7 @@ export const listClinicServices = async (req: AuthenticatedRequest, res: Respons
 export const createInvoice = async (req: AuthenticatedRequest, res: Response) => {
   const { patient_id, visit_id, items, discount_amount, payment_type } = req.body;
   const receptionist_id = req.user?.userId;
-  const allowedClinics = isFinanceUnrestricted(req) ? null : accessibleClinicIds(req); // null = مدير/مالية مركزية يرى الجميع
+  const allowedClinics = financeClinicScope(req); // null = مدير/مالية مركزية يرى الجميع
   const isAdmin = allowedClinics === null;
 
   if (!patient_id || !receptionist_id || (!isAdmin && !(allowedClinics ?? []).length) || !Array.isArray(items) || items.length === 0) {
@@ -240,15 +235,7 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
   const spent_by_user_id = req.user?.userId;
   const targetClinicId = Number(clinic_id);
 
-  if (!isFinanceUnrestricted(req)) {
-    const allowedList = accessibleClinicIds(req) ?? [];
-    const primaryClinic = req.user?.clinicId !== null && req.user?.clinicId !== undefined ? Number(req.user.clinicId) : null;
-    const okClinic = (primaryClinic !== null && primaryClinic === targetClinicId) || allowedList.map(Number).includes(targetClinicId);
-    if (!okClinic) {
-      return res.status(403).json({ message: 'لا يمكنك تسجيل مصروف في عيادة غير مسندة لك' });
-    }
-  }
-  if (!category || amount === undefined || !spent_by_user_id || !Number.isFinite(targetClinicId)) {
+  if (!category || amount === undefined || !spent_by_user_id || !Number.isFinite(targetClinicId) || targetClinicId <= 0) {
     return res.status(400).json({ message: 'بيانات المصروف غير مكتملة' });
   }
   if (!Number.isFinite(Number(amount)) || Number(amount) < 0) {
@@ -256,17 +243,28 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
   }
 
   try {
+    // لغير المالية المركزية: يجب أن تكون العيادة مسندة للمستخدم
+    if (!isGlobalFinanceRole(req)) {
+      const assigned: number[] = accessibleClinicIds(req) ?? [];
+      if (!assigned.map(Number).includes(targetClinicId)) {
+        return res.status(403).json({ message: 'لا يمكنك تسجيل مصروف في عيادة غير مسندة لك' });
+      }
+    }
+    // العيادة المستهدفة يجب أن تكون موجودة ونشطة (للمحاسب/الإدارة: أي عيادة نشطة)
+    if (!(await ensureActiveClinic(targetClinicId))) {
+      return res.status(400).json({ message: 'العيادة غير موجودة أو غير فعالة' });
+    }
     const result = await pool.query(
       `INSERT INTO expenses (clinic_id, category, amount, description, spent_by_user_id)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [clinic_id || null, category, amount, description || null, spent_by_user_id]
+      [targetClinicId, category, amount, description || null, spent_by_user_id]
     );
     try {
       await pool.query(
         `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
          VALUES ($1, $2, 'EXPENSE_CREATED', 'EXPENSE', $3)`,
-        [spent_by_user_id, clinic_id ?? req.user?.clinicId, result.rows[0].expense_id]
+        [spent_by_user_id, targetClinicId, result.rows[0].expense_id]
       );
     } catch (auditError) {
       console.error('Expense audit failed after commit:', auditError);
@@ -284,7 +282,7 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
 
 // 3ب. قائمة المصاريف مع اسم العيادة واسم الموظف الذي سجلها
 export const listExpenses = async (req: AuthenticatedRequest, res: Response) => {
-  const allowedClinics = isFinanceUnrestricted(req) ? null : accessibleClinicIds(req); // null = مدير/مالية مركزية يرى الجميع
+  const allowedClinics = financeClinicScope(req); // null = مدير/مالية مركزية يرى الجميع
   const filterClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
@@ -315,7 +313,7 @@ export const listExpenses = async (req: AuthenticatedRequest, res: Response) => 
 
 // 3ج. قائمة الفواتير مع أسماء المريض والعيادة والطبيب والخدمة (بدل الأرقام فقط)
 export const listInvoices = async (req: AuthenticatedRequest, res: Response) => {
-  const allowedClinics = isFinanceUnrestricted(req) ? null : accessibleClinicIds(req); // null = مدير/مالية مركزية يرى الجميع
+  const allowedClinics = financeClinicScope(req); // null = مدير/مالية مركزية يرى الجميع
   const filterClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   const patientId = req.query.patient_id ? Number(req.query.patient_id) : null;
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -394,12 +392,19 @@ export const listInvoices = async (req: AuthenticatedRequest, res: Response) => 
 
 // 4. استرجاع التقرير المالي الشهرى واستعلام KPIs
 export const getMonthlyFinancialKPIs = async (req: AuthenticatedRequest, res: Response) => {
+  // المالية المركزية (محاسب/إدارة) ترى مؤشرات كل العيادات؛ غيرهم مقيد بعياداته المسندة
+  const allowedClinics = financeClinicScope(req); // null = كل العيادات
+  const filterClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
+  if (filterClinic && allowedClinics !== null && !allowedClinics.includes(filterClinic)) {
+    return res.status(403).json({ message: 'لا يمكنك عرض مؤشرات عيادة غير مسندة لك' });
+  }
   try {
     const result = await pool.query(
       `SELECT * FROM mv_clinic_monthly_kpis
-       WHERE ($1::int IS NULL OR clinic_id = $1)
+       WHERE ($1::int[] IS NULL OR clinic_id = ANY($1::int[]))
+         AND ($2::int IS NULL OR clinic_id = $2)
        ORDER BY stat_month DESC`,
-      [req.user?.clinicId]
+      [allowedClinics, filterClinic]
     );
 
     return res.status(200).json({
