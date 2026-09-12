@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { fmtDateTime } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice } from '../components/ui'
+import { useAuth } from '../auth/AuthContext'
+import ImportMedicationsModal from '../components/ImportMedicationsModal'
 
 export default function PrescriptionsView() {
   const [tab, setTab] = useState('medications')
@@ -22,9 +24,11 @@ export default function PrescriptionsView() {
 }
 
 function MedicationsTab() {
+  const { user } = useAuth()
   const [rows, setRows] = useState(null)
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -39,12 +43,17 @@ function MedicationsTab() {
 
   useEffect(() => { load() }, [load])
 
+  const canImport = user?.permissions?.includes('MANAGE_MEDICATIONS') ||
+    user?.permissions?.includes('CREATE_PRESCRIPTION') ||
+    user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
+
   return (
     <div className="tab-inner">
       <div className="toolbar">
         <input className="input" placeholder="ابحث باسم الدواء (التجاري أو العلمي)..." value={search}
           onChange={(e) => setSearch(e.target.value)} />
         <button className="primary-button compact" onClick={() => setShowAdd(true)}>+ إضافة دواء</button>
+        {canImport && <button className="secondary-button compact" onClick={() => setShowImport(true)}>📥 استيراد دليل</button>}
       </div>
       <Notice kind="error">{error}</Notice>
       {rows === null ? <Loading /> : rows.length === 0 ? <Empty text="لا توجد أدوية مطابقة" /> : (
@@ -60,6 +69,7 @@ function MedicationsTab() {
         </div>
       )}
       {showAdd && <AddMedicationModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load() }} />}
+      {showImport && <ImportMedicationsModal onClose={() => setShowImport(false)} onSaved={() => load()} />}
     </div>
   )
 }

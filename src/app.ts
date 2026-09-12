@@ -3,6 +3,7 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import { randomUUID } from 'crypto';
 import authRoutes from './modules/auth/auth.routes';
 import patientsRoutes from './modules/patients/patients.routes';
@@ -13,6 +14,7 @@ import appointmentRoutes from './modules/appointments/appointments.routes';
 import usersRoutes from './modules/users/users.routes';
 import reportsRoutes from './modules/reports/reports.routes';
 import clinicsRoutes from './modules/clinics/clinics.routes';
+import medicationImportRoutes from './modules/prescriptions/medication.import.routes';
 import clinicalRoutes from './modules/clinical/clinical.routes';
 
 const app: Application = express();
@@ -52,6 +54,7 @@ app.use('/api/appointments', appointmentRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/clinics', clinicsRoutes);
+app.use('/api/medications/import', medicationImportRoutes);
 app.use('/api/clinical', clinicalRoutes);
 
 // معالجة المسارات غير الموجودة (404 Not Found)
@@ -60,7 +63,10 @@ app.use((req: Request, res: Response) => {
 });
 
 // معالج الأخطاء العام (Global Error Handler)
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof multer.MulterError || err?.message === 'الملف يجب أن يكون بصيغة CSV') {
+    return res.status(400).json({ message: err.message || 'خطأ في رفع الملف' });
+  }
   console.error('❌ Unhandled Server Error:', err.stack || err.message);
   res.status(500).json({
     message: 'حدث خطأ داخلي في الخادم',

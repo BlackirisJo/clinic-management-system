@@ -103,6 +103,9 @@ export const api = {
     createMedication: (body) => request('/api/prescriptions/medications', { method: 'POST', body }),
     create: (body) => request('/api/prescriptions', { method: 'POST', body }),
     get: (id) => request(`/api/prescriptions/${id}`),
+    importTemplate: () => request('/api/medications/import/template'),
+    validateImport: (formData) => request('/api/medications/import/validate', { method: 'POST', body: formData, isForm: true }),
+    executeImport: (formData) => request('/api/medications/import', { method: 'POST', body: formData, isForm: true }),
   },
   billing: {
     createService: (body) => request('/api/billing/services', { method: 'POST', body }),
