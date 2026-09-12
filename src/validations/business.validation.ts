@@ -27,9 +27,22 @@ export const prescriptionSchema = z.object({
 export const serviceSchema = z.object({ clinic_id: id, service_name: z.string().trim().min(2).max(150), price: money, doctor_percentage: z.coerce.number().finite().min(0).max(100).default(0) });
 export const invoiceSchema = z.object({
   patient_id: id, visit_id: id.optional(), discount_amount: money.optional(), payment_type: z.enum(['CASH', 'CARD', 'INSURANCE', 'SPLIT']).default('CASH'),
-  items: z.array(z.object({ clinic_id: id, doctor_id: id.optional(), service_id: id.optional(), price: money })).min(1).max(100),
+  items: z.array(z.object({ clinic_id: id, doctor_id: id.optional(), service_id: id.optional(), price: money.optional(), quantity: z.coerce.number().int().min(1).max(9999).optional() })).min(1).max(100),
 });
 export const expenseSchema = z.object({ clinic_id: id, category: z.string().trim().min(2).max(100), amount: money, description: z.string().max(5000).optional() });
+export const serviceUpdateSchema = z.object({
+  clinic_id: id.optional(),
+  service_name: z.string().trim().min(2).max(150).optional(),
+  price: money.optional(),
+  doctor_percentage: z.coerce.number().finite().min(0).max(100).optional(),
+  is_active: z.boolean().optional(),
+});
+export const expenseUpdateSchema = z.object({
+  clinic_id: id.optional(),
+  category: z.string().trim().min(2).max(100).optional(),
+  amount: money.optional(),
+  description: z.string().max(5000).optional(),
+});
 const ALLERGEN_KEYS = ['PENICILLIN', 'ASPIRIN', 'SULFA', 'LATEX', 'FOOD', 'POLLEN', 'INSECT_STING', 'OTHER'] as const;
 const CONDITION_KEYS = ['DIABETES', 'HYPERTENSION', 'ASTHMA', 'HEART_DISEASE', 'KIDNEY_DISEASE', 'THYROID', 'ANEMIA', 'OTHER'] as const;
 const SEVERITY_LEVELS = ['MILD', 'MODERATE', 'SEVERE', 'GESTATIONAL', 'TRANSIENT', 'UNSPECIFIED'] as const;

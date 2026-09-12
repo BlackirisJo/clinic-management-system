@@ -2,15 +2,22 @@ import { Router } from 'express';
 import {
   createClinicService,
   listClinicServices,
+  getClinicService,
+  updateClinicService,
+  deleteClinicService,
   createInvoice,
   listInvoices,
+  getInvoice,
   createExpense,
   listExpenses,
+  getExpense,
+  updateExpense,
+  deleteExpense,
   getMonthlyFinancialKPIs,
 } from './billing.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
 import { validateBody } from '../../middlewares/validate.middleware';
-import { expenseSchema, invoiceSchema, serviceSchema } from '../../validations/business.validation';
+import { expenseSchema, expenseUpdateSchema, invoiceSchema, serviceSchema, serviceUpdateSchema } from '../../validations/business.validation';
 
 const router = Router();
 
@@ -30,12 +37,19 @@ const requireAny = (keys: string[]) => {
 // خدمات العيادات
 router.post('/services', requirePermission('MANAGE_SERVICES'), validateBody(serviceSchema), createClinicService);
 router.get('/services', requireAny(['MANAGE_SERVICES', 'VIEW_INVOICES', 'VIEW_FINANCIAL_REPORTS', 'CREATE_INVOICE']), listClinicServices);
+router.get('/services/:id', requireAny(['MANAGE_SERVICES', 'VIEW_INVOICES', 'VIEW_FINANCIAL_REPORTS', 'CREATE_INVOICE']), getClinicService);
+router.put('/services/:id', requirePermission('MANAGE_SERVICES'), validateBody(serviceUpdateSchema), updateClinicService);
+router.delete('/services/:id', requirePermission('MANAGE_SERVICES'), deleteClinicService);
 
 // إصدار الفواتير والمصروفات
 router.post('/invoices', requirePermission('CREATE_INVOICE'), validateBody(invoiceSchema), createInvoice);
 router.get('/invoices', requireAny(['VIEW_INVOICES', 'VIEW_FINANCIAL_REPORTS', 'CREATE_INVOICE']), listInvoices);
+router.get('/invoices/:id', requireAny(['VIEW_INVOICES', 'VIEW_FINANCIAL_REPORTS', 'CREATE_INVOICE']), getInvoice);
 router.post('/expenses', requirePermission('CREATE_EXPENSE'), validateBody(expenseSchema), createExpense);
 router.get('/expenses', requireAny(['VIEW_FINANCIAL_REPORTS', 'VIEW_INVOICES', 'CREATE_EXPENSE']), listExpenses);
+router.get('/expenses/:id', requireAny(['VIEW_FINANCIAL_REPORTS', 'VIEW_INVOICES', 'CREATE_EXPENSE']), getExpense);
+router.put('/expenses/:id', requirePermission('CREATE_EXPENSE'), validateBody(expenseUpdateSchema), updateExpense);
+router.delete('/expenses/:id', requirePermission('CREATE_EXPENSE'), deleteExpense);
 
 // التقارير المالية
 router.get('/reports/kpis', requirePermission('VIEW_FINANCIAL_REPORTS'), getMonthlyFinancialKPIs);
