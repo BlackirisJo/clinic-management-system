@@ -1,16 +1,10 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
 import { hashPassword } from '../../utils/auth';
 
-const isFinanceBypass = (roleName?: string, permissions: string[] = []): boolean => {
-  if (roleName === 'SUPER_ADMIN' || roleName === 'SYSTEM_ADMIN') return true;
-  if (roleName === 'ACCOUNTANT') return true;
-  return permissions.includes('MANAGE_SERVICES') || permissions.includes('CREATE_EXPENSE');
-};
-
 export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
-  const isGlobal = isFinanceBypass(req.user?.roleName, req.user?.permissions ?? []);
+  const isGlobal = isGlobalFinanceRole(req);
   const requestedClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
@@ -80,7 +74,7 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
 // قائمة الأطباء المتاحين لحجز المواعيد — أطباء عيادات المستخدم المسندة (الأساسية أو clinic_staff)
 // وللمدير كل الأطباء (أو حسب العيادة المطلوبة)
 export const listDoctors = async (req: AuthenticatedRequest, res: Response) => {
-  const isGlobal = isFinanceBypass(req.user?.roleName, req.user?.permissions ?? []);
+  const isGlobal = isGlobalFinanceRole(req);
   const requestedClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   try {
     const params: unknown[] = [];
@@ -126,7 +120,7 @@ export const listDoctors = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createUser = async (req: AuthenticatedRequest, res: Response) => {
   const { full_name, username, password, role_name, clinic_id, phone, medical_license_no, sub_specialty, direct_phone } = req.body;
-  const managerIsGlobal = isFinanceBypass(req.user?.roleName, req.user?.permissions ?? []);
+  const managerIsGlobal = isGlobalFinanceRole(req);
   const targetClinicId = clinic_id ?? req.user?.clinicId;
 
   if (!managerIsGlobal && targetClinicId !== req.user?.clinicId) {
@@ -175,7 +169,7 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
   const targetId = Number(req.params.id);
   const updates: Record<string, unknown> = {};
   const body = req.body;
-  const managerIsGlobal = isFinanceBypass(req.user?.roleName, req.user?.permissions ?? []);
+  const managerIsGlobal = isGlobalFinanceRole(req);
   const current = await pool.query(
     `SELECT u.user_id, u.role_id, u.clinic_id, r.role_name
      FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
