@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   listClinics, listClinicDirectory, getClinic, createClinic, updateClinic,
   listClinicStaff, addClinicStaff, updateClinicStaff, removeClinicStaff,
+  listFinancialClinicDirectory,
 } from './clinics.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
 import { validateBody } from '../../middlewares/validate.middleware';
@@ -11,6 +12,10 @@ const router = Router();
 
 // دليل العيادات النشطة (بالاسم) — أي مستخدم مسجل دخول يمكنه الاختيار بالاسم
 router.get('/directory', authenticateJWT, listClinicDirectory);
+
+// دليل العيادات المالية — يُستخدم في العمليات المالية (الفواتير، الخدمات، المصاريف)
+// الأدوار المالية المركزية ترى كل العيادات النشطة، غيرهم يرون عياداتهم المسندة فقط
+router.get('/financial-directory', authenticateJWT, listFinancialClinicDirectory);
 
 // إدارة العيادات — متاحة لمدير النظام فقط (صلاحية MANAGE_CLINICS)
 router.use(authenticateJWT, requirePermission('MANAGE_CLINICS'));

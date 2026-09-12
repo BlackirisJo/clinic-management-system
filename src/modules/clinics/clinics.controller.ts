@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, financeClinicScope } from '../../middlewares/auth.middleware';
 import { hashPassword } from '../../utils/auth';
 
 // أدوات مساعدة: التحقق من أدوار المستخدمين قبل إسنادهم للعيادة
@@ -412,5 +412,28 @@ export const removeClinicStaff = async (req: AuthenticatedRequest, res: Response
   } catch (error) {
     console.error('Remove Clinic Staff Error:', error);
     return res.status(500).json({ message: 'حدث خطأ في الخادم عند إزالة الموظف' });
+  }
+};
+
+// 1ج. دليل العيادات المالية — يُستخدم في العمليات المالية (الفواتير، الخدمات، المصاريف)
+// الأدوار المالية المركزية (SUPER_ADMIN, SYSTEM_ADMIN, ACCOUNTANT) يرون كل العيادات النشطة
+// غيرهم يرون فقط العيادات المسندة إليهم
+export const listFinancialClinicDirectory = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const allowedClinics = financeClinicScope(req); // null = كل العيادات النشطة للمالية المركزية
+    const result = await pool.query(
+      `SELECT c.clinic_id, c.clinic_name, c.is_active,
+              s.specialty_id, s.specialty_key, s.name_ar AS specialty_name
+       FROM clinics c
+       LEFT JOIN specialties s ON s.specialty_id = c.specialty_id
+       WHERE c.is_active = TRUE
+         AND ($1::int[] IS NULL OR c.clinic_id = ANY($1::int[]))
+       ORDER BY c.clinic_name ASC`,
+      [allowedClinics]
+    );
+    return res.status(200).json({ clinics: result.rows });
+  } catch (error) {
+    console.error('List Financial Clinic Directory Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم عند استرجاع دليل العيادات المالية' });
   }
 };
