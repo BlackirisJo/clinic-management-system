@@ -116,6 +116,7 @@ export const api = {
   clinics: {
     list: () => request('/api/clinics'),
     directory: () => request('/api/clinics/directory'),
+    financialDirectory: () => request('/api/clinics/financial-directory'),
     get: (id) => request(`/api/clinics/${id}`),
     create: (body) => request('/api/clinics', { method: 'POST', body }),
     update: (id, body) => request(`/api/clinics/${id}`, { method: 'PUT', body }),

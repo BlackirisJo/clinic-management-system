@@ -43,7 +43,7 @@ function KpisTable() {
   useEffect(() => {
     api.billing.monthlyKpis({})
       .then((r) => setRows(r.kpis || []))
-      .catch((err) => { setError(err.message); setRows([]) })
+      .catch((err) => { console.error('KPIs load error:', err); setError(err.message); setRows([]) })
   }, [])
 
   return (
@@ -75,7 +75,6 @@ function KpisTable() {
 
 function InvoiceForm() {
   const { user } = useAuth()
-  const isGlobal = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
   const [patients, setPatients] = useState([])
   const [clinics, setClinics] = useState([])
   const [doctors, setDoctors] = useState([])
@@ -94,10 +93,10 @@ function InvoiceForm() {
     async function boot() {
       try {
         const [pRes, cRes, dRes, sRes] = await Promise.all([
-          api.patients.list({ limit: 100 }).catch(() => ({ patients: [] })),
-          api.clinics.directory().catch(() => ({ clinics: [] })),
-          api.users.doctors({ limit: 100 }).catch(() => ({ doctors: [] })),
-          api.billing.listServices({ limit: 100 }).catch(() => ({ services: [] })),
+          api.patients.list({ limit: 100 }).catch((err) => { console.error('patients load error:', err); return { patients: [] } }),
+          api.clinics.financialDirectory().catch((err) => { console.error('clinics directory error:', err); return { clinics: [] } }),
+          api.users.doctors({ limit: 100 }).catch((err) => { console.error('doctors load error:', err); return { doctors: [] } }),
+          api.billing.listServices({ limit: 100 }).catch((err) => { console.error('services load error:', err); return { services: [] } }),
         ])
         if (cancelled) return
         setPatients(pRes.patients || [])
@@ -116,7 +115,7 @@ function InvoiceForm() {
   useEffect(() => {
     api.billing.listInvoices({ limit: 20 })
       .then((r) => setInvoices(r.invoices || []))
-      .catch(() => setInvoices([]))
+      .catch((err) => { console.error('invoices load error:', err); setInvoices([]) })
   }, [done])
 
   function addItem() {
@@ -275,10 +274,14 @@ function ServicesTab() {
 
 function useClinicsDirectory() {
   const [clinics, setClinics] = useState([])
+  const [error, setError] = useState('')
   useEffect(() => {
-    api.clinics.directory().then((r) => setClinics(r.clinics || [])).catch(() => setClinics([]))
+    // استخدام الدليل المالي للمحاسب والأدوار المالية المركزية
+    api.clinics.financialDirectory()
+      .then((r) => setClinics(r.clinics || []))
+      .catch((err) => { setError(err.message); setClinics([]) })
   }, [])
-  return clinics
+  return { clinics, error }
 }
 
 function ServicesList() {
@@ -287,7 +290,7 @@ function ServicesList() {
   const load = () => {
     api.billing.listServices({ limit: 100 })
       .then((r) => setRows(r.services || []))
-      .catch((err) => { setError(err.message); setRows([]) })
+      .catch((err) => { console.error('services load error:', err); setError(err.message); setRows([]) })
   }
   useEffect(() => { load() }, [])
   useEffect(() => {
@@ -319,7 +322,7 @@ function ServicesList() {
 
 function ServiceForm() {
   const { user } = useAuth()
-  const clinics = useClinicsDirectory()
+  const { clinics, error: clinicsError } = useClinicsDirectory()
   const [form, setForm] = useState({ clinic_id: user?.clinicId || '', service_name: '', price: '', doctor_percentage: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -357,7 +360,7 @@ function ServiceForm() {
         <Field label="السعر" required><input type="number" min="0" step="0.01" required value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></Field>
         <Field label="نسبة الطبيب %"><input type="number" min="0" max="100" value={form.doctor_percentage} onChange={(e) => setForm({ ...form, doctor_percentage: e.target.value })} /></Field>
       </div>
-      <Notice kind="error">{error}</Notice>
+      <Notice kind="error">{error || clinicsError}</Notice>
       {done && <Notice kind="success">تمت إضافة الخدمة بنجاح</Notice>}
       <div className="modal-actions">
         <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'إضافة الخدمة'}</button>
@@ -383,7 +386,7 @@ function ExpensesList() {
   const load = () => {
     api.billing.listExpenses({ limit: 100 })
       .then((r) => setRows(r.expenses || []))
-      .catch((err) => { setError(err.message); setRows([]) })
+      .catch((err) => { console.error('expenses load error:', err); setError(err.message); setRows([]) })
   }
   useEffect(() => { load() }, [])
   useEffect(() => {
@@ -416,7 +419,7 @@ function ExpensesList() {
 
 function ExpenseForm() {
   const { user } = useAuth()
-  const clinics = useClinicsDirectory()
+  const { clinics, error: clinicsError } = useClinicsDirectory()
   const [form, setForm] = useState({ clinic_id: user?.clinicId || '', category: '', amount: '', description: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -454,7 +457,7 @@ function ExpenseForm() {
       </div>
       <Field label="المبلغ" required><input type="number" min="0" step="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Field>
       <Field label="الوصف"><textarea rows="2" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-      <Notice kind="error">{error}</Notice>
+      <Notice kind="error">{error || clinicsError}</Notice>
       {done && <Notice kind="success">تم تسجيل المصروف بنجاح</Notice>}
       <div className="modal-actions">
         <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'تسجيل المصروف'}</button>
