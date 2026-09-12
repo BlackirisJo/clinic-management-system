@@ -4,9 +4,11 @@ import { AuthenticatedRequest, isGlobalFinanceRole } from '../../middlewares/aut
 import { ReportQuery } from './reports.validation';
 
 const getScope = (req: AuthenticatedRequest, query: ReportQuery) => {
-  // المالية المركزية (مدير/محاسب) ترى كل العيادات أو تستخدم فلتر العيادة من الاستعلام
-  const global = isGlobalFinanceRole(req);
-  return global && query.clinic_id ? query.clinic_id : req.user?.clinicId;
+  // المالية المركزية (مدير النظام/المحاسب/السوبر): كل العيادات افتراضياً،
+  // أو عيادة محددة إذا مُرّر فلتر clinic_id صريح من الاستعلام
+  if (isGlobalFinanceRole(req)) return query.clinic_id ?? null;
+  // باقي الأدوار: عيادتهم المسندة فقط (null إن لم تكن لديهم عيادة)
+  return req.user?.clinicId ?? null;
 };
 
 const dateBounds = (query: ReportQuery) => ({
