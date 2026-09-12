@@ -1,100 +1,133 @@
-Backend modules are organized by business domain rather than placing all functionality in a single application layer.
+# Clinic Management System
 
-Security
+A full-stack clinic and medical center management system designed to manage clinical, administrative, financial, and operational workflows in a multi-clinic environment.
 
-Security is treated as a core part of the system rather than a frontend-only feature.
+## Overview
 
-Authorization is enforced on the backend using:
+Clinic Management System is a web-based healthcare management platform built to centralize the daily operations of medical clinics and healthcare centers.
 
-Authentication
-Roles
-Permissions
-Clinic access
-Resource-level validation
+The system provides a structured environment for managing patients, clinics, medical staff, appointments, clinical records, pregnancies, laboratory and imaging workflows, referrals, billing, expenses, reports, and role-based access control.
 
-Frontend restrictions are considered a user experience feature only and are not relied upon as the primary security mechanism.
+The project is designed with a focus on:
 
-Multi-Clinic Support
+- Data integrity
+- Role-based access control (RBAC)
+- Multi-clinic management
+- Clinical workflow organization
+- Financial management
+- Security and access isolation
+- Maintainable software architecture
 
-The system is designed to support multiple clinics within the same installation.
+## Main Features
 
-Users may be assigned to one or more clinics depending on their role and permissions.
+### Patient Management
+- Patient registration and management
+- Patient medical information
+- Patient search and records
+- Multi-clinic patient access
+- Clinical history
 
-Financial roles can be granted centralized access where required, while clinical and operational users remain restricted according to their authorized clinic scope.
+### Clinic Management
+- Multiple clinics and specialties
+- Clinic staff assignment
+- Clinic-specific services
+- Clinic-based access control
 
-Financial Data Integrity
+### Clinical Management
+- Medical visits
+- Vital signs
+- Diagnoses
+- Laboratory orders and results
+- Medical imaging
+- Referrals
+- Medical attachments
+- Clinical documentation
 
-Financial operations are designed to preserve historical invoice values.
+### Obstetrics & Gynecology
+- Pregnancy records
+- Pregnancy history
+- LMP and EDD
+- Gravida / Para / Abortions / Living Children
+- Blood group and Rh factor
+- Pregnancy risk assessment
+- Pregnancy visits
+- Fetal heart rate
+- Fundal height
+- Ultrasound records
+- Fetal measurements
+- Pregnancy outcomes
 
-Service prices and financial calculations should be validated and calculated on the backend rather than trusting values submitted by the client.
+### Appointment Management
+- Appointment scheduling
+- Doctor assignment
+- Clinic-based appointments
+- Appointment status management
 
-Historical invoices should retain the values used at the time the invoice was issued.
+### Billing & Financial Management
+- Invoice management
+- Invoice items and services
+- Clinic services
+- Doctor percentage/share calculations
+- Payments
+- Expenses
+- Financial reports
+- Financial overview and KPIs
 
-Development Status
+### Reports
+- Clinical reports
+- Financial reports
+- Appointment reports
+- Management overview
+- Clinic-based reporting
 
-This project is under active development.
+### Security & Access Control
+- JWT authentication
+- Role-based access control
+- Permission-based authorization
+- Multi-clinic access isolation
+- Central financial access for authorized accounting roles
+- Backend authorization enforcement
 
-Features, workflows, validations, security controls, and reporting capabilities are continuously being improved.
+## Technology Stack
 
-Some modules may still require additional testing and production hardening before deployment in a real healthcare environment.
+### Frontend
+- React
+- JavaScript
+- Vite
+- Modern responsive UI
 
-Running the Project
-Requirements
-Node.js
-npm
-Docker
-Docker Compose
-PostgreSQL (when running without Docker)
-Clone
-git clone https://github.com/BlackirisJo/clinic-management-system.git
-cd clinic-management-system
-Install Dependencies
-npm install
+### Backend
+- Node.js
+- Express
+- TypeScript
+- REST API
+- Zod validation
 
-Install frontend dependencies if required:
+### Database
+- PostgreSQL
+- Database migrations
+- Relational data integrity
+- Foreign keys and constraints
 
-cd frontend
-npm install
-cd ..
-Environment Configuration
+### Infrastructure
+- Docker
+- Docker Compose
 
-Create the required environment configuration based on the project's environment variables.
+## Architecture
 
-Do not commit:
+The project follows a modular architecture separating:
 
-Database passwords
-JWT secrets
-API keys
-Production credentials
-Private configuration files
-Docker
-
-The project can be run using Docker Compose where supported:
-
-docker compose up -d
-Testing
-
-The project includes automated tests covering authentication, validation, clinical workflows, appointments, users, reports, and integration scenarios.
-
-Run the available test suite with:
-
-npm test
-Project Goals
-
-The long-term goal is to provide a maintainable and extensible healthcare management platform capable of supporting:
-
-Small medical clinics
-Multi-specialty clinics
-Medical centers
-Multiple departments
-Centralized administration
-Financial management
-Clinical workflows
-
-while maintaining strong data integrity, security, and separation between clinical and administrative responsibilities.
-
-License
-
-This project is currently maintained as a private/open-source development project.
-
-License information will be added when the project's distribution terms are finalized.
+```text
+Frontend
+   |
+   v
+REST API
+   |
+   v
+Authentication & Authorization
+   |
+   v
+Business Modules
+   |
+   v
+PostgreSQL
