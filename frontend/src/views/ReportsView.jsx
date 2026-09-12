@@ -95,7 +95,7 @@ function exportCSV(tab, data) {
     ])
   } else if (tab === 'financial') {
     const summary = data.summary || {}
-    const rows = [['الفواتير', summary.invoices ?? 0], ['الإجمالي', summary.gross ?? 0], ['الخصومات', summary.discounts ?? 0], ['الصافي', summary.net ?? 0], ['المحصّل', summary.paid ?? 0]]
+    const rows = [['الفواتير', summary.invoices ?? 0], ['الإجمالي', summary.gross ?? 0], ['الخصومات', summary.discounts ?? 0], ['الصافي', summary.net ?? 0], ['المحصّل', summary.paid ?? 0], ['المستحق', summary.outstanding ?? 0], ['المصاريف', data.expenses?.total ?? 0], ['حصص الأطباء', summary.doctor_payout ?? 0], ['الصافي بعد المصاريف', summary.net_after_expenses ?? 0]]
     downloadCSV(filename, ['المؤشر', 'القيمة'], rows)
   } else if (tab === 'appointments') {
     downloadCSV(filename, ['الحالة', 'العدد'], data.statuses.map((s) => [s.status, s.total]))
@@ -118,8 +118,12 @@ function OverviewTab({ data }) {
         { label: 'مواعيد ملغاة', value: data.appointments?.cancelled ?? 0 },
         { label: 'الروشتات', value: data.prescriptions?.total ?? 0 },
         { label: 'الإيرادات', value: fmtMoney(data.financial?.revenue ?? 0) },
+        { label: 'المدفوع', value: fmtMoney(data.financial?.paid ?? 0) },
+        { label: 'المستحق', value: fmtMoney(data.financial?.outstanding ?? 0) },
+        { label: 'المصاريف', value: fmtMoney(data.financial?.expenses ?? 0) },
         { label: 'حصص الأطباء', value: fmtMoney(data.financial?.doctor_payout ?? 0) },
         { label: 'الخصومات', value: fmtMoney(data.financial?.discounts ?? 0) },
+        { label: 'الصافي بعد المصاريف', value: fmtMoney(data.financial?.net_after_expenses ?? 0) },
       ].map((item) => (
         <div className="report-cell" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>
       ))}
@@ -137,7 +141,10 @@ function FinancialTab({ data }) {
     { label: 'الخصومات', value: fmtMoney(s.discounts) },
     { label: 'الصافي', value: fmtMoney(s.net) },
     { label: 'المحصّل', value: fmtMoney(s.paid) },
+    { label: 'المستحق', value: fmtMoney(s.outstanding) },
     { label: 'المصاريف', value: fmtMoney(expenses.total) },
+    { label: 'حصص الأطباء', value: fmtMoney(s.doctor_payout) },
+    { label: 'الصافي بعد المصاريف', value: fmtMoney(s.net_after_expenses) },
   ]
   return (
     <div className="tab-stack">

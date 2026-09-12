@@ -39,12 +39,18 @@ export default function OverviewView({ onNavigate }) {
     return () => { cancelled = true }
   }, [])
 
+  const fin = overview?.financial
   const cards = useMemo(() => [
     { label: 'إجمالي المرضى', value: fmtNumber(overview?.patients?.total ?? patients.length), note: 'سجلات مسجلة', color: 'teal' },
     { label: 'الزيارات الطبية', value: fmtNumber(overview?.visits?.total ?? 0), note: 'ضمن الفترة المحددة', color: 'blue' },
     { label: 'مواعيد مكتملة', value: fmtNumber(overview?.appointments?.completed ?? 0), note: `${fmtNumber(overview?.appointments?.total ?? appointments.length)} إجمالي المواعيد`, color: 'amber' },
-    { label: 'صافي الإيرادات', value: fmtMoney(overview?.financial?.revenue ?? 0), note: 'قبل المصاريف', color: 'coral' },
-  ], [overview, patients, appointments])
+    { label: 'إجمالي الإيرادات', value: fmtMoney(fin?.revenue ?? 0), note: 'قيمة الخدمات المباعة', color: 'blue' },
+    { label: 'المدفوع', value: fmtMoney(fin?.paid ?? 0), note: 'مقبوضات فعلياً', color: 'teal' },
+    { label: 'مبالغ مستحقة', value: fmtMoney(fin?.outstanding ?? 0), note: 'إجمالي المتبقي على المرضى', color: 'amber' },
+    { label: 'المصاريف', value: fmtMoney(fin?.expenses ?? 0), note: 'ضمن الفترة', color: 'coral' },
+    { label: 'حصة الأطباء', value: fmtMoney(fin?.doctor_payout ?? 0), note: 'محسوبة من البنود', color: 'amber' },
+    { label: 'صافي الإيرادات', value: fmtMoney(fin?.net_after_expenses ?? 0), note: 'الصافي − المصاريف', color: 'coral' },
+  ], [overview, patients, appointments, fin])
 
   if (loading) return <Loading text="جارِ تحميل بيانات العيادة" />
 

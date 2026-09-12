@@ -102,3 +102,49 @@
 .timeline-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.timeline-head strong{color:var(--ink)}
 .timeline-body{display:grid;gap:5px}
 .timeline-vitals{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:#536467;background:#f2f7f5;border-radius:8px;padding:7px 10px}
+
+/* ===== إدارة الفوترة: أزرار الإجراءات وطباعة الفاتورة ===== */
+.row-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.strong-cell{font-weight:600}
+.inv-meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media (max-width:700px){.inv-meta-grid{grid-template-columns:1fr}}
+.service-detail p,.expense-detail p{margin:6px 0;font-size:13px}
+.service-detail strong,.expense-detail strong{color:#134e4a}
+.invoice-summary{margin:12px 0 4px;display:flex;justify-content:flex-end}
+.invoice-summary .sum-row{display:flex;justify-content:space-between;gap:24px;min-width:280px;padding:6px 10px;border-bottom:1px dashed #d8e7e2;font-size:13px}
+.invoice-summary .sum-row.total{background:#eef5f3;border-radius:6px;font-weight:700;color:#134e4a}
+
+
+/* أوراق الفاتورة (Modal عرض الفاتورة) */
+.invoice-sheet{direction:rtl}
+.invoice-sheet .inv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:2px solid #1e6f68;padding-bottom:10px;margin-bottom:12px}
+.invoice-sheet .inv-brand strong{display:block;font-size:16px;color:#134e4a}
+.invoice-sheet .inv-brand small{color:#536467}
+.invoice-sheet .inv-meta{text-align:left;font-size:12px;color:#376864}
+.invoice-sheet .inv-meta strong{display:block;color:#134e4a;font-size:14px}
+.invoice-sheet .inv-parties{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;font-size:12px}
+.invoice-sheet .inv-parties div{background:#f2f7f5;border-radius:8px;padding:8px 10px}
+.invoice-sheet .inv-parties span{display:block;color:#536467;font-size:10px}
+.invoice-sheet table{width:100%;border-collapse:collapse;font-size:12px}
+.invoice-sheet th,.invoice-sheet td{border:1px solid #d8e7e2;padding:7px 9px;text-align:right}
+.invoice-sheet th{background:#eef5f3;color:#134e4a}
+.invoice-sheet td.num,.invoice-sheet th.num{text-align:left}
+.invoice-sheet .inv-summary{margin-top:12px;display:flex;justify-content:flex-end}
+.invoice-sheet .inv-summary table{width:auto;min-width:280px}
+.invoice-sheet .inv-summary td:last-child{text-align:left;font-weight:600}
+.invoice-sheet .inv-summary tr.grand td{background:#eef5f3;font-size:14px}
+.invoice-sheet .inv-status{display:inline-block;border-radius:999px;padding:3px 10px;font-size:11px;background:#eef5f3;color:#134e4a}
+.invoice-sheet .inv-status.unpaid{background:#fdecea;color:#b3261e}
+.invoice-sheet .inv-status.partial{background:#fff7e0;color:#8a6d1a}
+.invoice-sheet .inv-footer{margin-top:12px;font-size:11px;color:#536467;display:flex;justify-content:space-between}
+
+/* حماية طباعة نظيفة: اطبع الفاتورة فقط */
+@media print{
+  @page{size:A4;margin:12mm}
+  body *{visibility:hidden}
+  .invoice-sheet,.invoice-sheet *{visibility:visible}
+  .invoice-sheet{position:absolute;inset-inline-start:0;top:0;width:100%;padding:0}
+  .modal-backdrop{position:static;background:#fff;padding:0}
+  .modal-card{box-shadow:none;border:none;max-height:none;width:100%;max-width:none;margin:0}
+  .modal-header,.modal-close,.invoice-print-actions{display:none !important}
+}

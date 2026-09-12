@@ -88,3 +88,18 @@ export const USER_STATUS = {
   SUSPENDED: { label: 'موقوف', cls: 'cancelled' },
   PASSWORD_RESET_REQUIRED: { label: 'يتطلب تغيير كلمة المرور', cls: 'scheduled' },
 }
+
+// حالات الفاتورة (مشتقة في الخادم من المدفوع مقابل الصافي)
+export const INVOICE_STATUS = {
+  PAID: { label: 'مدفوعة', cls: 'completed' },
+  PARTIAL: { label: 'مدفوعة جزئياً', cls: 'scheduled' },
+  UNPAID: { label: 'غير مدفوعة', cls: 'cancelled' },
+}
+
+// رقم الفاتورة المعروض: INV-<السنة>-<المعرف بأربع خانات> (نفس منطق الخادم)
+export const fmtInvoiceNumber = (invoiceId, createdAt) => {
+  if (invoiceId === undefined || invoiceId === null) return '—'
+  const year = createdAt ? new Date(createdAt).getFullYear() : new Date().getFullYear()
+  const safeYear = Number.isNaN(year) ? new Date().getFullYear() : year
+  return `INV-${safeYear}-${String(Number(invoiceId)).padStart(4, '0')}`
+}

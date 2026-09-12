@@ -107,10 +107,17 @@ export const api = {
   billing: {
     createService: (body) => request('/api/billing/services', { method: 'POST', body }),
     listServices: (params) => request('/api/billing/services', { params }),
+    getService: (id) => request(`/api/billing/services/${id}`),
+    updateService: (id, body) => request(`/api/billing/services/${id}`, { method: 'PUT', body }),
+    deleteService: (id) => request(`/api/billing/services/${id}`, { method: 'DELETE' }),
     createInvoice: (body) => request('/api/billing/invoices', { method: 'POST', body }),
     listInvoices: (params) => request('/api/billing/invoices', { params }),
+    getInvoice: (id) => request(`/api/billing/invoices/${id}`),
     createExpense: (body) => request('/api/billing/expenses', { method: 'POST', body }),
     listExpenses: (params) => request('/api/billing/expenses', { params }),
+    getExpense: (id) => request(`/api/billing/expenses/${id}`),
+    updateExpense: (id, body) => request(`/api/billing/expenses/${id}`, { method: 'PUT', body }),
+    deleteExpense: (id) => request(`/api/billing/expenses/${id}`, { method: 'DELETE' }),
     monthlyKpis: (params) => request('/api/billing/reports/kpis', { params }),
   },
   clinics: {
