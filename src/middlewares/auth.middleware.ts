@@ -35,6 +35,24 @@ export const accessibleClinicIds = (req: AuthenticatedRequest): number[] | null 
   return req.user?.clinicIds ?? (req.user?.clinicId !== null && req.user?.clinicId !== undefined ? [req.user.clinicId] : []);
 };
 
+// هل المستخدم "مالي مركزي" يتعامل مع كل العيادات النشطة دون تقييد بالإسناد؟
+// الأدوار المالية المركزية: SUPER_ADMIN, SYSTEM_ADMIN, ACCOUNTANT
+// (بالإضافة لأي دور يملك صلاحية مالية إدارية كـ MANAGE_SERVICES أو CREATE_EXPENSE)
+export const isGlobalFinanceRole = (req: AuthenticatedRequest): boolean => {
+  if (req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN') return true;
+  if (req.user?.roleName === 'ACCOUNTANT') return true;
+  const perms: string[] = req.user?.permissions ?? [];
+  return perms.includes('MANAGE_SERVICES') || perms.includes('CREATE_EXPENSE');
+};
+
+// نطاق العيادات للعمليات المالية — مصدر الحقيقة الموحد.
+// - الأدوار المالية المركزية (SUPER_ADMIN, SYSTEM_ADMIN, ACCOUNTANT): ترجع null = كل العيادات.
+// - باقي المستخدمين: قائمة عياداتهم المسندة (الأساسية + clinic_staff).
+export const financeClinicScope = (req: AuthenticatedRequest): number[] | null => {
+  if (isGlobalFinanceRole(req)) return null;
+  return accessibleClinicIds(req);
+};
+
 // تحميل جميع العيادات المسند إليها المستخدم (الأساسية + جدول العلاقة clinic_staff)
 const loadUserClinicIds = async (userId: number, primaryClinicId: number | null): Promise<number[]> => {
   const result = await pool.query(
