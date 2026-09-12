@@ -51,6 +51,29 @@ async function request(path, { method = 'GET', body, params, isForm } = {}) {
   return data
 }
 
+// تنزيل نموذج CSV للأدوية مع توكن المصادقة
+export async function downloadMedicationTemplate() {
+  const headers = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(`${API_URL}/api/medications/import/template`, { headers })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.message || 'تعذّر تحميل النموذج')
+  }
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const match = disposition.match(/filename="?([^";]+)"?/)
+  const filename = match?.[1] || 'medication_template.csv'
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 // تنزيل ملف النسخة الاحتياطية مع توكن المصادقة
 export async function downloadBackupFile(backupId) {
   const headers = {}
@@ -103,7 +126,7 @@ export const api = {
     createMedication: (body) => request('/api/prescriptions/medications', { method: 'POST', body }),
     create: (body) => request('/api/prescriptions', { method: 'POST', body }),
     get: (id) => request(`/api/prescriptions/${id}`),
-    importTemplate: () => request('/api/medications/import/template'),
+    importTemplate: () => downloadMedicationTemplate(),
     validateImport: (formData) => request('/api/medications/import/validate', { method: 'POST', body: formData, isForm: true }),
     executeImport: (formData) => request('/api/medications/import', { method: 'POST', body: formData, isForm: true }),
   },

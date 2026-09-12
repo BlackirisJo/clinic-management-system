@@ -69,7 +69,7 @@ function MedicationsTab() {
         </div>
       )}
       {showAdd && <AddMedicationModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load() }} />}
-      {showImport && <ImportMedicationsModal onClose={() => setShowImport(false)} onSaved={() => load()} />}
+      {showImport && <ImportMedicationsModal onClose={() => setShowImport(false)} onImported={() => load()} />}
     </div>
   )
 }

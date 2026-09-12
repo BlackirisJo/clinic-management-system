@@ -55,6 +55,7 @@ export const generateMedicationTemplate = (_req: AuthenticatedRequest, res: Resp
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="medication_template.csv"');
   res.status(200).send('﻿' + header + '\n' + exampleRow + '\n');
+};
 
 export const validateMedicationImport = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -67,7 +68,7 @@ export const validateMedicationImport = async (req: AuthenticatedRequest, res: R
     catch (e: any) { return res.status(400).json({ message: e.message || 'فشل قراءة الملف' }); }
     if (!records.length) return res.status(400).json({ message: 'الملف لا يحتوي على صفوف' });
 
-    const fileColumns = Object.keys(records[0]);
+    const fileColumns = Object.keys(records[0] ?? {});
     const missing = ALL_CSV_COLUMNS.filter((c) => !fileColumns.includes(c));
     if (missing.length) return res.status(400).json({ message: `الأعمدة الناقصة: ${missing.join('، ')}`, missingColumns: missing });
     const unknown = fileColumns.filter((c) => !ALL_CSV_COLUMNS.includes(c as any));
@@ -106,39 +107,6 @@ export const validateMedicationImport = async (req: AuthenticatedRequest, res: R
     return res.status(500).json({ message: 'حدث خطأ أثناء فحص الملف' });
   }
 };
-};wnColumns.join('، ')}`, unknownColumns });
-    if (records.length > MAX_ROWS) return res.status(400).json({ message: `عدد الصفوف يتجاوز الحد المسموح (${MAX_ROWS})` });
-
-    const existingRes = await pool.query('SELECT lower(trade_name) AS trade_name FROM medications');
-    const existingNames = new Set(existingRes.rows.map((r) => r.trade_name));
-    const seenInFile = new Set<string>();
-    const validRows: MedicationImportRow[] = [];
-    const invalidRows: { rowNumber: number; raw: Record<string, string>; error: string }[] = [];
-    let existing = 0;
-    let duplicateInFile = 0;
-
-    records.forEach((rawRow, idx) => {
-      const rowNumber = idx + 1;
-      const parsed = medicationImportRowSchema.safeParse({
-        trade_name: rawRow.trade_name ?? '',
-        scientific_name: rawRow.scientific_name ?? '',
-        default_dosage: rawRow.default_dosage && rawRow.default_dosage !== '' ? rawRow.default_dosage : null,
-        instructions: rawRow.instructions && rawRow.instructions !== '' ? rawRow.instructions : null,
-      });
-      if (!parsed.success) {
-        invalidRows.push({ rowNumber, raw: rawRow, error: parsed.error.issues.map((i) => i.message).join('؛ ') });
-        return;
-      }
-      const normalized = normalizeRow(rawRow);
-      if (!normalized) { invalidRows.push({ rowNumber, raw: rawRow, error: 'فشل التطبيع' }); return; }
-      const key = normalized.trade_name.toLowerCase();
-      if (existingNames.has(key)) { existing++; return; }
-      if (seenInFile.has(key)) { duplicateInFile++; return; }
-      seenInFile.add(key);
-      validRows.push(normalized);
-    });
-
-    const preview: ImportPreviewResult = {
 // 3) تنفيذ الاستيراد النهائي بـ Transaction
 export const executeMedicationImport = async (req: AuthenticatedRequest, res: Response) => {
   const client = await pool.connect();
@@ -155,7 +123,7 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
     }
     if (!records.length) return res.status(400).json({ message: 'الملف لا يحتوي على صفوف' });
 
-    const fileColumns = Object.keys(records[0]);
+    const fileColumns = Object.keys(records[0] ?? {});
     const missingColumns = ALL_CSV_COLUMNS.filter((c) => !fileColumns.includes(c));
     if (missingColumns.length) return res.status(400).json({ message: `الأعمدة الناقصة: ${missingColumns.join('، ')}`, missingColumns });
 
@@ -214,13 +182,5 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
     return res.status(500).json({ message: 'حدث خطأ أثناء الاستيراد' });
   } finally {
     client.release();
-  }
-};
-      totalRows: records.length, validNew: validRows.length, existing, duplicateInFile, invalid: invalidRows.length, validRows, invalidRows,
-    };
-    return res.status(200).json({ preview });
-  } catch (error: any) {
-    console.error('Validate Medication Import Error:', error);
-    return res.status(500).json({ message: 'حدث خطأ أثناء فحص الملف' });
   }
 };

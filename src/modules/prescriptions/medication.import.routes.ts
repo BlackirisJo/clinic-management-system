@@ -23,12 +23,18 @@ const upload = multer({
 router.use(authenticateJWT);
 
 // تحميل نموذج CSV فارغ
+router.get('/template', requirePermission('VIEW_MEDICATIONS'), generateMedicationTemplate);
+// مسار بديل للتوافق مع أي عميل قديم
 router.get('/import/template', requirePermission('VIEW_MEDICATIONS'), generateMedicationTemplate);
 
 // فحص الملف وإرجاع Preview
+router.post('/validate', requirePermission('MANAGE_MEDICATIONS'), upload.single('file'), validateMedicationImport);
+// مسار بديل للتوافق مع أي عميل قديم
 router.post('/import/validate', requirePermission('MANAGE_MEDICATIONS'), upload.single('file'), validateMedicationImport);
 
 // تنفيذ الاستيراد
+router.post('/', requirePermission('MANAGE_MEDICATIONS'), upload.single('file'), executeMedicationImport);
+// مسار بديل للتوافق مع أي عميل قديم
 router.post('/import', requirePermission('MANAGE_MEDICATIONS'), upload.single('file'), executeMedicationImport);
 
 export default router;
