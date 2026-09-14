@@ -1,0 +1,29 @@
+# ==========================================================
+# Docker build context exclusions
+# Goal: keep secrets and build artifacts OUT of the API image.
+# ==========================================================
+
+# Secrets - must never be baked into the image
+.env
+.env.*
+!**/.env.example
+
+# Dependencies (installed inside the image)
+node_modules/
+frontend/node_modules/
+
+# Build output (built inside the image)
+dist/
+frontend/dist/
+
+# Runtime data (mounted as volumes instead)
+backups/
+uploads/
+
+# Git & logs
+.git/
+.gitignore
+*.log
+
+# Frontend is built and served outside the API image
+frontend/

@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./backups:/secure_backups
@@ -26,6 +26,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=${PORT}
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
       - DB_HOST=postgres_db
       - DB_PORT=5432
       - DB_USER=${DB_USER}

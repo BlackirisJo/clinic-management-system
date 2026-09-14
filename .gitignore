@@ -6,11 +6,14 @@ dist/
 
 # Environment & Keys
 .env
-.env.local
+.env.*
+!.env.example
 
 # Backups & Uploads
-uploads/
-backups/
+# مُرتكزة على الجذر عمداً: النمط غير المُرتكز (backups/) طابق أيضاً
+# src/modules/backups/ وابتلع كود وحدة النسخ الاحتياطي من المستودع!
+/uploads/
+/backups/
 
 # System Files
 *.log
