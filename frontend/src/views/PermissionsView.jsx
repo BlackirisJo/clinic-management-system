@@ -50,18 +50,17 @@ export default function PermissionsView() {
   // فقط عندما يختلف عن ما يعرضه النموذج (تحميل جديد / تبديل دور / حفظ ناجح)،
   // أما نقرات المستخدم المحلية فلا تُمسح لأنها تحدّث selected فوراً.
   useEffect(() => {
-    if (!role) return
-    const serverPerms = [...(role.permissions || [])].sort()
-    setSelected((cur) => {
-      const curSorted = [...cur].sort()
-      const same =
-        curSorted.length === serverPerms.length && curSorted.every((k, i) => k === serverPerms[i])
-      return same ? cur : [...(role.permissions || [])]
-    })
-    setName(role.role_name)
-    setDescription(role.description || '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role])
+  if (!role) {
+    setSelected([])
+    setName('')
+    setDescription('')
+    return
+  }
+
+  setSelected(Array.isArray(role.permissions) ? [...role.permissions] : [])
+  setName(role.role_name || '')
+  setDescription(role.description || '')
+}, [selectedId])
 
   const isProtected = role?.role_name === 'SUPER_ADMIN'
   const isSystem = Boolean(role?.is_system)
@@ -70,26 +69,54 @@ export default function PermissionsView() {
   const toggle = (key) =>
     setSelected((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]))
 
-  const savePermissions = async () => {
-    if (!role) return
-    setBusy(true)
-    try {
-      const res = await api.permissions.setRolePermissions(role.role_id, { permission_keys: selected })
-      flash(res.message || 'تم الحفظ')
-      if (res.role) {
-        setRoles((cur) => cur.map((r) => (r.role_id === res.role.role_id ? res.role : r)))
-        setSelected([...(res.role.permissions || [])])
-      } else {
-        await load(role.role_id)
-      }
-    } catch (e) {
-      flash(e.message, true)
-      // إعادة المزامنة مع الخادم عند الفشل حتى لا تبقى الواجهة على حالة وهمية
-      await load(role.role_id)
-    } finally {
-      setBusy(false)
+const savePermissions = async () => {
+  if (!role) return
+
+  setBusy(true)
+  setError(null)
+  setMessage(null)
+
+  try {
+    const permission_keys = [...new Set(selected)]
+
+    await api.permissions.setRolePermissions(role.role_id, {
+      permission_keys,
+    })
+
+    // مصدر الحقيقة الوحيد بعد الحفظ هو قاعدة البيانات.
+    // لا نعتمد على الحالة المحلية أو على نسخة role القديمة.
+    const result = await api.permissions.roles()
+    const updatedRoles = result.roles || []
+
+    setRoles(updatedRoles)
+
+    const updatedRole = updatedRoles.find(
+      (r) => r.role_id === role.role_id
+    )
+
+    if (!updatedRole) {
+      throw new Error('تعذر العثور على الدور بعد حفظ الصلاحيات')
     }
+
+    setSelected(
+      Array.isArray(updatedRole.permissions)
+        ? [...updatedRole.permissions]
+        : []
+    )
+
+    setName(updatedRole.role_name || '')
+    setDescription(updatedRole.description || '')
+
+    flash('تم حفظ الصلاحيات بنجاح')
+  } catch (e) {
+    flash(e.message || 'تعذر حفظ الصلاحيات', true)
+
+    // في حالة الفشل نعيد تحميل الحالة الحقيقية من الخادم.
+    await load(role.role_id)
+  } finally {
+    setBusy(false)
   }
+}
 
   const saveMeta = async () => {
     if (!role) return
