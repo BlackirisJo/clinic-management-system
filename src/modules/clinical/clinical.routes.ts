@@ -26,9 +26,22 @@ import {
 } from './clinical.validation';
 
 const router = Router();
+
+// رفع مرفقات الزيارات: حد 20MB + فلتر MIME للأنواع الطبية الشائعة فقط.
+// (يُخزَّن الملف باسم عشوائي يولده multer — لا يُستخدم اسم المستخدم في المسار إطلاقاً)
+const ALLOWED_MIME = [
+  'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff',
+  'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain', 'text/csv', 'application/octet-stream',
+];
 const upload = multer({
   dest: 'uploads/visits/',
   limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    const isAllowed = ALLOWED_MIME.includes(file.mimetype?.toLowerCase() ?? '');
+    if (isAllowed) return callback(null, true);
+    return callback(new Error('نوع الملف غير مسموح. الصيغ المقبولة: صور (PNG/JPG/WebP/GIF)، PDF، مستندات Word، وملفات نصية'));
+  },
 });
 
 router.use(authenticateJWT);

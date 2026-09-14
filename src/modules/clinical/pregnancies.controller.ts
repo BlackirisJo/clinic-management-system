@@ -68,8 +68,22 @@ export const listPregnancies = async (req: AuthenticatedRequest, res: Response) 
     const params: unknown[] = [];
     let where = 'TRUE';
     if (patientId) {
+      // أمن: حتى عند الاستعلام بمريض محدد، يجب أن يبقى نطاق العيادات مفروضاً في الخادم.
+      // المستخدم لا يمكنه رؤية سجلات حمل مريضة من خارج عياداته (إلا عبر مشاركة نشطة)،
+      // أو إذا كان مديراً شاملاً (canManageAllClinics).
       params.push(patientId);
       where = `pr.patient_id = $${params.length}`;
+      if (!canManageAllClinics(req)) {
+        const ids = accessibleClinicIds(req) ?? [];
+        if (!ids.length) return res.status(200).json({ pregnancies: [] });
+        params.push(ids);
+        // المريضة يجب أن تنتمي لإحدى عيادات المستخدم أو تكون مشارَكةً إليها بنشاط
+        where += ` AND (p.clinic_id = ANY($${params.length}::int[]) OR EXISTS (
+          SELECT 1 FROM patient_clinic_shares s
+          WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($${params.length}::int[])
+            AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+        ))`;
+      }
     } else if (!canManageAllClinics(req)) {
       const ids = accessibleClinicIds(req) ?? [];
       if (!ids.length) return res.status(200).json({ pregnancies: [] });
@@ -261,6 +275,10 @@ export const createPregnancyVisit = async (req: AuthenticatedRequest, res: Respo
       if (Number(visit.rows[0].patient_id) !== Number(pregnancy.patient_id)) {
         return res.status(400).json({ message: 'الزيارة لا تنتمي لنفس المريضة' });
       }
+    }
+    // تحقق منطقي قبل قاعدة البيانات: ضغط منعكس = خطأ عميل (400) وليس خطأ خادم
+    if (b.systolic !== undefined && b.systolic !== null && b.diastolic !== undefined && b.diastolic !== null && Number(b.systolic) < Number(b.diastolic)) {
+      return res.status(400).json({ message: 'الضغط الانقباضي يجب أن يكون أكبر من أو يساوي الانبساطي' });
     }
     const result = await pool.query(
       `INSERT INTO pregnancy_visits (pregnancy_id, visit_id, visit_date, ga_weeks, ga_days, weight_kg, systolic, diastolic,

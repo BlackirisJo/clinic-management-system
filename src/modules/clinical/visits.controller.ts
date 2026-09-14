@@ -162,6 +162,10 @@ export const addVitalSign = async (req: AuthenticatedRequest, res: Response) => 
   const visit = await requireVisitAccess(req, res, req.params.visitId);
   if (!visit) return;
   const { weight_kg, height_cm, systolic, diastolic, pulse, temperature, respiratory_rate, spo2, pain_score, notes } = req.body;
+  // تحقق منطقي قبل الوصول لقاعدة البيانات: ضغط منعكس (انقباضي < انبساطي) خطأ من العميل وليس خطأ خادم
+  if (systolic !== undefined && systolic !== null && diastolic !== undefined && diastolic !== null && Number(systolic) < Number(diastolic)) {
+    return res.status(400).json({ message: 'الضغط الانقباضي يجب أن يكون أكبر من أو يساوي الانبساطي' });
+  }
   try {
     const result = await pool.query(
       `INSERT INTO vital_signs (visit_id, weight_kg, height_cm, systolic, diastolic, pulse, temperature, respiratory_rate, spo2, pain_score, notes, recorded_by)
@@ -311,9 +315,11 @@ export const createImaging = async (req: AuthenticatedRequest, res: Response) =>
   try {
     const result = await pool.query(
       `INSERT INTO imaging_orders (visit_id, modality, body_part, findings, impression, status, ordered_by, performed_by, completed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $6 = 'COMPLETED' THEN NOW() ELSE NULL END)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [visit.visit_id, modality, body_part ?? null, findings ?? null, impression ?? null, status ?? 'ORDERED', req.user?.userId, status === 'COMPLETED' ? req.user?.userId : null]
+      [visit.visit_id, modality, body_part ?? null, findings ?? null, impression ?? null, status ?? 'ORDERED',
+       req.user?.userId, status === 'COMPLETED' ? req.user?.userId : null,
+       status === 'COMPLETED' ? new Date().toISOString() : null]
     );
     await audit(req.user?.userId, visit.clinic_id, 'IMAGING_ORDER_CREATED', 'VISIT', visit.visit_id, { modality });
     return res.status(201).json({ message: 'تم إنشاء طلب التصوير', imaging: result.rows[0] });
@@ -392,15 +398,52 @@ export const uploadAttachment = async (req: AuthenticatedRequest, res: Response)
   if (!visit) return;
   const file = req.file;
   if (!file) return res.status(400).json({ message: 'لم يتم رفع أي ملف' });
-  const kind = typeof req.body?.kind === 'string' && req.body.kind.trim() ? req.body.kind.trim().slice(0, 50) : 'DOCUMENT';
+  // أنواع المرفقات المسموحة حصراً — تُرفض القيم العشوائية
+  const ALLOWED_KINDS = new Set(['DOCUMENT', 'IMAGE', 'ULTRASOUND', 'LAB_REPORT', 'PRESCRIPTION', 'REFERRAL', 'OTHER']);
+  const rawKind = typeof req.body?.kind === 'string' ? req.body.kind.trim().toUpperCase() : 'DOCUMENT';
+  const kind = ALLOWED_KINDS.has(rawKind) ? rawKind : 'DOCUMENT';
   const pregnancyId = req.body?.pregnancy_id ? Number(req.body.pregnancy_id) : null;
   const ultrasoundId = req.body?.ultrasound_id ? Number(req.body.ultrasound_id) : null;
+  // تعقيم اسم العرض المخزّن (منع تكوين مسار خبيث عند العرض/التنزيل)
+  const safeFileName = (file.originalname || 'attachment').replace(/[\\/]/g, '_').replace(/["\u0000\r\n]/g, '').slice(0, 200);
   try {
+    // أمن وسلامة البيانات: سجل الحمل (إن حُدّد) يجب أن يعود لنفس مريضة هذه الزيارة تماماً،
+    // وفحص السونار (إن حُدّد) يجب أن يعود لنفس سجل الحمل — حتى لا يُربط مرفق بسجلات عيادة/مريض آخر.
+    if (pregnancyId) {
+      const pregnancyCheck = await pool.query(
+        'SELECT 1 FROM pregnancies WHERE pregnancy_id = $1 AND patient_id = $2',
+        [pregnancyId, visit.patient_id]
+      );
+      if (!pregnancyCheck.rowCount) {
+        return res.status(400).json({ message: 'سجل الحمل المحدد غير موجود لهذه المريضة' });
+      }
+      if (ultrasoundId) {
+        const ultrasoundCheck = await pool.query(
+          `SELECT 1 FROM ultrasound_exams us
+           JOIN pregnancies pr ON pr.pregnancy_id = us.pregnancy_id
+           WHERE us.us_id = $1 AND pr.patient_id = $2`,
+          [ultrasoundId, visit.patient_id]
+        );
+        if (!ultrasoundCheck.rowCount) {
+          return res.status(400).json({ message: 'فحص السونار المحدد غير موجود لهذه المريضة' });
+        }
+      }
+    } else if (ultrasoundId) {
+      const ultrasoundCheck = await pool.query(
+        `SELECT 1 FROM ultrasound_exams us
+         JOIN pregnancies pr ON pr.pregnancy_id = us.pregnancy_id
+         WHERE us.us_id = $1 AND pr.patient_id = $2`,
+        [ultrasoundId, visit.patient_id]
+      );
+      if (!ultrasoundCheck.rowCount) {
+        return res.status(400).json({ message: 'فحص السونار المحدد غير موجود لهذه المريضة' });
+      }
+    }
     const result = await pool.query(
       `INSERT INTO attachments (patient_id, visit_id, pregnancy_id, ultrasound_id, kind, file_name, file_path, mime_type, size_bytes, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING attachment_id, patient_id, visit_id, pregnancy_id, ultrasound_id, kind, file_name, mime_type, size_bytes, created_at`,
-      [visit.patient_id, visit.visit_id, pregnancyId, ultrasoundId, kind, file.originalname, file.path, file.mimetype, file.size, req.user?.userId]
+      [visit.patient_id, visit.visit_id, pregnancyId, ultrasoundId, kind, safeFileName, file.path, file.mimetype, file.size, req.user?.userId]
     );
     await audit(req.user?.userId, visit.clinic_id, 'ATTACHMENT_UPLOADED', 'VISIT', visit.visit_id, { kind });
     return res.status(201).json({ message: 'تم رفع المرفق', attachment: result.rows[0] });
@@ -434,9 +477,9 @@ export const downloadAttachment = async (req: AuthenticatedRequest, res: Respons
     }
     if (!allowed) return res.status(404).json({ message: 'المرفق غير موجود أو لا تملك صلاحية الوصول إليه' });
     if (!fs.existsSync(row.file_path)) return res.status(404).json({ message: 'ملف المرفق غير موجود على الخادم' });
-    res.setHeader('Content-Type', row.mime_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(row.file_name)}"`);
-    return res.sendFile(path.resolve(row.file_path));
+    // ملاحظة: res.sendFile حُذفت من Express 5، لذا نستخدم res.download الآمنة رسمياً.
+    const safeFileName = (row.file_name || 'attachment').replace(/[\\/]/g, '_').replace(/["\r\n]/g, '');
+    return res.download(path.resolve(row.file_path), encodeURIComponent(safeFileName));
   } catch (error) {
     console.error('Download Attachment Error:', error);
     return res.status(500).json({ message: 'حدث خطأ عند تنزيل المرفق' });
