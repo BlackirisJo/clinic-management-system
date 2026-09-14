@@ -25,7 +25,37 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
   }
 
   try {
-        // التحقق من عدم وجود تعارض في مواعيد الطبيب لنفس اليوم والوقت (Overlapping Check)
+    // أمن وسلامة البيانات: الطبيب المحدد يجب أن يكون حساباً نشطاً بدور DOCTOR ومسنداً لهذه العيادة
+    // (أساسي أو إسناد إضافي) — لا يمكن حجز طبيب من عيادة أخرى.
+    const doctorMembership = await pool.query(
+      `SELECT 1 FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.status = 'ACTIVE' AND r.role_name = 'DOCTOR' AND (
+         u.clinic_id = $2 OR EXISTS (SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $2)
+       )`,
+      [doctor_id, clinic_id]
+    );
+    if (!doctorMembership.rowCount) {
+      return res.status(400).json({ message: 'الطبيب المحدد غير موجود أو غير مسند لهذه العيادة' });
+    }
+
+    // المريض يجب أن يكون من العيادة نفسها أو مشارَاً إليها بصلاحية كتابة (WRITE) نشطة.
+    const patientOwnership = await pool.query(
+      `SELECT 1 FROM patients p
+       WHERE p.patient_id = $1 AND (
+         p.clinic_id = $2 OR EXISTS (
+           SELECT 1 FROM patient_clinic_shares s
+           WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
+             AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+         )
+       )`,
+      [patient_id, clinic_id]
+    );
+    if (!patientOwnership.rowCount) {
+      return res.status(400).json({ message: 'المريض غير مسجل في هذه العيادة أو غير مشارَك إليها' });
+    }
+
+    // التحقق من عدم وجود تعارض في مواعيد الطبيب لنفس اليوم والوقت (Overlapping Check)
     // يُنفَّذ فقط إذا تم توفير أوقات البداية والنهاية معاً
     if (start_time && end_time) {
     const conflictCheck = await pool.query(
