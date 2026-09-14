@@ -16,6 +16,7 @@ import reportsRoutes from './modules/reports/reports.routes';
 import clinicsRoutes from './modules/clinics/clinics.routes';
 import medicationImportRoutes from './modules/prescriptions/medication.import.routes';
 import clinicalRoutes from './modules/clinical/clinical.routes';
+import permissionsRoutes from './modules/permissions/permissions.routes';
 
 const app: Application = express();
 
@@ -56,6 +57,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/clinics', clinicsRoutes);
 app.use('/api/medications/import', medicationImportRoutes);
 app.use('/api/clinical', clinicalRoutes);
+app.use('/api/permissions', permissionsRoutes);
 
 // معالجة المسارات غير الموجودة (404 Not Found)
 app.use((req: Request, res: Response) => {

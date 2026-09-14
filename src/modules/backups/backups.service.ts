@@ -143,7 +143,9 @@ export const generateEncryptedBackup = async (): Promise<{
   const dbPort = process.env.DB_PORT || '5432';
   const encryptionKey = getBackupKey();
 
-  const dumpCommand = `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} -F p -d ${dbName} -f "${tempSqlPath}"`;
+    // --clean --if-exists: توليد أوامر DROP قبل CREATE — يتيح الاسترجاع فوق قاعدة بيانات تحتوي الجداول والبيانات فعلاً
+  // --no-owner --no-privileges: تجنب أخطاء الملكية/الامتيازات عند اختلاف مستخدم القاعدة بين بيئة النسخ والاسترجاع
+  const dumpCommand = `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} -F p --clean --if-exists --no-owner --no-privileges -d ${dbName} -f "${tempSqlPath}"`;
 
   await execPromise(dumpCommand, {
     env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD },

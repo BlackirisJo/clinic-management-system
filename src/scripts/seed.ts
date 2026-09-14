@@ -33,6 +33,7 @@ const PERMISSIONS = [
   { key: 'VIEW_REPORTS', group: 'Reports', desc: 'عرض التقارير الشاملة للنظام' },
 
   // النسخ الاحتياطي
+    { key: 'MANAGE_PERMISSIONS', group: 'System', desc: 'إدارة الأدوار والصلاحيات وربطها بالمستخدمين' },
   { key: 'MANAGE_BACKUPS', group: 'System', desc: 'إنشاء وتنزيل النسخ الاحتياطية' },
   { key: 'VIEW_BACKUP_LOGS', group: 'System', desc: 'عرض سجلات النسخ الاحتياطي' },
   { key: 'RESTORE_BACKUPS', group: 'System', desc: 'استرجاع النسخ الاحتياطية' },
@@ -46,6 +47,7 @@ const ROLES = [
   { name: 'NURSE', desc: 'ممرض/ممرضة العيادة (متابعة المرضى والمواعيد)' },
   { name: 'ACCOUNTANT', desc: 'المحاسب (الشؤون المالية والتقارير حصرياً)' },
   { name: 'RECEPTIONIST', desc: 'موظف الاستقبال (تسجيل المرضى والزيارات والمواعيد)' },
+  { name: 'FINANCIAL_AUDITOR', desc: 'مدقق مالي (قراءة فقط للفواتير والتقارير المالية والتدقيق)' },
 ];
 
 const ROLE_PERMISSIONS: Record<string, string[]> = {
@@ -53,6 +55,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   NURSE: ['VIEW_PATIENTS', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'VIEW_SHARED_PATIENT_RECORDS', 'MANAGE_PREGNANCY'],
   ACCOUNTANT: ['VIEW_PATIENTS', 'MANAGE_SERVICES', 'CREATE_INVOICE', 'VIEW_INVOICES', 'CREATE_EXPENSE', 'VIEW_FINANCIAL_REPORTS', 'VIEW_REPORTS'],
   RECEPTIONIST: ['VIEW_PATIENTS', 'CREATE_PATIENT', 'CREATE_VISIT', 'VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'VIEW_SHARED_PATIENT_RECORDS'],
+  FINANCIAL_AUDITOR: ['VIEW_INVOICES', 'VIEW_FINANCIAL_REPORTS', 'VIEW_REPORTS'],
 };
 
 const seedDatabase = async () => {
@@ -66,6 +69,8 @@ const seedDatabase = async () => {
 
   try {
     console.log('🌱 بدء زرع البيانات الأولية (Seeding)...');
+    // الحسابات التجريبية (Demo) بكلمات مرور ثابتة مخصصة للتطوير فقط — لا تُنشأ أبداً في الإنتاج
+    const isProduction = process.env.NODE_ENV === 'production';
     await client.query('BEGIN');
 
     // 1. إضافة الصلاحيات
@@ -156,6 +161,7 @@ const seedDatabase = async () => {
     );
 
 
+    if (!isProduction) {
     // 6. إنشاء أطباء تجريبيين للعيادة
     console.log('6. إنشاء أطباء تجريبيين...');
     const doctorRole = await client.query('SELECT role_id FROM roles WHERE role_name = \'DOCTOR\'');
@@ -207,6 +213,7 @@ const seedDatabase = async () => {
         [receptionistRole.rows[0].role_id, defaultClinicId, rec.name, rec.username, receptionistPasswordHash, 'ACTIVE']
       );
     }
+    } // نهاية كتلة الحسابات التجريبية — تُنشأ في التطوير فقط
     await client.query('COMMIT');
     console.log('✅ تم إكمال زرع البيانات بنجاح!');
     console.log('------------------------------------');
