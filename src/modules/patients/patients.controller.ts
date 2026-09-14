@@ -183,10 +183,9 @@ export const getPatientVisits = async (req: AuthenticatedRequest, res: Response)
 export const sharePatientRecord = async (req: AuthenticatedRequest, res: Response) => {
   const { patientId } = req.params;
   const { target_clinic_id, access_level = 'READ', expires_at } = req.body;
-  const ownerClinicId = req.user?.clinicId;
   const userId = req.user?.userId;
 
-  if (ownerClinicId === null || ownerClinicId === undefined || userId === undefined || !target_clinic_id || !expires_at || !['READ', 'WRITE'].includes(access_level)) {
+  if (userId === undefined || !target_clinic_id || !expires_at || !['READ', 'WRITE'].includes(access_level)) {
     return res.status(400).json({ message: 'بيانات المشاركة غير مكتملة أو غير صالحة' });
   }
   const expiry = new Date(expires_at);
@@ -195,11 +194,19 @@ export const sharePatientRecord = async (req: AuthenticatedRequest, res: Respons
   }
 
   try {
-    const patient = await pool.query('SELECT 1 FROM patients WHERE patient_id = $1 AND clinic_id = $2', [patientId, ownerClinicId]);
+    // العيادة المالكة هي عيادة المريض الفعلية دائماً — ويشترط أن تكون ضمن نطاق عيادات المستخدم
+    // (أو يكون المستخدم مديراً شاملاً)، فيمكن للمستخدمين متعددي العيادات المشاركة من أي عيادة مسندة لهم.
+    const patient = await pool.query(
+      `SELECT p.patient_id, p.clinic_id AS owner_clinic_id
+       FROM patients p
+       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]))`,
+      [patientId, accessibleClinicIds(req)]
+    );
     const targetClinic = await pool.query('SELECT 1 FROM clinics WHERE clinic_id = $1 AND is_active = TRUE', [target_clinic_id]);
     if (!patient.rowCount || !targetClinic.rowCount) {
-      return res.status(404).json({ message: 'المريض أو العيادة المستهدفة غير موجودة' });
+      return res.status(404).json({ message: 'المريض أو العيادة المستهدفة غير موجودة أو لا تملك صلاحية المشاركة' });
     }
+    const ownerClinicId = patient.rows[0].owner_clinic_id;
 
     const result = await pool.query(
       `INSERT INTO patient_clinic_shares
@@ -222,8 +229,20 @@ export const sharePatientRecord = async (req: AuthenticatedRequest, res: Respons
 };
 
 export const listPatientShares = async (req: AuthenticatedRequest, res: Response) => {
-  const ownerClinicId = req.user?.clinicId;
   try {
+    // التحقق من إمكانية وصول المستخدم للمريض ضمن كامل نطاق عياداته
+    const patient = await pool.query(
+      `SELECT p.patient_id, p.clinic_id AS owner_clinic_id
+       FROM patients p
+       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares s
+         WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($2::int[])
+           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+       ))`,
+      [req.params.patientId, accessibleClinicIds(req)]
+    );
+    if (!patient.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
+    const ownerClinicId = patient.rows[0].owner_clinic_id;
     const result = await pool.query(
       `SELECT s.share_id, s.patient_id, s.target_clinic_id, c.clinic_name,
               s.access_level, s.status, s.expires_at, s.created_at
@@ -242,11 +261,24 @@ export const listPatientShares = async (req: AuthenticatedRequest, res: Response
 
 export const revokePatientShare = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // التحقق من إمكانية وصول المستخدم للمريض قبل السماح بإلغاء مشاركاته
+    const patient = await pool.query(
+      `SELECT p.patient_id, p.clinic_id AS owner_clinic_id
+       FROM patients p
+       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares s
+         WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($2::int[])
+           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+       ))`,
+      [req.params.patientId, accessibleClinicIds(req)]
+    );
+    if (!patient.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
+    const ownerClinicId = patient.rows[0].owner_clinic_id;
     const result = await pool.query(
       `UPDATE patient_clinic_shares SET status = 'REVOKED', revoked_at = NOW()
        WHERE share_id = $1 AND patient_id = $2 AND owner_clinic_id = $3 AND status = 'ACTIVE'
        RETURNING share_id`,
-      [req.params.shareId, req.params.patientId, req.user?.clinicId]
+      [req.params.shareId, req.params.patientId, ownerClinicId]
     );
     if (!result.rowCount) return res.status(404).json({ message: 'المشاركة النشطة غير موجودة' });
     await pool.query(
@@ -263,19 +295,18 @@ export const revokePatientShare = async (req: AuthenticatedRequest, res: Respons
 
 export const getUnifiedMedicalRecord = async (req: AuthenticatedRequest, res: Response) => {
   const patientId = req.params.patientId;
-  const clinicId = req.user?.clinicId;
+  // النطاق الكامل (null = المدراء يرون كل العيادات) بدل العيادة الأساسية فقط — يدعم الإسنادات المتعددة
+  const clinicIds = accessibleClinicIds(req);
   try {
     const access = await pool.query(
       `SELECT p.patient_id, p.full_name, p.national_id, p.document_type, p.document_number, p.phone, p.gender, p.date_of_birth
        FROM patients p
-       WHERE p.patient_id = $1 AND (
-         p.clinic_id = $2 OR EXISTS (
-           SELECT 1 FROM patient_clinic_shares s
-           WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
-             AND s.status = 'ACTIVE' AND s.expires_at > NOW()
-         )
-       )`,
-      [patientId, clinicId]
+       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares s
+         WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($2::int[])
+           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+       ))`,
+      [patientId, clinicIds]
     );
     if (!access.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
 
@@ -292,7 +323,7 @@ export const getUnifiedMedicalRecord = async (req: AuthenticatedRequest, res: Re
     await pool.query(
       `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
        VALUES ($1, $2, 'PATIENT_RECORD_VIEWED', 'PATIENT', $3)`,
-      [req.user?.userId, clinicId, patientId]
+      [req.user?.userId, req.user?.clinicId, patientId]
     );
     return res.status(200).json({ patient: access.rows[0], visits: visits.rows, prescriptions: prescriptions.rows });
   } catch (error) {
@@ -304,24 +335,18 @@ export const getUnifiedMedicalRecord = async (req: AuthenticatedRequest, res: Re
 // 9. جلب ملف البيانات الطبية التكميلية للمريض (الحساسيات والأمراض المزمنة وغيرها)
 export const getMedicalProfile = async (req: AuthenticatedRequest, res: Response) => {
   const patientId = req.params.patientId;
-  const clinicId = req.user?.clinicId;
-
-  if (clinicId === null || clinicId === undefined) {
-    return res.status(403).json({ message: 'الحساب غير مرتبط بعيادة' });
-  }
+  const clinicIds = accessibleClinicIds(req);
 
   try {
-    // العيادة المالكة أو أي مشاركة نشطة (قراءة/كتابة)
+    // العيادة المالكة أو أي مشاركة نشطة (قراءة/كتابة) ضمن كامل نطاق عيادات المستخدم
     const access = await pool.query(
       `SELECT 1 FROM patients p
-       WHERE p.patient_id = $1 AND (
-         p.clinic_id = $2 OR EXISTS (
-           SELECT 1 FROM patient_clinic_shares s
-           WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
-             AND s.status = 'ACTIVE' AND s.expires_at > NOW()
-         )
-       )`,
-      [patientId, clinicId]
+       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares s
+         WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($2::int[])
+           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+       ))`,
+      [patientId, clinicIds]
     );
     if (!access.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
 
@@ -355,27 +380,24 @@ export const getMedicalProfile = async (req: AuthenticatedRequest, res: Response
 // 10. حفظ/تحديث ملف البيانات الطبية (يكمله الطبيب) — يستبدل الحساسيات والأمراض المزمنة بالكامل حسب مربعات التفعيل
 export const saveMedicalProfile = async (req: AuthenticatedRequest, res: Response) => {
   const patientId = req.params.patientId;
-  const clinicId = req.user?.clinicId;
   const userId = req.user?.userId;
   const { blood_type, current_medications, medical_notes, allergies, chronic_conditions } = req.body;
 
-  if (clinicId === null || clinicId === undefined || userId === undefined) {
-    return res.status(403).json({ message: 'الحساب غير مرتبط بعيادة' });
+  if (userId === undefined) {
+    return res.status(401).json({ message: 'المستخدم غير موثق' });
   }
 
   const client = await pool.connect();
   try {
-    // يُسمح بالتعديل للعيادة المالكة أو عيادة لديها مشاركة كتابة نشطة
+    // يُسمح بالتعديل للعيادة المالكة أو عيادة لديها مشاركة كتابة نشطة — ضمن كامل نطاق عيادات المستخدم
     const access = await client.query(
       `SELECT 1 FROM patients p
-       WHERE p.patient_id = $1 AND (
-         p.clinic_id = $2 OR EXISTS (
-           SELECT 1 FROM patient_clinic_shares s
-           WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
-             AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()
-         )
-       )`,
-      [patientId, clinicId]
+       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares s
+         WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($2::int[])
+           AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+       ))`,
+      [patientId, accessibleClinicIds(req)]
     );
     if (!access.rowCount) {
       client.release();
@@ -420,7 +442,7 @@ export const saveMedicalProfile = async (req: AuthenticatedRequest, res: Respons
     await client.query(
       `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
        VALUES ($1, $2, 'PATIENT_MEDICAL_PROFILE_UPDATED', 'PATIENT', $3)`,
-      [userId, clinicId, patientId]
+      [userId, req.user?.clinicId, patientId]
     );
     await client.query('COMMIT');
 

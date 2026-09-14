@@ -159,7 +159,6 @@ export default function PatientsView() {
 function AddPatientModal({ user, onClose, onSaved }) {
   const isGlobal = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
   const { clinics, loading: clinicsLoading } = useClinicDirectory(true)
-  const userClinicLabel = clinicNameById(clinics, user?.clinicId) || (user?.clinicId ? `العيادة #${user.clinicId}` : '')
   const defaultClinic = useMemo(() => {
     const mine = Number(user?.clinicId)
     if (mine) return String(mine)
@@ -183,7 +182,7 @@ function AddPatientModal({ user, onClose, onSaved }) {
     if (mine && (!form.clinic_id || form.clinic_id === '')) {
       setForm((prev) => ({ ...prev, clinic_id: String(mine.clinic_id) }))
     }
-  }, [clinics, clinicsLoading, user?.clinicId, form.clinic_id])
+  }, [clinics, clinicsLoading, user?.clinicId, form.clinic_id, isGlobal])
 
   async function submit(e) {
     e.preventDefault()
