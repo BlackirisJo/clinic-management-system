@@ -127,6 +127,18 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
       throw new InvoiceCalcError('المريض لا ينتمي إلى أي من عياداتك المسندة');
     }
 
+    // أمن وسلامة البيانات: الزيارة المرتبطة (إن وُجدت) يجب أن تعود لنفس المريض
+    // حتى لا تُربط فاتورة بزيارة مريض آخر.
+    if (visit_id) {
+      const visitCheck = await client.query(
+        `SELECT 1 FROM visits WHERE visit_id = $1 AND patient_id = $2`,
+        [visit_id, patient_id]
+      );
+      if (visitCheck.rows.length !== 1) {
+        throw new InvoiceCalcError('الزيارة المحددة غير موجودة أو لا تنتمي لهذا المريض');
+      }
+    }
+
     // تجميع معرّفات الخدمات والأطباء للتحقق الجماعي (بدون استعلام لكل بند N+1)
     const requestedClinicIds: number[] = [];
     const serviceIds: number[] = [];
@@ -214,11 +226,6 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
 
     await client.query('COMMIT');
     transactionActive = false;
-    try {
-      await pool.query('REFRESH MATERIALIZED VIEW mv_clinic_monthly_kpis');
-    } catch (refreshError) {
-      console.error('KPI refresh failed after invoice commit:', refreshError);
-    }
     await logAudit(receptionist_id, processedItems[0]?.clinic_id ?? req.user?.clinicId, 'INVOICE_CREATED', 'INVOICE', invoiceId, JSON.stringify({ total: totalAmount, net: netAmount }));
 
     return res.status(201).json({
@@ -657,26 +664,54 @@ export const getMonthlyFinancialKPIs = async (req: AuthenticatedRequest, res: Re
   }
   try {
     const result = await pool.query(
-      `SELECT c.clinic_id, c.clinic_name,
-              DATE_TRUNC('month', ii.created_at) AS stat_month,
-              COUNT(DISTINCT i.patient_id)::int AS unique_patients,
-              COUNT(DISTINCT i.visit_id)::int AS total_visits,
-              COALESCE(SUM(ii.price * ii.quantity), 0)::numeric AS total_revenue,
-              COALESCE(SUM(ii.doctor_share), 0)::numeric AS total_doctor_payout,
-              COALESCE(SUM(i.paid_amount) FILTER (WHERE ii.item_id = (
-                        SELECT MIN(x.item_id) FROM invoice_items x WHERE x.invoice_id = ii.invoice_id)), 0)::numeric AS total_paid,
-              COALESCE(SUM(i.net_amount - i.paid_amount) FILTER (WHERE ii.item_id = (
-                        SELECT MIN(x.item_id) FROM invoice_items x WHERE x.invoice_id = ii.invoice_id)), 0)::numeric AS total_outstanding,
-              (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e
-                WHERE e.clinic_id = c.clinic_id AND e.deleted_at IS NULL
-                  AND DATE_TRUNC('month', e.created_at) = DATE_TRUNC('month', MIN(ii.created_at))) AS total_expenses
-       FROM invoice_items ii
-       JOIN invoices i ON i.invoice_id = ii.invoice_id
-       JOIN clinics c ON c.clinic_id = ii.clinic_id
-       WHERE ($1::int[] IS NULL OR ii.clinic_id = ANY($1::int[]))
-         AND ($2::int IS NULL OR ii.clinic_id = $2)
-       GROUP BY c.clinic_id, c.clinic_name, DATE_TRUNC('month', ii.created_at)
-       ORDER BY stat_month DESC`,
+      `WITH item_stats AS (
+          SELECT ii.clinic_id,
+                 DATE_TRUNC('month', ii.created_at) AS stat_month,
+                 COUNT(DISTINCT i.patient_id)::int AS unique_patients,
+                 COUNT(DISTINCT i.visit_id)::int AS total_visits,
+                 SUM(ii.price * ii.quantity)::numeric AS total_revenue,
+                 SUM(ii.doctor_share)::numeric AS total_doctor_payout
+          FROM invoice_items ii
+          JOIN invoices i ON i.invoice_id = ii.invoice_id
+          WHERE ($1::int[] IS NULL OR ii.clinic_id = ANY($1::int[]))
+            AND ($2::int IS NULL OR ii.clinic_id = $2)
+          GROUP BY ii.clinic_id, DATE_TRUNC('month', ii.created_at)
+        ),
+        invoice_payments AS (
+          SELECT DISTINCT ii.clinic_id,
+                 DATE_TRUNC('month', ii.created_at) AS stat_month,
+                 i.paid_amount, i.net_amount
+          FROM invoice_items ii
+          JOIN invoices i ON i.invoice_id = ii.invoice_id
+          WHERE ($1::int[] IS NULL OR ii.clinic_id = ANY($1::int[]))
+            AND ($2::int IS NULL OR ii.clinic_id = $2)
+        ),
+        invoice_totals AS (
+          SELECT clinic_id, stat_month,
+                 SUM(paid_amount)::numeric AS total_paid,
+                 SUM(net_amount - paid_amount)::numeric AS total_outstanding
+          FROM invoice_payments
+          GROUP BY clinic_id, stat_month
+        ),
+        expense_stats AS (
+          SELECT clinic_id, DATE_TRUNC('month', created_at) AS stat_month,
+                 SUM(amount)::numeric AS total_expenses
+          FROM expenses
+          WHERE deleted_at IS NULL
+            AND ($1::int[] IS NULL OR clinic_id = ANY($1::int[]))
+            AND ($2::int IS NULL OR clinic_id = $2)
+          GROUP BY clinic_id, DATE_TRUNC('month', created_at)
+        )
+       SELECT c.clinic_id, c.clinic_name, s.stat_month,
+              s.unique_patients, s.total_visits, s.total_revenue, s.total_doctor_payout,
+              COALESCE(p.total_paid, 0)::numeric AS total_paid,
+              COALESCE(p.total_outstanding, 0)::numeric AS total_outstanding,
+              COALESCE(e.total_expenses, 0)::numeric AS total_expenses
+       FROM item_stats s
+       JOIN clinics c ON c.clinic_id = s.clinic_id
+       LEFT JOIN invoice_totals p ON p.clinic_id = s.clinic_id AND p.stat_month = s.stat_month
+       LEFT JOIN expense_stats e ON e.clinic_id = s.clinic_id AND e.stat_month = s.stat_month
+       ORDER BY s.stat_month DESC`,
       [allowedClinics, filterClinic]
     );
     const kpis = result.rows.map((r) => {

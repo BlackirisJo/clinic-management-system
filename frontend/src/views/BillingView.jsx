@@ -109,7 +109,7 @@ function InvoiceForm() {
     }
     boot()
     return () => { cancelled = true }
-  }, [])
+  }, [user?.clinicId])
 
   function addItem() {
     const defClinic = user?.clinicId || clinics[0]?.clinic_id || ''
