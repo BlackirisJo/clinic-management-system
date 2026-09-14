@@ -215,6 +215,15 @@ export const api = {
     create: (body) => request('/api/users', { method: 'POST', body }),
     update: (id, body) => request(`/api/users/${id}`, { method: 'PATCH', body }),
   },
+  permissions: {
+    options: () => request('/api/permissions/options'),
+    roles: () => request('/api/permissions/roles'),
+    createRole: (body) => request('/api/permissions/roles', { method: 'POST', body }),
+    updateRole: (id, body) => request(`/api/permissions/roles/${id}`, { method: 'PUT', body }),
+    setRolePermissions: (id, body) => request(`/api/permissions/roles/${id}/permissions`, { method: 'PUT', body }),
+    setRoleStatus: (id, body) => request(`/api/permissions/roles/${id}/status`, { method: 'PATCH', body }),
+    deleteRole: (id) => request(`/api/permissions/roles/${id}`, { method: 'DELETE' }),
+  },
   reports: {
     overview: (params) => request('/api/reports/overview', { params }),
     financial: (params) => request('/api/reports/financial', { params }),

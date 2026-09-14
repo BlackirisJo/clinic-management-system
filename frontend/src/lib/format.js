@@ -81,6 +81,7 @@ export const ROLE_LABELS = {
   NURSE: 'ممرض/ة',
   ACCOUNTANT: 'محاسب',
   RECEPTIONIST: 'استقبال',
+  FINANCIAL_AUDITOR: 'مدقق مالي',
 }
 
 export const USER_STATUS = {

@@ -1,6 +1,8 @@
 FROM node:20-alpine
 
-RUN apk add --no-cache postgresql-client openssl
+# postgresql16-client: مطابقة إصدار العميل مع سيرفر postgres:16 في docker-compose
+# (عميل أحدث يصدر SET transaction_timeout غير مدعوم في PG16 ويفشل الاسترجاع)
+RUN apk add --no-cache postgresql16-client openssl
 
 WORKDIR /app
 

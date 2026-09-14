@@ -12,15 +12,22 @@ export const NAV_ITEMS = [
   { id: 'clinics', label: 'العيادات', icon: '⌗', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
   { id: 'users', label: 'المستخدمون', icon: '♙', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
   { id: 'backups', label: 'النسخ الاحتياطية', icon: '♺', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
+  { id: 'permissions', label: 'إدارة الصلاحيات', icon: '☰', permission: 'MANAGE_PERMISSIONS' },
 ]
 
-// تصفية عناصر القائمة حسب دور المستخدم الحالي
-export const navItemsForRole = (roleName) => NAV_ITEMS.filter((item) => item.roles.includes(roleName))
+// تصفية عناصر القائمة حسب دور المستخدم وصلاحياته (الأدوار الإدارية ترى كل شيء)
+export const navItemsForRole = (roleName, permissions = []) =>
+  NAV_ITEMS.filter(
+    (item) =>
+      (item.roles && item.roles.includes(roleName)) ||
+      (item.permission &&
+        (roleName === 'SUPER_ADMIN' || roleName === 'SYSTEM_ADMIN' || permissions.includes(item.permission)))
+  )
 
 export default function Layout({ active, onNavigate, children }) {
   const { user, logout } = useAuth()
   const roleLabel = user?.roleName ? ROLE_LABELS[user.roleName] || user.roleName : 'مستخدم'
-  const visibleItems = navItemsForRole(user?.roleName)
+  const visibleItems = navItemsForRole(user?.roleName, user?.permissions || [])
 
   return (
     <div className="app-shell">

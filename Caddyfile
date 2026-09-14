@@ -1,0 +1,27 @@
+# ============================================
+# Caddy Reverse Proxy — الإنتاج (المرحلة 11)
+# HTTPS تلقائي (Let's Encrypt) + تحويل HTTP -> HTTPS تلقائياً
+# يُشغَّل مع: docker compose --profile production up -d
+# المطلوب: ضبط DOMAIN في ملف .env (مثال: clinic.example.com)
+# ملاحظة: شهادات TLS تُخزن في volume (caddy_data) خارج Git والصور
+# ============================================
+{
+    # email admin@example.com   <- فعّل وضع بريدك لاستلام إشعارات Let's Encrypt
+}
+
+{$DOMAIN} {
+    # تمرير الـ API والـ health check إلى الخلفية عبر شبكة Docker الداخلية
+    handle /api/* {
+        reverse_proxy node_api:3000
+    }
+    handle /health {
+        reverse_proxy node_api:3000
+    }
+
+    # خدمة الواجهة الأمامية (SPA مبنية في frontend/dist)
+    handle {
+        root * /srv/www
+        try_files {path} /index.html
+        file_server
+    }
+}

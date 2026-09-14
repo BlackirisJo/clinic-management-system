@@ -23,7 +23,8 @@ services:
     container_name: clinic_node_api
     restart: always
     ports:
-      - "3000:3000"
+      # مرتبط على localhost فقط — الوصول العام يتم عبر Reverse Proxy (Caddy) في الإنتاج
+      - "127.0.0.1:3000:3000"
     environment:
       - PORT=${PORT}
       - CORS_ORIGIN=${CORS_ORIGIN:-}
@@ -45,5 +46,27 @@ services:
       postgres_db:
         condition: service_healthy
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: clinic_caddy
+    restart: always
+    # يُشغَّل فقط مع --profile production — التطوير المحلي يبقى على 3000/5173 (المرحلة 11.5)
+    profiles: ["production"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv/www:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - node_api
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

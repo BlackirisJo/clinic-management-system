@@ -68,10 +68,19 @@ export function AuthProvider({ children }) {
   }, [clearSession])
 
   return (
-    <AuthContext.Provider value={{ token, user, initializing, login, logout, refresh }}>
+    <AuthContext.Provider
+      value={{ token, user, initializing, login, logout, refresh, hasPermission: (key) => hasPermission(user, key) }}
+    >
       {children}
     </AuthContext.Provider>
   )
+}
+
+// نظام صلاحيات مركزي للواجهة (مرحلة 18) — لتحسين UX فقط، الحماية الحقيقية في الخادم
+export function hasPermission(user, permissionKey) {
+  if (!user) return false
+  if (user.roleName === 'SUPER_ADMIN' || user.roleName === 'SYSTEM_ADMIN') return true
+  return (user.permissions || []).includes(permissionKey)
 }
 
 export function useAuth() {

@@ -13,6 +13,7 @@ import ReportsView from './views/ReportsView'
 import UsersView from './views/UsersView'
 import BackupsView from './views/BackupsView'
 import ClinicsView from './views/ClinicsView'
+import PermissionsView from './views/PermissionsView'
 
 const VIEWS = {
   overview: OverviewView,
@@ -24,6 +25,7 @@ const VIEWS = {
   clinics: ClinicsView,
   users: UsersView,
   backups: BackupsView,
+  permissions: PermissionsView,
 }
 
 function Shell() {
@@ -45,7 +47,7 @@ function Shell() {
   }
 
   // الافتراضي أول قسم مسموح لدور المستخدم (الطبيب يبدأ بالمرضى، المحاسب بالنظرة العامة...)
-  const allowed = navItemsForRole(user?.roleName)
+  const allowed = navItemsForRole(user?.roleName, user?.permissions || [])
   const current = allowed.some((item) => item.id === active) ? active : (allowed[0]?.id || 'patients')
   const ActiveView = VIEWS[current] || PatientsView
   return (

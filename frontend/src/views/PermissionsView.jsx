@@ -1,0 +1,219 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { api } from '../lib/api'
+import { useAuth, hasPermission } from '../auth/AuthContext'
+import { ROLE_LABELS } from '../lib/format'
+
+// صفحة إدارة الصلاحيات (المرحلة 3) — إدارة الأدوار والصلاحيات من داخل النظام بدون تعديل الكود
+// الظهور مشروط بصلاحية MANAGE_PERMISSIONS، والحماية الحقيقية والنهائية في الخادم
+export default function PermissionsView() {
+  const { user } = useAuth()
+  const [groups, setGroups] = useState([])
+  const [roles, setRoles] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
+  const [selected, setSelected] = useState([])
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [newRoleName, setNewRoleName] = useState('')
+  const [newRoleDesc, setNewRoleDesc] = useState('')
+  const [message, setMessage] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const flash = (msg, isError = false) => {
+    setError(isError ? msg : null)
+    setMessage(isError ? null : msg)
+  }
+
+  const load = useCallback(async (keepId) => {
+    setBusy(true)
+    try {
+      const [opt, rls] = await Promise.all([api.permissions.options(), api.permissions.roles()])
+      setGroups(opt.groups || [])
+      const list = rls.roles || []
+      setRoles(list)
+      setSelectedId((cur) => {
+        const want = keepId ?? cur
+        return want && list.some((r) => r.role_id === want) ? want : (list[0]?.role_id ?? null)
+      })
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const role = useMemo(() => roles.find((r) => r.role_id === selectedId) || null, [roles, selectedId])
+
+  useEffect(() => {
+    if (!role) return
+    setSelected([...(role.permissions || [])])
+    setName(role.role_name)
+    setDescription(role.description || '')
+  }, [role])
+
+  const isProtected = role?.role_name === 'SUPER_ADMIN'
+  const isSystem = Boolean(role?.is_system)
+  const canManage = hasPermission(user, 'MANAGE_PERMISSIONS')
+
+  const toggle = (key) =>
+    setSelected((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]))
+
+  const savePermissions = async () => {
+    if (!role) return
+    setBusy(true)
+    try {
+      const res = await api.permissions.setRolePermissions(role.role_id, { permission_keys: selected })
+      flash(res.message || 'تم الحفظ')
+      await load(role.role_id)
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveMeta = async () => {
+    if (!role) return
+    setBusy(true)
+    try {
+      const res = await api.permissions.updateRole(role.role_id, { role_name: name, description })
+      flash(res.message || 'تم التحديث')
+      await load(role.role_id)
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggleActive = async () => {
+    if (!role) return
+    setBusy(true)
+    try {
+      const res = await api.permissions.setRoleStatus(role.role_id, { is_active: !role.is_active })
+      flash(res.message || 'تم التحديث')
+      await load(role.role_id)
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeRole = async () => {
+    if (!role || !window.confirm(`حذف الدور "${role.role_name}" نهائياً؟`)) return
+    setBusy(true)
+    try {
+      const res = await api.permissions.deleteRole(role.role_id)
+      flash(res.message || 'تم الحذف')
+      setSelectedId(null)
+      await load()
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const createRole = async () => {
+    if (!newRoleName.trim()) return flash('أدخل اسم الدور أولاً (أحرف إنجليزية كبيرة)', true)
+    setBusy(true)
+    try {
+      const res = await api.permissions.createRole({ role_name: newRoleName.trim(), description: newRoleDesc.trim() })
+      flash(res.message || 'تم الإنشاء')
+      setNewRoleName('')
+      setNewRoleDesc('')
+      await load(res.role_id)
+    } catch (e) {
+      flash(e.message, true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!canManage) {
+    return <div>لا تمتلك صلاحية إدارة الصلاحيات</div>
+  }
+
+  return (
+    <div>
+      {message && <div>{message}</div>}
+      {error && <div style={{ color: '#b00020' }}>{error}</div>}
+      {busy && <p>جارِ التنفيذ...</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, alignItems: 'start' }}>
+        <aside>
+          <h3 style={{ margin: '4px 0 8px' }}>الأدوار</h3>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {roles.map((r) => (
+              <li key={r.role_id}>
+                <button
+                  onClick={() => setSelectedId(r.role_id)}
+                  style={{
+                    width: '100%', textAlign: 'start',
+                    fontWeight: r.role_id === selectedId ? '700' : '400',
+                    opacity: r.is_active ? 1 : 0.55,
+                  }}
+                >
+                  {ROLE_LABELS[r.role_name] || r.role_name}
+                  {r.is_system ? ' ★' : ''}
+                  {!r.is_active ? ' (معطل)' : ''}
+                  <small> — {r.users_count} مستخدم</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
+            <strong>دور جديد</strong>
+            <input placeholder="ROLE_NAME" value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} />
+            <input placeholder="وصف الدور" value={newRoleDesc} onChange={(e) => setNewRoleDesc(e.target.value)} />
+            <button onClick={createRole} disabled={busy}>+ إنشاء دور</button>
+          </div>
+        </aside>
+        <section>
+          {!role ? (
+            <p>اختر دوراً من القائمة لعرض صلاحياته</p>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                <input value={name} disabled={isSystem} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 220 }} />
+                <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="وصف الدور" style={{ flex: 1, minWidth: 160 }} />
+                <button onClick={saveMeta} disabled={busy || (isSystem && name !== role.role_name)}>حفظ البيانات</button>
+                {!isSystem && (
+                  <>
+                    <button onClick={toggleActive} disabled={busy}>{role.is_active ? 'تعطيل' : 'تفعيل'}</button>
+                    <button onClick={removeRole} disabled={busy || role.users_count > 0}>حذف</button>
+                  </>
+                )}
+              </div>
+              {role.users_count > 0 && !isSystem && <p><small>لا يمكن حذف الدور لارتباطه بحسابات — زر الحذف معطل</small></p>}
+              {isProtected && <p>⚠️ دور SUPER_ADMIN محمي — لا يمكن تعديل صلاحياته أو اسمه (حماية من انغلاق النظام)</p>}
+              <div>
+                {groups.map((g) => (
+                  <fieldset key={g.group} style={{ marginTop: 10 }}>
+                    <legend><strong>{g.group}</strong></legend>
+                    {g.permissions.map((p) => (
+                      <label key={p.key} style={{ display: 'block', margin: '3px 0' }}>
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(p.key)}
+                          disabled={isProtected || busy}
+                          onChange={() => toggle(p.key)}
+                        />
+                        {' '}<code>{p.key}</code>{p.description ? ` — ${p.description}` : ''}
+                      </label>
+                    ))}
+                  </fieldset>
+                ))}
+              </div>
+              <button onClick={savePermissions} disabled={isProtected || busy} style={{ marginTop: 12 }}>
+                💾 حفظ الصلاحيات
+              </button>
+            </>
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}
