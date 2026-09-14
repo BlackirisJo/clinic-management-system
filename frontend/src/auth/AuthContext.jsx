@@ -15,6 +15,13 @@ export function AuthProvider({ children }) {
     setUser(null)
   }, [])
 
+  // تحديث بيانات المستخدم من الخادم (مثل مسح علامة is_force_password_change بعد تغيير كلمة المرور)
+  const refresh = useCallback(async () => {
+    const me = await api.auth.me()
+    setUser(me.user)
+    return me.user
+  }, [])
+
   // مزامنة التوكن مع طبقة الـ API
   useEffect(() => {
     setAuthToken(token)
@@ -61,7 +68,7 @@ export function AuthProvider({ children }) {
   }, [clearSession])
 
   return (
-    <AuthContext.Provider value={{ token, user, initializing, login, logout }}>
+    <AuthContext.Provider value={{ token, user, initializing, login, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   )

@@ -103,6 +103,7 @@ export const api = {
     me: () => request('/api/auth/me'),
     logout: () => request('/api/auth/logout', { method: 'POST' }),
     logoutAll: () => request('/api/auth/logout-all', { method: 'POST' }),
+    changePassword: (body) => request('/api/auth/change-password', { method: 'POST', body }),
   },
   patients: {
     list: (params) => request('/api/patients', { params }),

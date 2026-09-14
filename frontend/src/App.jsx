@@ -3,6 +3,7 @@ import './App.css'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import Login from './components/Login'
 import Layout, { navItemsForRole } from './components/Layout'
+import ChangePasswordModal from './components/ChangePasswordModal'
 import OverviewView from './views/OverviewView'
 import PatientsView from './views/PatientsView'
 import AppointmentsView from './views/AppointmentsView'
@@ -26,7 +27,7 @@ const VIEWS = {
 }
 
 function Shell() {
-  const { user, initializing } = useAuth()
+  const { user, initializing, refresh } = useAuth()
   const [active, setActive] = useState(null)
 
   if (initializing) {
@@ -37,6 +38,11 @@ function Shell() {
     )
   }
   if (!user) return <Login />
+
+  // الحسابات المؤقتة يُجبر مستخدمها على تغيير كلمة المرور قبل أي عمل آخر
+  if (user.is_force_password_change) {
+    return <ChangePasswordModal onDone={() => refresh()} />
+  }
 
   // الافتراضي أول قسم مسموح لدور المستخدم (الطبيب يبدأ بالمرضى، المحاسب بالنظرة العامة...)
   const allowed = navItemsForRole(user?.roleName)

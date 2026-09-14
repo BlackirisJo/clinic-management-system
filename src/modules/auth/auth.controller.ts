@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../../config/database';
-import { comparePassword, generateToken } from '../../utils/auth';
+import { comparePassword, generateToken, hashPassword } from '../../utils/auth';
 import jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
 
@@ -68,4 +68,62 @@ export const logout = async (req: AuthenticatedRequest, res: Response) => {
 export const logoutAll = async (req: AuthenticatedRequest, res: Response) => {
   await pool.query('UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [req.user?.userId]);
   return res.status(200).json({ message: 'تم إنهاء جميع الجلسات بنجاح' });
+};
+
+// تغيير كلمة المرور (يتطلب كلمة المرور الحالية) — يُصفّر is_force_password_change
+// ويُلغي بقية الجلسات النشطة كإجراء أمني.
+export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
+  const { current_password, new_password } = req.body;
+  const userId = req.user?.userId;
+
+  if (typeof current_password !== 'string' || !current_password) {
+    return res.status(400).json({ message: 'كلمة المرور الحالية مطلوبة' });
+  }
+  if (typeof new_password !== 'string' || new_password.length < 12 || new_password.length > 128) {
+    return res.status(400).json({ message: 'كلمة المرور الجديدة يجب أن تكون بين 12 و 128 حرفاً' });
+  }
+  if (new_password === current_password) {
+    return res.status(400).json({ message: 'كلمة المرور الجديدة يجب أن تختلف عن الحالية' });
+  }
+
+  try {
+    const userResult = await pool.query(
+      'SELECT password_hash, status, username FROM users WHERE user_id = $1',
+      [userId]
+    );
+    if (!userResult.rowCount) return res.status(404).json({ message: 'المستخدم غير موجود' });
+    const user = userResult.rows[0];
+    if (user.status !== 'ACTIVE') return res.status(403).json({ message: 'الحساب غير فعال' });
+
+    const isCurrentValid = await comparePassword(current_password, user.password_hash);
+    if (!isCurrentValid) {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, metadata)
+         VALUES ($1, $2, 'PASSWORD_CHANGE_FAILED', 'AUTH', $3)`,
+        [userId, req.user?.clinicId, JSON.stringify({ ip: req.ip })]
+      );
+      return res.status(400).json({ message: 'كلمة المرور الحالية غير صحيحة' });
+    }
+
+    const newHash = await hashPassword(new_password);
+    await pool.query(
+      `UPDATE users SET password_hash = $1, is_force_password_change = FALSE, updated_at = NOW() WHERE user_id = $2`,
+      [newHash, userId]
+    );
+    // إلغاء جميع الجلسات الأخرى (تبقى الجلسة الحالية ليتابع المستخدم عمله)
+    await pool.query(
+      `UPDATE user_sessions SET revoked_at = NOW()
+       WHERE user_id = $1 AND revoked_at IS NULL AND jti <> $2`,
+      [userId, req.authToken?.jti]
+    );
+    await pool.query(
+      `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)
+       VALUES ($1, $2, 'PASSWORD_CHANGED', 'AUTH', $3)`,
+      [userId, req.user?.clinicId, userId]
+    );
+    return res.status(200).json({ message: 'تم تغيير كلمة المرور بنجاح' });
+  } catch (error) {
+    console.error('Change Password Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم أثناء تغيير كلمة المرور' });
+  }
 };
