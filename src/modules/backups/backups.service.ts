@@ -1,0 +1,224 @@
+import { exec } from 'child_process';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import util from 'util';
+import { pool } from '../../config/database';
+
+const execPromise = util.promisify(exec);
+
+export const BACKUP_DIR = process.env.BACKUP_DIR || path.join(process.cwd(), 'backups');
+const ALGORITHM = 'aes-256-gcm';
+
+// Ensures a path stays inside BACKUP_DIR (path traversal protection) and
+// returns its absolute form. Throws when the path escapes the backup dir.
+export const resolveSafeBackupPath = (filePath: string): string => {
+  const backupRoot = path.resolve(BACKUP_DIR);
+  const resolved = path.resolve(filePath);
+  const relative = path.relative(backupRoot, resolved);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('مسار ملف النسخة الاحتياطية غير صالح');
+  }
+  return resolved;
+};
+let restoreInProgress = false;
+
+const getBackupKey = (): string => {
+  if (!process.env.BACKUP_ENCRYPTION_KEY) {
+    throw new Error('BACKUP_ENCRYPTION_KEY is required');
+  }
+  return process.env.BACKUP_ENCRYPTION_KEY;
+};
+
+if (!fs.existsSync(BACKUP_DIR)) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+
+export const cleanupOldBackups = async (): Promise<void> => {
+  const retentionDays = Math.max(1, Number(process.env.BACKUP_RETENTION_DAYS) || 30);
+  const result = await pool.query(
+    `SELECT backup_id, file_path FROM backup_logs WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+    [retentionDays]
+  );
+  for (const backup of result.rows) {
+    let safePath: string;
+    try {
+      safePath = resolveSafeBackupPath(backup.file_path);
+    } catch {
+      // Path outside the backup directory - never touch files outside scope
+      await pool.query('DELETE FROM backup_logs WHERE backup_id = $1', [backup.backup_id]);
+      continue;
+    }
+    if (fs.existsSync(safePath)) fs.unlinkSync(safePath);
+    // حذف ملف الوصف الجانبي المرافق إن وجد
+    const metaPath = `${safePath}.meta.json`;
+    if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
+    await pool.query('DELETE FROM backup_logs WHERE backup_id = $1', [backup.backup_id]);
+  }
+};
+
+// 1. تشفير الملف بـ AES-256-GCM
+export const encryptFile = (
+  inputPath: string,
+  outputPath: string,
+  secretKey: string
+): Promise<{ iv: string; authTag: string }> => {
+  return new Promise((resolve, reject) => {
+    const key = crypto.scryptSync(secretKey, 'salt', 32);
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+
+    const input = fs.createReadStream(inputPath);
+    const output = fs.createWriteStream(outputPath);
+
+    input.pipe(cipher).pipe(output);
+
+    output.on('finish', () => {
+      const authTag = cipher.getAuthTag().toString('hex');
+      resolve({
+        iv: iv.toString('hex'),
+        authTag,
+      });
+    });
+
+    output.on('error', (err) => reject(err));
+    input.on('error', (err) => reject(err));
+    cipher.on('error', (err) => reject(err));
+  });
+};
+
+// 2. فك تشفير الملف بـ AES-256-GCM
+export const decryptFile = (
+  inputPath: string,
+  outputPath: string,
+  secretKey: string,
+  ivHex: string,
+  authTagHex: string
+): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const key = crypto.scryptSync(secretKey, 'salt', 32);
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(authTag);
+
+    const input = fs.createReadStream(inputPath);
+    const output = fs.createWriteStream(outputPath);
+
+    input.pipe(decipher).pipe(output);
+
+    output.on('finish', () => resolve());
+    output.on('error', (err) => reject(err));
+    input.on('error', (err) => reject(err));
+    decipher.on('error', (err) => reject(err));
+  });
+};
+
+// 3.1 كتابة ملف وصف جانبي بجانب النسخة المشفرة حتى تبقى قابلة للاسترجاع
+// حتى في سيناريو فقدان قاعدة البيانات بالكامل (لا يعتمد فك التشفير على backup_logs فقط).
+// iv و auth_tag ليسا سريين (GCM) — السر هو BACKUP_ENCRYPTION_KEY في متغيرات البيئة فقط.
+export const writeBackupMetaFile = (
+  encryptedPath: string,
+  meta: Record<string, unknown>
+): void => {
+  fs.writeFileSync(`${encryptedPath}.meta.json`, JSON.stringify(meta, null, 2), { mode: 0o600 });
+};
+
+// 3. إنتاج نسخة احتياطية مشفرة
+export const generateEncryptedBackup = async (): Promise<{
+  filePath: string;
+  fileSize: number;
+  checksum: string;
+  iv: string;
+  authTag: string;
+}> => {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const tempSqlPath = path.join(BACKUP_DIR, `dump_${timestamp}.sql`);
+  const encryptedPath = path.join(BACKUP_DIR, `backup_${timestamp}.enc`);
+
+  const dbUser = process.env.DB_USER || 'postgres';
+  const dbHost = process.env.DB_HOST || 'localhost';
+  const dbName = process.env.DB_NAME || 'clinic_db';
+  const dbPort = process.env.DB_PORT || '5432';
+  const encryptionKey = getBackupKey();
+
+  const dumpCommand = `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} -F p -d ${dbName} -f "${tempSqlPath}"`;
+
+  await execPromise(dumpCommand, {
+    env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD },
+  });
+
+  const { iv, authTag } = await encryptFile(tempSqlPath, encryptedPath, encryptionKey);
+
+  if (fs.existsSync(tempSqlPath)) {
+    fs.unlinkSync(tempSqlPath);
+  }
+
+  const fileBuffer = fs.readFileSync(encryptedPath);
+  const checksum = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+  const stats = fs.statSync(encryptedPath);
+
+  // وصف جانبي ذاتي الكفاية لكل نسخة (استرجاع الكوارث من الملفات وحدها)
+  writeBackupMetaFile(encryptedPath, {
+    file: path.basename(encryptedPath),
+    algorithm: ALGORITHM,
+    iv,
+    auth_tag: authTag,
+    checksum,
+    file_size_bytes: stats.size,
+    database: dbName,
+    created_at: new Date().toISOString(),
+  });
+
+  return {
+    filePath: encryptedPath,
+    fileSize: stats.size,
+    checksum,
+    iv,
+    authTag,
+  };
+};
+
+// 4. استرجاع قاعدة البيانات من الملف
+export const restoreEncryptedBackup = async (
+  encryptedFilePath: string,
+  ivHex: string,
+  authTagHex: string,
+  expectedChecksum?: string
+): Promise<void> => {
+  const safeFilePath = resolveSafeBackupPath(encryptedFilePath);
+  if (!fs.existsSync(safeFilePath)) {
+    throw new Error('ملف النسخة الاحتياطية غير موجود');
+  }
+  if (restoreInProgress) throw new Error('A backup restore is already in progress');
+  if (expectedChecksum) {
+    const checksum = crypto.createHash('sha256').update(fs.readFileSync(safeFilePath)).digest('hex');
+    if (checksum !== expectedChecksum) throw new Error('Backup checksum verification failed');
+  }
+  restoreInProgress = true;
+
+  const timestamp = Date.now();
+  const tempSqlPath = path.join(BACKUP_DIR, `restore_temp_${timestamp}.sql`);
+  const encryptionKey = getBackupKey();
+
+  const dbUser = process.env.DB_USER || 'postgres';
+  const dbHost = process.env.DB_HOST || 'localhost';
+  const dbName = process.env.DB_NAME || 'clinic_db';
+  const dbPort = process.env.DB_PORT || '5432';
+
+  try {
+    await decryptFile(safeFilePath, tempSqlPath, encryptionKey, ivHex, authTagHex);
+
+    const restoreCommand = `psql --set=ON_ERROR_STOP=1 --single-transaction -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -f "${tempSqlPath}"`;
+
+    await execPromise(restoreCommand, {
+      env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD },
+    });
+  } finally {
+    if (fs.existsSync(tempSqlPath)) {
+      fs.unlinkSync(tempSqlPath);
+    }
+    restoreInProgress = false;
+  }
+};
