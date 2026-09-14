@@ -46,11 +46,21 @@ export default function PermissionsView() {
 
   const role = useMemo(() => roles.find((r) => r.role_id === selectedId) || null, [roles, selectedId])
 
+  // المفتاح الذي يعكس صلاحيات الخادم للدور المحدد — نزامن النموذج مع الخادم
+  // فقط عندما يختلف عن ما يعرضه النموذج (تحميل جديد / تبديل دور / حفظ ناجح)،
+  // أما نقرات المستخدم المحلية فلا تُمسح لأنها تحدّث selected فوراً.
   useEffect(() => {
     if (!role) return
-    setSelected([...(role.permissions || [])])
+    const serverPerms = [...(role.permissions || [])].sort()
+    setSelected((cur) => {
+      const curSorted = [...cur].sort()
+      const same =
+        curSorted.length === serverPerms.length && curSorted.every((k, i) => k === serverPerms[i])
+      return same ? cur : [...(role.permissions || [])]
+    })
     setName(role.role_name)
     setDescription(role.description || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role])
 
   const isProtected = role?.role_name === 'SUPER_ADMIN'
@@ -66,9 +76,16 @@ export default function PermissionsView() {
     try {
       const res = await api.permissions.setRolePermissions(role.role_id, { permission_keys: selected })
       flash(res.message || 'تم الحفظ')
-      await load(role.role_id)
+      if (res.role) {
+        setRoles((cur) => cur.map((r) => (r.role_id === res.role.role_id ? res.role : r)))
+        setSelected([...(res.role.permissions || [])])
+      } else {
+        await load(role.role_id)
+      }
     } catch (e) {
       flash(e.message, true)
+      // إعادة المزامنة مع الخادم عند الفشل حتى لا تبقى الواجهة على حالة وهمية
+      await load(role.role_id)
     } finally {
       setBusy(false)
     }

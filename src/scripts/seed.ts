@@ -116,14 +116,13 @@ const seedDatabase = async () => {
       const roleResult = await client.query('SELECT role_id FROM roles WHERE role_name = $1', [roleName]);
       const roleId = roleResult.rows[0]?.role_id;
       if (!roleId) continue;
-      // مزامنة صلاحيات الدور: حذف أي صلاحية لم تعد مدرجة في المصفوفة أعلاه
-      await client.query(
-        `DELETE FROM role_permissions rp
-         USING permissions p
-         WHERE rp.permission_id = p.permission_id AND rp.role_id = $1
-           AND NOT (p.permission_key = ANY($2::text[]))`,
-        [roleId, permissionKeys]
-      );
+      // المزامنة لمرة واحدة فقط عند أول إنشاء للدور: إذا كان الدور يملك صلاحيات
+      // مخصصة من قبل (عُدّلت عبر واجهة إدارة الصلاحيات) فلا نلمسها — التخصيص
+      // عبر الواجهة هو مصدر الحقيقة بعد الإنشاء الأول.
+      const existing = await client.query('SELECT COUNT(*)::int AS cnt FROM role_permissions WHERE role_id = $1', [
+        roleId,
+      ]);
+      if ((existing.rows[0] as { cnt: number }).cnt > 0) continue;
       for (const permissionKey of permissionKeys) {
         await client.query(
           `INSERT INTO role_permissions (role_id, permission_id)

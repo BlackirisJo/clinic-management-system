@@ -241,11 +241,12 @@ export const setRolePermissions = async (req: AuthenticatedRequest, res: Respons
     }
     await assertSystemKeepsPermissionManager(client);
     await client.query('COMMIT');
+    const updated = await getRoleById(roleId);
     await logAudit(req.user?.userId, 'PERMISSION_CHANGED', 'ROLE', roleId, {
       role_name: role.role_name,
       permissions_count: permission_keys.length,
     });
-    return res.json({ message: 'تم حفظ صلاحيات الدور بنجاح' });
+    return res.json({ message: 'تم حفظ صلاحيات الدور بنجاح', role: updated });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     const lockoutMessage = isLockoutError(error);
