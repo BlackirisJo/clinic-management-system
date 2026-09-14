@@ -1,7 +1,11 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// مهم: أعمدة DATE (نوع pg 1082) تُرجع كنص خالص YYYY-MM-DD بدل كائن Date يتحول حسب منطقة
+// الخادم الزمنية (كان يسبب إزاحة يوماً واحداً في الصيغ المرسلة للواجهة مثل appointment_date/edd_date).
+types.setTypeParser(1082, (value: string) => value);
 
 export const pool = new Pool({
   host: process.env.DB_HOST,

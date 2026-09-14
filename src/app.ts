@@ -64,8 +64,12 @@ app.use((req: Request, res: Response) => {
 
 // معالج الأخطاء العام (Global Error Handler)
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  if (err instanceof multer.MulterError || err?.message === 'الملف يجب أن يكون بصيغة CSV') {
-    return res.status(400).json({ message: err.message || 'خطأ في رفع الملف' });
+  // أخطاء رفع الملفات (Multer أو فلتر types) هي أخطاء من العميل — 400 وليس 500
+  if (err instanceof multer.MulterError || err?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ message: err.message || 'حجم الملف يتجاوز الحد المسموح' });
+  }
+  if (typeof err?.message === 'string' && (err.message.includes('CSV') || err.message.includes('غير مسموح'))) {
+    return res.status(400).json({ message: err.message });
   }
   console.error('❌ Unhandled Server Error:', err.stack || err.message);
   res.status(500).json({

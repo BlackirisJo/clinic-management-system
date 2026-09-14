@@ -447,12 +447,20 @@ cd ..
 
 Create the required environment configuration based on the project's environment variables.
 
+A ready-to-copy template is provided at `.env.example` (backend root) and `frontend/.env.example`:
+
+```bash
+cp .env.example .env        # then fill in real values
+cp frontend/.env.example frontend/.env
+```
+
 Environment variables may include configuration for:
 
-* Database connection
-* Database credentials
-* JWT configuration
-* Application ports
+* Database connection (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`)
+* JWT configuration (`JWT_SECRET`)
+* Application ports (`PORT`) and CORS (`CORS_ORIGIN`)
+* Seed defaults (`ADMIN_USERNAME`, `ADMIN_INITIAL_PASSWORD`)
+* Encrypted backups (`BACKUP_ENCRYPTION_KEY`, `BACKUP_DIR`, `BACKUP_RETENTION_DAYS`)
 * External services
 * API configuration
 
@@ -468,6 +476,12 @@ Do not commit:
 * `.env` files containing secrets
 
 Use environment variables or a secure secrets-management solution instead.
+
+### Runtime requirements
+
+* **PostgreSQL >= 16** (the `ALTER TABLE IF EXISTS` and exclusion-constraint migrations rely on it).
+* **Backups**: the encrypted backup feature shells out to `pg_dump`/`psql`. The Docker image already installs `postgresql-client`; on bare-metal hosts install the PostgreSQL client tools, otherwise `POST /api/backups` responds with a clear `503`. Each backup writes a sibling `<file>.enc.meta.json` (iv, auth_tag, checksum, size, database, created_at) so a backup stays restorable even if the database itself is lost — keep these files together with the `.enc` files.
+* **Password rotation**: users change their own password via `POST /api/auth/change-password`; on success all other sessions are revoked and `is_force_password_change` is cleared.
 
 ---
 

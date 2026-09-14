@@ -73,6 +73,10 @@ test('medical center integration: clinic → specialty → staff → patient →
     const stillThere = await call('GET', `/api/users?role=DOCTOR&limit=100`) as any;
     assert.ok(stillThere.data.users.some((u: any) => u.user_id === secondDoctor.user_id), 'المستخدم ما زال في النظام');
   }
+  // إعادة جلب تفاصيل العيادة بعد الإسناد الإضافي — حتى تكون "قائمة الفريق" حديثة
+  // (كان الجلب السابق قبل إسناد الطبيب الثاني فيختار الاختبار طبيباً أصبح مسنداً فعلاً).
+  const freshDetail = await call('GET', `/api/clinics/${clinicId}`) as any;
+  const staffAfterAssignments = freshDetail.data?.staff ?? [...(freshDetail.data?.doctors ?? []), ...(freshDetail.data?.nurses ?? [])];
 
   // 6) رفض إسناد ممرض في قائمة الأطباء (تحقق الدور)
   const wrongRole = await call('POST', '/api/clinics', {
@@ -100,8 +104,8 @@ test('medical center integration: clinic → specialty → staff → patient →
   assert.equal(visitRes.status, 201, JSON.stringify(visitRes.data));
   const visitId = visitRes.data.visit.visit_id as number;
 
-  // 9) رفض طبيب غير مسند للعيادة
-  const foreignDoctor = users.data.users.find((u: any) => u.role_name === 'DOCTOR' && !detail.data.staff.some((s: any) => s.user_id === u.user_id));
+  // 9) رفض طبيب غير مسند للعيادة (يُعاد جلب الفريق بعد كل الإسنادات)
+  const foreignDoctor = users.data.users.find((u: any) => u.role_name === 'DOCTOR' && !staffAfterAssignments.some((s: any) => Number(s.user_id) === Number(u.user_id)));
   if (foreignDoctor) {
     const badVisit = await call('POST', '/api/patients/visits', {
       patient_id: patientId, clinic_id: clinicId, doctor_id: foreignDoctor.user_id,
@@ -235,7 +239,7 @@ test('medical center integration: clinic → specialty → staff → patient →
     headers: { authorization: `Bearer ${token}` },
     body: form,
   });
-  assert.equal(attachRes.status, 201, await attachRes.text());
+  assert.equal(attachRes.status, 201, await attachRes.clone().text());
   const attachment = await attachRes.json() as any;
   const attachmentId = attachment.attachment.attachment_id as number;
   const download = await fetch(`${baseUrl}/api/clinical/attachments/${attachmentId}/download`, {
