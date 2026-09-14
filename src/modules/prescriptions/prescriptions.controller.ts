@@ -11,6 +11,15 @@ export const createMedication = async (req: AuthenticatedRequest, res: Response)
   }
 
   try {
+    // منع التكرار: الاسم التجاري يُقارن بلا حساسية لحالة الأحرف (نفس منطق الاستيراد)
+    const duplicate = await pool.query(
+      'SELECT medication_id FROM medications WHERE lower(trade_name) = lower($1)',
+      [trade_name]
+    );
+    if (duplicate.rowCount) {
+      return res.status(409).json({ message: 'يوجد دواء مكرر بنفس الاسم التجاري في الدليل' });
+    }
+
     const result = await pool.query(
       `INSERT INTO medications (trade_name, scientific_name, default_dosage, instructions)
        VALUES ($1, $2, $3, $4)

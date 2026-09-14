@@ -133,10 +133,13 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
     const toInsert: MedicationImportRow[] = [];
     let skippedExisting = 0;
     let skippedDuplicate = 0;
+    let failed = 0;
 
+    // الصفوف غير الصالحة تُعدّ ولا تُسقط بصمت — لتطابق النتيجة مع معاينة /validate وتفادي
+    // إيهام المستخدم بأن كل الصفوف استُوردت.
     records.forEach((rawRow) => {
       const normalized = normalizeRow(rawRow);
-      if (!normalized) return;
+      if (!normalized) { failed++; return; }
       const key = normalized.trade_name.toLowerCase();
       if (existingNames.has(key)) { skippedExisting++; return; }
       if (seenInFile.has(key)) { skippedDuplicate++; return; }
@@ -144,9 +147,16 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
       toInsert.push(normalized);
     });
 
-    if (!toInsert.length) {
-      const result: ImportExecutionResult = { totalRows: records.length, added: 0, skippedExisting, skippedDuplicate, failed: 0 };
+    if (!toInsert.length && failed === 0) {
+      const result: ImportExecutionResult = { totalRows: records.length, added: 0, skippedExisting, skippedDuplicate, failed };
       return res.status(200).json({ message: 'لا توجد أدوية جديدة لإضافتها', result });
+    }
+    if (!toInsert.length) {
+      const result: ImportExecutionResult = { totalRows: records.length, added: 0, skippedExisting, skippedDuplicate, failed };
+      return res.status(200).json({
+        message: failed === records.length ? 'ملف غير صالح: لم يحتوِ على أي صف مقروء صحيح' : `تم رفض ${failed} صفاً غير صالح`,
+        result,
+      });
     }
 
     await client.query('BEGIN');
@@ -170,12 +180,15 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
     await client.query(
       `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
        VALUES ($1, $2, 'MEDICATIONS_IMPORTED', 'MEDICATION', null, $3)`,
-      [req.user?.userId ?? null, req.user?.clinicId ?? null, JSON.stringify({ totalRows: records.length, added, skippedExisting, skippedDuplicate })],
+      [req.user?.userId ?? null, req.user?.clinicId ?? null, JSON.stringify({ totalRows: records.length, added, skippedExisting, skippedDuplicate, failed })],
     );
     await client.query('COMMIT');
 
-    const result: ImportExecutionResult = { totalRows: records.length, added, skippedExisting, skippedDuplicate, failed: 0 };
-    return res.status(201).json({ message: `تم استيراد ${added} دواء بنجاح`, result });
+    const result: ImportExecutionResult = { totalRows: records.length, added, skippedExisting, skippedDuplicate, failed };
+    const message = failed > 0
+      ? `تم استيراد ${added} دواء بنجاح، وتخطّي ${skippedExisting} موجودة و${skippedDuplicate} مكررة، ورفض ${failed} صفاً غير صالح`
+      : `تم استيراد ${added} دواء بنجاح`;
+    return res.status(201).json({ message, result });
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Execute Medication Import Error:', error);
