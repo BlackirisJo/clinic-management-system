@@ -3,6 +3,9 @@ import { pool } from '../../config/database';
 import { AuthenticatedRequest, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
 import { ReportQuery } from './reports.validation';
 
+// تقريب مالي ثنائي الخانتين (حسابات مالية آمنة — لا Floating Point خام)
+const roundMoney = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
+
 const getScope = (req: AuthenticatedRequest, query: ReportQuery) => {
   // المالية المركزية (مدير النظام/المحاسب/السوبر): كل العيادات افتراضياً،
   // أو عيادة محددة إذا مُرّر فلتر clinic_id صريح من الاستعلام
@@ -28,7 +31,7 @@ export const getOverviewReport = async (req: AuthenticatedRequest, res: Response
       pool.query(`SELECT COUNT(*)::int AS total FROM prescriptions p JOIN visits v ON v.visit_id = p.visit_id WHERE ($1::int IS NULL OR v.clinic_id = $1) AND p.created_at >= $2 AND p.created_at < ($3::date + INTERVAL '1 day')`, [clinicId, from, to]),
       pool.query(`WITH scoped_invoices AS (SELECT DISTINCT i.invoice_id, i.discount_amount, i.net_amount, i.paid_amount FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.invoice_id WHERE ($1::int IS NULL OR ii.clinic_id = $1) AND i.created_at >= $2 AND i.created_at < ($3::date + INTERVAL '1 day')) SELECT (SELECT COALESCE(SUM(ii.price * ii.quantity), 0) FROM invoice_items ii WHERE ii.invoice_id IN (SELECT invoice_id FROM scoped_invoices) AND ($1::int IS NULL OR ii.clinic_id = $1))::numeric AS revenue, (SELECT COALESCE(SUM(ii.doctor_share), 0) FROM invoice_items ii WHERE ii.invoice_id IN (SELECT invoice_id FROM scoped_invoices) AND ($1::int IS NULL OR ii.clinic_id = $1))::numeric AS doctor_payout, COALESCE(SUM(discount_amount), 0)::numeric AS discounts, COALESCE(SUM(net_amount), 0)::numeric AS net, COALESCE(SUM(paid_amount), 0)::numeric AS paid, COALESCE(SUM(net_amount - paid_amount), 0)::numeric AS outstanding, (SELECT COALESCE(SUM(e.amount), 0)::numeric FROM expenses e WHERE ($1::int IS NULL OR e.clinic_id = $1) AND e.deleted_at IS NULL AND e.created_at >= $2 AND e.created_at < ($3::date + INTERVAL '1 day')) AS expenses FROM scoped_invoices`, [clinicId, from, to]),
     ]);
-    return res.status(200).json({ period: { from, to }, clinic_id: clinicId, overview: { patients: patients.rows[0], visits: visits.rows[0], appointments: appointments.rows[0], prescriptions: prescriptions.rows[0], financial: { ...financial.rows[0], net_after_expenses: Math.max(0, Number(financial.rows[0]?.net || 0) - Number(financial.rows[0]?.expenses || 0)) } } });
+    return res.status(200).json({ period: { from, to }, clinic_id: clinicId, overview: { patients: patients.rows[0], visits: visits.rows[0], appointments: appointments.rows[0], prescriptions: prescriptions.rows[0], financial: { ...financial.rows[0], net_after_expenses: roundMoney(Number(financial.rows[0]?.net || 0) - Number(financial.rows[0]?.expenses || 0)) } } });
   } catch (error) {
     console.error('Overview Report Error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء إنشاء التقرير الشامل' });
@@ -47,7 +50,7 @@ export const getFinancialReport = async (req: AuthenticatedRequest, res: Respons
       pool.query(`SELECT cs.service_name, COUNT(ii.item_id)::int AS items, COALESCE(SUM(ii.price * ii.quantity), 0)::numeric AS revenue, COALESCE(SUM(ii.doctor_share), 0)::numeric AS doctor_payout FROM invoice_items ii JOIN clinic_services cs ON cs.service_id = ii.service_id WHERE ($1::int IS NULL OR ii.clinic_id = $1) AND ii.created_at >= $2 AND ii.created_at < ($3::date + INTERVAL '1 day') GROUP BY cs.service_name ORDER BY revenue DESC`, [clinicId, from, to]),
       pool.query(`SELECT COALESCE(SUM(ii.doctor_share), 0)::numeric AS total FROM invoice_items ii WHERE ($1::int IS NULL OR ii.clinic_id = $1) AND ii.created_at >= $2 AND ii.created_at < ($3::date + INTERVAL '1 day')`, [clinicId, from, to]),
     ]);
-    return res.status(200).json({ period: { from, to }, summary: { ...summary.rows[0], doctor_payout: Number(payouts.rows[0]?.total || 0), net_after_expenses: Math.max(0, Number(summary.rows[0]?.net || 0) - Number(expenses.rows[0]?.total || 0)) }, payment_methods: byPayment.rows, expenses: expenses.rows[0], services: byService.rows });
+    return res.status(200).json({ period: { from, to }, summary: { ...summary.rows[0], doctor_payout: Number(payouts.rows[0]?.total || 0), net_after_expenses: roundMoney(Number(summary.rows[0]?.net || 0) - Number(expenses.rows[0]?.total || 0)) }, payment_methods: byPayment.rows, expenses: expenses.rows[0], services: byService.rows });
   } catch (error) {
     console.error('Financial Report Error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء إنشاء التقرير المالي' });
