@@ -189,12 +189,17 @@ function FinancialTab({ data }) {
       <div className="record-block">
         <h4>الإيراد حسب الخدمة</h4>
         {services.length === 0 ? <Empty text="لا بيانات" /> : (
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>الخدمة</th><th>المرات</th><th>الإيراد</th><th>حصة الأطباء</th></tr></thead>
               <tbody>
                 {services.map((sv, i) => (
-                  <tr key={i}><td>{sv.service_name}</td><td>{fmtNumber(sv.items)}</td><td>{fmtMoney(sv.revenue)}</td><td>{fmtMoney(sv.doctor_payout)}</td></tr>
+                  <tr key={i}>
+                    <td>{sv.service_name}</td>
+                    <td data-label="المرات">{fmtNumber(sv.items)}</td>
+                    <td data-label="الإيراد">{fmtMoney(sv.revenue)}</td>
+                    <td data-label="حصة الأطباء">{fmtMoney(sv.doctor_payout)}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -224,12 +229,16 @@ function ClinicalTab({ data }) {
       <div className="record-block">
         <h4>أداء الأطباء</h4>
         {doctors.length === 0 ? <Empty text="لا بيانات" /> : (
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>الطبيب</th><th>الزيارات</th><th>المرضى</th></tr></thead>
               <tbody>
                 {doctors.map((d, i) => (
-                  <tr key={i}><td>{d.doctor_name}</td><td>{fmtNumber(d.visits)}</td><td>{fmtNumber(d.patients)}</td></tr>
+                  <tr key={i}>
+                    <td>{d.doctor_name}</td>
+                    <td data-label="الزيارات">{fmtNumber(d.visits)}</td>
+                    <td data-label="المرضى">{fmtNumber(d.patients)}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -273,7 +282,7 @@ function AppointmentsTab({ statuses, rows }) {
       <div className="record-block">
         <h4>سجل المواعيد ({fmtNumber(rows.length)})</h4>
         {rows.length === 0 ? <Empty text="لا توجد مواعيد ضمن هذه الفترة" /> : (
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>التاريخ</th><th>الوقت</th><th>المريض</th><th>العيادة</th><th>الطبيب</th><th>الحالة</th></tr></thead>
               <tbody>
@@ -282,11 +291,11 @@ function AppointmentsTab({ statuses, rows }) {
                   return (
                     <tr key={a.appointment_id}>
                       <td>{fmtDate(a.appointment_date)}</td>
-                      <td>{fmtTime(a.start_time)}</td>
-                      <td>{a.patient_name}</td>
-                      <td>{a.clinic_name}</td>
-                      <td>{a.doctor_name || '—'}</td>
-                      <td><span className={`status ${st.cls}`}>{st.label}</span></td>
+                      <td data-label="الوقت">{fmtTime(a.start_time)}</td>
+                      <td data-label="المريض">{a.patient_name}</td>
+                      <td data-label="العيادة">{a.clinic_name}</td>
+                      <td data-label="الطبيب">{a.doctor_name || '—'}</td>
+                      <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>
                     </tr>
                   )
                 })}
@@ -302,12 +311,18 @@ function AppointmentsTab({ statuses, rows }) {
 function PatientsTab({ rows }) {
   return (
     <div className="tab-stack">
-      <div className="table-wrap">
+      <div className="table-wrap table-cards">
         <table>
           <thead><tr><th>الاسم</th><th>الهاتف</th><th>النوع</th><th>الزيارات</th><th>آخر زيارة</th></tr></thead>
           <tbody>
             {rows.map((p) => (
-              <tr key={p.patient_id}><td>{p.full_name}</td><td dir="ltr">{p.phone}</td><td>{p.gender === 'FEMALE' ? 'أنثى' : 'ذكر'}</td><td>{fmtNumber(p.visits)}</td><td>{fmtDateTime(p.last_visit)}</td></tr>
+              <tr key={p.patient_id}>
+                <td>{p.full_name}</td>
+                <td dir="ltr" data-label="الهاتف">{p.phone}</td>
+                <td data-label="النوع">{p.gender === 'FEMALE' ? 'أنثى' : 'ذكر'}</td>
+                <td data-label="الزيارات">{fmtNumber(p.visits)}</td>
+                <td data-label="آخر زيارة">{fmtDateTime(p.last_visit)}</td>
+              </tr>
             ))}
           </tbody>
         </table>

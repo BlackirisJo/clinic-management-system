@@ -31,16 +31,18 @@ export default function ClinicsView() {
       </div>
       <Notice kind="error">{error}</Notice>
       {loading ? <Loading text="جارِ تحميل العيادات" /> : clinics.length === 0 ? <Empty text="لا توجد عيادات" /> : (
-        <div className="table-wrap"><table><thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الحالة</th><th>الموظفون</th><th>المرضى</th><th>الإنشاء</th><th>إجراءات</th></tr></thead><tbody>
+        <div className="table-wrap table-cards"><table><thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الحالة</th><th>الموظفون</th><th>المرضى</th><th>الإنشاء</th><th>إجراءات</th></tr></thead><tbody>
           {clinics.map((c) => (
             <tr key={c.clinic_id}>
-              <td>{c.clinic_id}</td><td>{c.clinic_name}</td>
-              <td>{c.specialty_name ? <span className="badge">{c.specialty_name}</span> : <span className="muted-small">غير محدد</span>}</td>
-              <td>{c.is_active ? <span className="badge">نشطة</span> : <span className="muted-small">موقوفة</span>}</td>
-              <td>{c.staff_count}</td><td>{c.patients_count}</td>
-              <td>{fmtDate(c.created_at, true)}</td>
-              <td>
-                <button className="text-button" onClick={() => setStaffClinic(c)}>فريق العمل ←</button> {' '}
+              <td className="hide-sm" data-label="#">{c.clinic_id}</td>
+              <td className="cell-title">{c.clinic_name}</td>
+              <td data-label="التخصص">{c.specialty_name ? <span className="badge">{c.specialty_name}</span> : <span className="muted-small">غير محدد</span>}</td>
+              <td data-label="الحالة">{c.is_active ? <span className="badge">نشطة</span> : <span className="muted-small">موقوفة</span>}</td>
+              <td data-label="الموظفون">{c.staff_count}</td>
+              <td data-label="المرضى">{c.patients_count}</td>
+              <td data-label="الإنشاء">{fmtDate(c.created_at, true)}</td>
+              <td className="cell-actions">
+                <button className="text-button" onClick={() => setStaffClinic(c)}>فريق العمل ←</button>
                 <button className="text-button" onClick={() => setEditing(c)}>تعديل</button>
               </td>
             </tr>
@@ -287,10 +289,23 @@ function ClinicStaffModal({ clinic, onClose }) {
     <Modal title={`فريق عمل: ${clinic.clinic_name}`} subtitle={clinicDetail?.specialty_name ? `التخصص: ${clinicDetail.specialty_name}` : "إدارة العيادات"} onClose={onClose} wide>
       <Notice kind="error">{error}</Notice>
       {loading ? <Loading text="جارِ تحميل الفريق" /> : staff.length === 0 ? (<Empty text="لا يوجد موظفون مسندون" />) : (
-        <div className="table-wrap"><table><thead><tr><th>الاسم</th><th>المستخدم</th><th>الدور</th><th>التخصص الفرعي</th><th>الحالة</th><th>الإسناد</th><th>إجراءات</th></tr></thead><tbody>
+        <div className="table-wrap table-cards"><table><thead><tr><th>الاسم</th><th>المستخدم</th><th>الدور</th><th>التخصص الفرعي</th><th>الحالة</th><th>الإسناد</th><th>إجراءات</th></tr></thead><tbody>
           {staff.map((m) => {
             const st = USER_STATUS[m.status] || { label: m.status, cls: "" }
-            return (<tr key={m.user_id}><td>{m.full_name}</td><td dir="ltr">{m.username}</td><td>{ROLE_LABELS[m.role_name] || m.role_name}</td><td>{m.sub_specialty || "—"}</td><td><span className={`status ${st.cls}`}>{st.label}</span></td><td>{m.is_primary ? "أساسي" : "إضافي"}</td><td><button className="text-button" onClick={() => setEditing(m)}>تعديل</button> {' '}<button className="text-button danger" onClick={() => removeStaff(m)}>إزالة</button></td></tr>)
+            return (
+              <tr key={m.user_id}>
+                <td>{m.full_name}</td>
+                <td dir="ltr" data-label="المستخدم">{m.username}</td>
+                <td data-label="الدور">{ROLE_LABELS[m.role_name] || m.role_name}</td>
+                <td data-label="التخصص الفرعي">{m.sub_specialty || "—"}</td>
+                <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>
+                <td data-label="الإسناد">{m.is_primary ? "أساسي" : "إضافي"}</td>
+                <td className="cell-actions">
+                  <button className="text-button" onClick={() => setEditing(m)}>تعديل</button>
+                  <button className="text-button danger" onClick={() => removeStaff(m)}>إزالة</button>
+                </td>
+              </tr>
+            )
           })}</tbody></table></div>
       )}
       {!showAdd && !editing && !showAssign && (

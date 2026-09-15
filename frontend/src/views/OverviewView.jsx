@@ -86,12 +86,17 @@ export default function OverviewView({ onNavigate }) {
             <button className="text-button" onClick={() => onNavigate('patients')}>عرض الكل ←</button>
           </div>
           {patients.length === 0 ? <Empty text="لا توجد سجلات مرضى بعد" /> : (
-            <div className="table-wrap">
+            <div className="table-wrap table-cards">
               <table>
                 <thead><tr><th>المريض</th><th>الهاتف</th><th>النوع</th><th>التاريخ</th></tr></thead>
                 <tbody>
                   {patients.slice(0, 5).map((p) => (
-                    <tr key={p.patient_id}><td><span className="table-avatar">{p.full_name?.[0] || 'م'}</span>{p.full_name}</td><td dir="ltr">{p.phone}</td><td>{GENDER_LABELS[p.gender] || p.gender}</td><td>{fmtDate(p.created_at)}</td></tr>
+                    <tr key={p.patient_id}>
+                      <td><span className="table-avatar">{p.full_name?.[0] || 'م'}</span>{p.full_name}</td>
+                      <td dir="ltr" data-label="الهاتف">{p.phone}</td>
+                      <td data-label="النوع">{GENDER_LABELS[p.gender] || p.gender}</td>
+                      <td data-label="التاريخ">{fmtDate(p.created_at)}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>

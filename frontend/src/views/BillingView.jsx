@@ -50,19 +50,19 @@ function KpisTable() {
     <div>
       <Notice kind="error">{error}</Notice>
       {rows === null ? <Loading /> : rows.length === 0 ? <Empty text="لا توجد مؤشرات بعد" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>الشهر</th><th>العيادة</th><th>مرضى</th><th>زيارات</th><th>الإيراد</th><th>حصص الأطباء</th><th>الصافي</th></tr></thead>
             <tbody>
               {rows.map((k, i) => (
                 <tr key={i}>
                   <td>{fmtDate(k.stat_month)}</td>
-                  <td>{k.clinic_name || '—'}</td>
-                  <td>{fmtNumber(k.unique_patients)}</td>
-                  <td>{fmtNumber(k.total_visits)}</td>
-                  <td>{fmtMoney(k.total_revenue)}</td>
-                  <td>{fmtMoney(k.total_doctor_payout)}</td>
-                  <td>{fmtMoney(k.net_clinic_margin)}</td>
+                  <td data-label="العيادة">{k.clinic_name || '—'}</td>
+                  <td data-label="مرضى">{fmtNumber(k.unique_patients)}</td>
+                  <td data-label="زيارات">{fmtNumber(k.total_visits)}</td>
+                  <td data-label="الإيراد">{fmtMoney(k.total_revenue)}</td>
+                  <td data-label="حصص الأطباء">{fmtMoney(k.total_doctor_payout)}</td>
+                  <td data-label="الصافي">{fmtMoney(k.net_clinic_margin)}</td>
                 </tr>
               ))}
             </tbody>
@@ -272,7 +272,7 @@ function InvoicesList({ refreshKey }) {
       <h4>أحدث الفواتير</h4>
       <Notice kind="error">{error || actionError}</Notice>
       {rows.length === 0 ? <Empty text="لا توجد فواتير بعد" /> : (
-        <div className="table-wrap"><table>
+        <div className="table-wrap table-cards"><table>
           <thead><tr>
             <th>رقم الفاتورة</th><th>المريض</th><th>العيادة</th><th>الطبيب</th><th>البنود</th>
             <th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th><th>التاريخ</th><th>الإجراءات</th>
@@ -283,16 +283,16 @@ function InvoicesList({ refreshKey }) {
               return (
                 <tr key={inv.invoice_id}>
                   <td dir="ltr" className="strong-cell">{fmtInvoiceNumber(inv.invoice_id, inv.created_at)}</td>
-                  <td>{inv.patient_name || `مريض #${inv.patient_id}`}</td>
-                  <td>{inv.clinic_names?.join('، ') || '—'}</td>
-                  <td>{inv.doctor_names?.join('، ') || '—'}</td>
-                  <td>{fmtNumber(inv.items_count)}</td>
-                  <td>{fmtMoney(inv.net_amount)}</td>
-                  <td>{fmtMoney(inv.paid_amount)}</td>
-                  <td>{fmtMoney(inv.remaining)}</td>
-                  <td><span className={`status ${st.cls}`}>{st.label}</span></td>
-                  <td>{fmtDate(inv.created_at, true)}</td>
-                  <td>
+                  <td data-label="المريض">{inv.patient_name || `مريض #${inv.patient_id}`}</td>
+                  <td data-label="العيادة">{inv.clinic_names?.join('، ') || '—'}</td>
+                  <td data-label="الطبيب">{inv.doctor_names?.join('، ') || '—'}</td>
+                  <td data-label="البنود">{fmtNumber(inv.items_count)}</td>
+                  <td data-label="الإجمالي">{fmtMoney(inv.net_amount)}</td>
+                  <td data-label="المدفوع">{fmtMoney(inv.paid_amount)}</td>
+                  <td data-label="المتبقي">{fmtMoney(inv.remaining)}</td>
+                  <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>
+                  <td data-label="التاريخ">{fmtDate(inv.created_at, true)}</td>
+                  <td className="cell-actions" data-label="الإجراءات">
                     <div className="row-actions">
                       <button type="button" className="text-button" onClick={() => openInvoice(inv.invoice_id)}>عرض</button>
                       <button type="button" className="text-button" onClick={() => printInvoice(inv.invoice_id)}>طباعة</button>

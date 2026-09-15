@@ -184,21 +184,17 @@ const savePermissions = async () => {
   return (
     <div>
       {message && <div>{message}</div>}
-      {error && <div style={{ color: '#b00020' }}>{error}</div>}
+      {error && <div className="perm-error">{error}</div>}
       {busy && <p>جارِ التنفيذ...</p>}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="perm-layout">
         <aside>
-          <h3 style={{ margin: '4px 0 8px' }}>الأدوار</h3>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+          <h3 className="perm-aside-title">الأدوار</h3>
+          <ul className="perm-role-list">
             {roles.map((r) => (
               <li key={r.role_id}>
                 <button
                   onClick={() => setSelectedId(r.role_id)}
-                  style={{
-                    width: '100%', textAlign: 'start',
-                    fontWeight: r.role_id === selectedId ? '700' : '400',
-                    opacity: r.is_active ? 1 : 0.55,
-                  }}
+                  className={`perm-role-btn${r.role_id === selectedId ? ' selected' : ''}${r.is_active ? '' : ' inactive'}`}
                 >
                   {ROLE_LABELS[r.role_name] || r.role_name}
                   {r.is_system ? ' ★' : ''}
@@ -208,7 +204,7 @@ const savePermissions = async () => {
               </li>
             ))}
           </ul>
-          <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
+          <div className="perm-new-role">
             <strong>دور جديد</strong>
             <input placeholder="ROLE_NAME" value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} />
             <input placeholder="وصف الدور" value={newRoleDesc} onChange={(e) => setNewRoleDesc(e.target.value)} />
@@ -220,9 +216,9 @@ const savePermissions = async () => {
             <p>اختر دوراً من القائمة لعرض صلاحياته</p>
           ) : (
             <>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-                <input value={name} disabled={isSystem} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 220 }} />
-                <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="وصف الدور" style={{ flex: 1, minWidth: 160 }} />
+              <div className="perm-meta-bar">
+                <input value={name} disabled={isSystem} onChange={(e) => setName(e.target.value)} className="perm-name-input" />
+                <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="وصف الدور" className="perm-desc-input" />
                 <button onClick={saveMeta} disabled={busy || (isSystem && name !== role.role_name)}>حفظ البيانات</button>
                 {!isSystem && (
                   <>
@@ -235,10 +231,10 @@ const savePermissions = async () => {
               {isProtected && <p>⚠️ دور SUPER_ADMIN محمي — لا يمكن تعديل صلاحياته أو اسمه (حماية من انغلاق النظام)</p>}
               <div>
                 {groups.map((g) => (
-                  <fieldset key={g.group} style={{ marginTop: 10 }}>
+                  <fieldset key={g.group} className="perm-group">
                     <legend><strong>{g.group}</strong></legend>
                     {g.permissions.map((p) => (
-                      <label key={p.key} style={{ display: 'block', margin: '3px 0' }}>
+                      <label key={p.key} className="perm-check">
                         <input
                           type="checkbox"
                           checked={selected.includes(p.key)}
@@ -251,7 +247,7 @@ const savePermissions = async () => {
                   </fieldset>
                 ))}
               </div>
-              <button onClick={savePermissions} disabled={isProtected || busy} style={{ marginTop: 12 }}>
+              <button onClick={savePermissions} disabled={isProtected || busy} className="perm-save">
                 💾 حفظ الصلاحيات
               </button>
             </>

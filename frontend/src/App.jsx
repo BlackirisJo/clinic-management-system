@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import './App.css'
+import './styles/responsive.css'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import Login from './components/Login'
 import Layout, { navItemsForRole } from './components/Layout'
 import ChangePasswordModal from './components/ChangePasswordModal'
+import InstallPrompt from './components/InstallPrompt'
+import UpdateNotice from './components/UpdateNotice'
 import OverviewView from './views/OverviewView'
 import PatientsView from './views/PatientsView'
 import AppointmentsView from './views/AppointmentsView'
@@ -61,6 +64,9 @@ export default function App() {
   return (
     <AuthProvider>
       <Shell />
+      {/* واجهات PWA: دعوة التثبيت وإشعار التحديث (لا تظهر في الوضع المثبّت/التطوير) */}
+      <InstallPrompt />
+      <UpdateNotice />
     </AuthProvider>
   )
 }

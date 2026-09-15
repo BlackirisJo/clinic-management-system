@@ -57,9 +57,9 @@ export default function AppointmentsView() {
       </div>
 
       <Notice kind="error">{error}</Notice>
-      {loading ? <Loading text="جارِ تثميل المواعيد" /> : rows.length === 0 ? <Empty text="لا توجد مواعيد مطابقة" /> : (
+      {loading ? <Loading text="جارِ تحميل المواعيد" /> : rows.length === 0 ? <Empty text="لا توجد مواعيد مطابقة" /> : (
         <>
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead>
                 <tr><th>التاريخ</th><th>الوقت</th><th>المريض</th><th>الطبيب</th><th>العيادة</th><th>السبب</th><th>الحالة</th><th>تحديث الحالة</th></tr>
@@ -70,14 +70,14 @@ export default function AppointmentsView() {
                   return (
                     <tr key={a.appointment_id}>
                       <td>{fmtDate(a.appointment_date)}</td>
-                      <td dir="ltr">{fmtTime(a.start_time)} - {fmtTime(a.end_time)}</td>
-                      <td>{a.patient_name || `مريض #${a.patient_id}`}</td>
-                      <td>{a.doctor_name || '—'}</td>
-                      <td>{a.clinic_name || '—'}</td>
-                      <td>{a.reason || '—'}</td>
-                      <td><span className={`status ${st.cls}`}>{st.label}</span></td>
-                      <td className="nowrap">
-                        <select value="" onChange={(e) => e.target.value && changeStatus(a.appointment_id, e.target.value)} className="input">
+                      <td dir="ltr" data-label="الوقت">{fmtTime(a.start_time)} - {fmtTime(a.end_time)}</td>
+                      <td data-label="المريض">{a.patient_name || `مريض #${a.patient_id}`}</td>
+                      <td data-label="الطبيب">{a.doctor_name || '—'}</td>
+                      <td data-label="العيادة">{a.clinic_name || '—'}</td>
+                      <td data-label="السبب">{a.reason || '—'}</td>
+                      <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>
+                      <td className="cell-actions">
+                        <select value="" onChange={(e) => e.target.value && changeStatus(a.appointment_id, e.target.value)} className="input" aria-label="تحديث حالة الموعد">
                           <option value="">تحديث...</option>
                           {ALL_STATUS.map((s) => <option key={s} value={s}>{APPOINTMENT_STATUS[s]?.label || s}</option>)}
                         </select>
@@ -88,7 +88,7 @@ export default function AppointmentsView() {
               </tbody>
             </table>
           </div>
-          <Paginator page={page} onPage={setPage} />
+          <Paginator page={page} rows={rows} limit={LIMIT} onPage={setPage} />
         </>
       )}
 

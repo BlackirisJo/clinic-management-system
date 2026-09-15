@@ -81,19 +81,19 @@ export default function BackupsView() {
 
       {loading ? <Loading text="جارِ تحميل السجلات" /> : rows.length === 0 ? <Empty text="لا توجد نسخ احتياطية" /> : (
         <>
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>#</th><th>الحجم</th><th>الحالة</th><th>المنشئ</th><th>التاريخ</th><th>Checksum</th><th>إجراءات</th></tr></thead>
               <tbody>
                {rows.map((b) => (
                  <tr key={b.backup_id}>
-                    <td>{b.backup_id}</td>
-                    <td dir="ltr">{fmtNumber(b.file_size_bytes)} بايت</td>
-                    <td><span className="status">{b.status === 'SUCCESS' ? 'ناجحة' : b.status}</span></td>
-                    <td>{b.created_by_user || '—'}</td>
-                    <td>{fmtDateTime(b.created_at)}</td>
-                    <td dir="ltr" style={{ fontSize: 10 }}>{b.checksum ? `${b.checksum.slice(0, 24)}…` : '—'}</td>
-                    <td className="nowrap">
+                    <td className="hide-sm" data-label="#">{b.backup_id}</td>
+                    <td dir="ltr" data-label="الحجم">{fmtNumber(b.file_size_bytes)} بايت</td>
+                    <td data-label="الحالة"><span className="status">{b.status === 'SUCCESS' ? 'ناجحة' : b.status}</span></td>
+                    <td data-label="المنشئ">{b.created_by_user || '—'}</td>
+                    <td data-label="التاريخ">{fmtDateTime(b.created_at)}</td>
+                    <td className="hide-sm" dir="ltr" style={{ fontSize: 10 }} data-label="Checksum">{b.checksum ? `${b.checksum.slice(0, 24)}…` : '—'}</td>
+                    <td className="cell-actions">
                       <button className="text-button" onClick={() => download(b.backup_id)}>تنزيل</button>
                       <button className="text-button" onClick={() => restore(b.backup_id)}>استرجاع</button>
                     </td>

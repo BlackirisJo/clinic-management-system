@@ -1,0 +1,496 @@
+/* ============================================================================
+   نبض — طبقة الاستجابة (Mobile-First) + أساس تجربة التطبيق
+   ----------------------------------------------------------------------------
+   القواعد الأساسية هنا مكتوبة للهاتف أولاً، ثم تُرقّى تدريجياً عبر min-width.
+   تُستورد هذه الطبقة بعد App.css مباشرة (من App.jsx) لذلك تفوز عند تعادل
+   الأولوية، والقيم الأصلية للتصميم على الدسكتوب مُعاد إعلانها كما هي حرفياً
+   داخل استعلامات min-width حتى لا يتغير مظهر الدسكتوب إطلاقًا.
+
+   نقاط الانكسار (مبنية على المحتوى الفعلي وليس أرقاماً افتراضية):
+     < 640px      هاتف: عمود واحد، قائمة Drawer، جداول بطاقات، نوافذ Bottom-Sheet
+     640–767px    هاتف كبير: نماذج بعمودين، شبكات بعمودين
+     768–1023px   تابلت: جداول بتمرير أفقي، شبكات 2–3 أعمدة
+     >= 1024px    دسكتوب: شريط جانبي ثابت (250px + محتوى مريح)
+     >= 1440px    شاشات كبيرة: حشوات مريحة بعرض أقصى 1500px
+   ========================================================================== */
+
+/* ===== 1) أساس عالمي آمن للهاتف ===== */
+:root {
+  --tap: 44px;                     /* أصغر هدف لمس مريح */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;   /* منع تكبير النص تلقائياً على iOS */
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;               /* حماية جذرية من الفائض الأفقي للصفحة */
+  min-height: 100vh;
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+}
+
+/* الصور والأيقونات لا تخرج عن الشاشة أبداً */
+img, svg, video, canvas { max-width: 100%; }
+img, video { height: auto; }
+
+/* منع انفجار النصوص الطويلة (أسماء مرضى/أدوية/عيادات/checksum) */
+h1, h2, h3, h4, p, span, strong, small, label, td, th, code, b { overflow-wrap: anywhere; }
+
+/* عناصر النماذج لا تتجاوز حاوياتها */
+input, select, textarea, button, fieldset { max-width: 100%; }
+input, select, textarea { font-size: 16px; }   /* منع تكبير Safari التلقائي عند التركيز */
+
+/* أساس اللمس: لا وظيفة أساسية تعتمد على hover */
+button, [role="button"], a, label, select, summary { touch-action: manipulation; }
+button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* لغة الحركة: احترام رغبة تقليل الحركة */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+}
+/* ===== 2) الهيكل: Drawer على الهاتف ثم شريط جانبي ثابت ===== */
+.app-shell { min-height: 100vh; min-height: 100dvh; }
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  inset-inline-start: 0;            /* RTL: جهة البداية (اليمين) — القائمة تنزلق منها */
+  width: min(86vw, 300px);
+  z-index: 120;
+  padding: calc(18px + var(--safe-top)) 16px calc(18px + var(--safe-bottom));
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  transform: translateX(100%);       /* مخفية خارج الشاشة (transform فيزيائي غير معكوس) */
+  transition: transform .26s ease;
+  box-shadow: -18px 0 44px #0b26264d;
+}
+.sidebar.open { transform: translateX(0); }
+
+.sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.nav-close {
+  flex: 0 0 auto; width: var(--tap); height: var(--tap);
+  border: 1px solid #ffffff2e; background: #ffffff14; color: #d5e7e2;
+  border-radius: 12px; font-size: 22px; line-height: 1;
+}
+.sidebar-brand { padding: 0 0 18px; }
+.sidebar-brand strong { font-size: 20px; }
+.sidebar-brand span { font-size: 11px; }
+
+/* عناصر القائمة: هدف لمس كامل العرض */
+.nav-item { width: 100%; min-height: var(--tap); padding: 12px 14px; font-size: 14px; }
+.nav-item span { flex: 0 0 22px; }
+.sidebar nav { padding-bottom: 6px; }
+.sidebar-bottom { margin-top: 18px; gap: 12px; }
+.support-note { padding: 0 4px; }
+
+/* بطاقة تعريف المستخدم داخل القائمة (تعوّض إخفاء بيانات الحساب من الهيدر على الهاتف) */
+.drawer-profile {
+  display: flex; align-items: center; gap: 10px;
+  background: #ffffff12; border: 1px solid #ffffff1f; border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 12px;
+}
+.drawer-profile .avatar { flex: 0 0 auto; background: #df8b67; color: #4b2a1c; }
+.drawer-profile-meta { min-width: 0; }
+.drawer-profile-meta strong { display: block; color: #fff; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-profile-meta span { display: block; color: #9abcb5; font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.install-entry {
+  width: 100%; min-height: var(--tap); text-align: start;
+  border: 1px solid #ffffff2e; background: #ffffff12; color: #d5e7e2;
+  border-radius: 10px; padding: 11px 12px; font-size: 13px; font-weight: 600;
+}
+.logout-button { min-height: var(--tap); }
+
+/* خلفية القائمة الجانبية */
+.nav-overlay {
+  position: fixed; inset: 0; z-index: 110;
+  background: #0d2b2ccc;
+  opacity: 0; visibility: hidden; transition: opacity .2s ease, visibility .2s ease;
+}
+.nav-overlay.show { opacity: 1; visibility: visible; }
+
+/* ===== 3) المحتوى والهيدر ===== */
+.main-content {
+  width: 100%;
+  min-width: 0;
+  padding: calc(16px + var(--safe-top)) 14px calc(26px + var(--safe-bottom));
+  overflow-x: clip;                  /* لا نخفي الفائض فقط… بل لا نسمح به */
+}
+.topbar { gap: 10px; align-items: center; margin-bottom: 18px; }
+.menu-button {
+  flex: 0 0 auto; width: var(--tap); height: var(--tap); min-width: var(--tap);
+  border: 1px solid var(--line); border-radius: 12px; background: #fff;
+  color: var(--ink); font-size: 20px; line-height: 1; display: grid; place-items: center;
+}
+.topbar-title { flex: 1 1 auto; min-width: 0; }
+.topbar h1 {
+  margin: 3px 0 0;
+  font-size: clamp(19px, 4.8vw, 26px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.eyebrow { font-size: clamp(10px, 2.8vw, 11px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-actions { gap: 10px; }
+.icon-button { width: var(--tap); height: var(--tap); min-width: var(--tap); }
+.profile strong, .profile span { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ===== 4) الأزرار: أهداف لمس مريحة ===== */
+.primary-button, .secondary-button { min-height: var(--tap); padding: 12px 18px; }
+.primary-button.compact, .secondary-button.compact { min-height: 40px; }
+.text-button { min-height: 40px; padding: 8px 6px; font-size: 12px; }
+.pagination .secondary-button { min-width: 104px; }
+.modal-close { width: var(--tap); height: var(--tap); min-width: var(--tap); }
+
+/* ===== 5) الشبكات: من عمود واحد إلى أربعة ===== */
+.metric-grid { grid-template-columns: 1fr; gap: 12px; }
+.content-grid { grid-template-columns: 1fr; gap: 14px; }
+.report-bars { grid-template-columns: 1fr; gap: 14px; }
+.report-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.report-cell { padding: 13px 14px; }
+.report-cell strong { font-size: clamp(16px, 4.6vw, 19px); }
+.metric-card > strong { font-size: clamp(22px, 6.4vw, 27px); }
+.summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tab-grid.two { grid-template-columns: 1fr; gap: 14px; }
+.inv-meta-grid { grid-template-columns: 1fr; }
+.med-grid { grid-template-columns: 1fr; }
+.form-row { grid-template-columns: 1fr; gap: 12px; }
+.form-row.four { grid-template-columns: 1fr; }
+.invoice-sheet .inv-parties { grid-template-columns: 1fr; }
+.data-panel, .full-panel { padding: 15px; border-radius: 12px; }
+.record-block { padding: 15px; }
+
+/* البانر الترحيبي/التقارير: تراكب رأسي على الهاتف */
+.welcome-band { flex-direction: column; align-items: stretch; gap: 14px; padding: 18px; }
+.welcome-band h2, .report-hero h2 { font-size: clamp(18px, 5vw, 22px); }
+.welcome-band .top-actions, .report-hero .top-actions { flex-wrap: wrap; }
+.welcome-band .top-actions > button, .report-hero .top-actions > button { flex: 1 1 150px; }
+.report-hero { flex-direction: column; align-items: stretch; gap: 14px; padding: 18px; }
+.date-chip { border-right: 0; padding-right: 0; border-inline-start: 1px solid #b9d9d1; padding-inline-start: 16px; }
+
+/* ===== 6) النماذج والفلاتر ===== */
+.toolbar { display: grid; grid-template-columns: 1fr; gap: 10px; align-items: stretch; }
+.toolbar .input, .toolbar .input.sm { width: 100%; min-width: 0; }
+.toolbar > button { width: 100%; }
+.report-toolbar { padding: 12px; }
+.field { font-size: 13px; }
+.patient-form input, .patient-form select, .patient-form textarea { min-height: var(--tap); }
+.input { min-height: var(--tap); }
+.mini-select { min-height: 40px; }
+
+/* ===== 7) الجداول: تمرير آمن افتراضياً ===== */
+.table-wrap { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; max-width: 100%; }
+table { font-size: 12px; }
+th { padding: 9px 8px; }
+td { padding: 11px 8px; }
+/* ===== 8) الجداول كبطاقات على الهاتف (table-cards) =====
+   تُطبَّق فقط على الجداول التي يخدمها هذا العرض، وكل خلية تحمل data-label. */
+@media (max-width: 767px) {
+  .table-cards { overflow: visible; }
+  .table-cards table, .table-cards thead, .table-cards tbody,
+  .table-cards tr, .table-cards th, .table-cards td { display: block; width: auto; }
+  .table-cards table { white-space: normal; font-size: 13px; }
+  /* إخفاء رأس الجدول بصرياً مع إبقائه متاحاً للقارئ الشاشي */
+  .table-cards thead {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); border: 0;
+  }
+  .table-cards tbody { display: grid; gap: 10px; }
+  .table-cards tr {
+    border: 1px solid var(--line); border-radius: 12px; background: #fff;
+    padding: 12px; box-shadow: 0 4px 14px #10312f0a;
+  }
+  .table-cards td {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 10px; border: 0; padding: 7px 0; font-size: 13px; color: #4d5b5d; text-align: start;
+  }
+  .table-cards td + td { border-top: 1px dashed #eef2f1; }
+  .table-cards td::before {
+    content: attr(data-label);
+    flex: 0 0 40%; max-width: 40%;
+    color: #93a2a1; font-size: 11px; font-weight: 600;
+  }
+  .table-cards td > * { min-width: 0; }
+  /* الخلية الأولى = عنوان البطاقة */
+  .table-cards td:first-child {
+    display: block; font-size: 14px; font-weight: 700; color: var(--ink);
+    border-bottom: 1px solid var(--line); padding: 0 0 9px; margin-bottom: 4px;
+  }
+  .table-cards td:first-child::before { content: none; }
+  /* خلية عنوان صريحة (للجداول التي لا يكون عمودها الأول هو العنوان) */
+  .table-cards td.cell-title {
+    display: block; font-size: 14px; font-weight: 700; color: var(--ink);
+    border-bottom: 1px solid var(--line); padding: 0 0 9px; margin-bottom: 4px;
+    border-top: 0;
+  }
+  .table-cards td.cell-title::before { content: none; }
+  /* خلية الإجراءات: أزرار بعرض مريح للمس */
+  .table-cards td.cell-actions { display: block; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+  .table-cards td.cell-actions::before { content: none; }
+  .table-cards td.cell-actions .row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .table-cards td.cell-actions button { flex: 1 1 132px; }
+  .table-cards td.cell-actions .input { width: 100%; }
+  /* إخفاء الأعمدة الثانوية عند الحاجة */
+  .table-cards .hide-sm { display: none; }
+  .table-cards td.empty-row { border-top: 0; }
+}
+
+/* ===== 9) النوافذ: Bottom-Sheet على الهاتف ===== */
+.modal-backdrop { padding: 0; align-items: flex-end; }
+.modal-card, .modal-card.wide, .patient-modal {
+  width: 100%; max-width: 100%;
+  border-radius: 18px 18px 0 0;
+  max-height: 92vh; max-height: 92dvh;
+  padding: 18px 16px calc(20px + var(--safe-bottom));
+}
+.modal-header {
+  position: sticky; top: 0; z-index: 3;
+  background: #fff; padding-bottom: 12px; margin-bottom: 14px; gap: 10px;
+}
+.modal-header > div { min-width: 0; }
+.modal-header h2 { font-size: clamp(17px, 4.8vw, 21px); }
+.modal-actions {
+  position: sticky; bottom: calc(-1 * (20px + var(--safe-bottom))); z-index: 3;
+  background: #fff; display: flex; gap: 10px;
+  padding-top: 14px; margin-top: 6px;
+  box-shadow: 0 -10px 18px #ffffff;
+}
+.modal-actions > button { flex: 1 1 auto; }
+.modal-actions > button.secondary-button { flex: 0 0 auto; }
+
+/* ===== 10) التبويبات: قابلة للتمرير باللمس ===== */
+.tabs, .tab-bar {
+  display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+  margin-inline: -14px; padding-inline: 14px;
+}
+.tab, .tab-item { flex: 0 0 auto; white-space: nowrap; min-height: 42px; }
+.tab { padding: 10px 13px; }
+/* ===== 11) تفاصيل الشاشات ===== */
+/* الروشتة والفاتورة (مع الحفاظ الكامل على قواعد الطباعة) */
+.paper-head { flex-direction: column; align-items: flex-start; gap: 6px; }
+.paper-actions { flex-wrap: wrap; }
+.paper-actions > button { flex: 1 1 120px; }
+.invoice-summary { justify-content: stretch; }
+.invoice-summary .sum-row { min-width: 0; width: 100%; }
+.invoice-sheet .inv-head { flex-direction: column; gap: 8px; }
+.invoice-sheet .inv-meta { text-align: start; }
+.invoice-sheet .inv-summary { justify-content: stretch; }
+.invoice-sheet .inv-summary table { width: 100%; min-width: 0; }
+.invoice-sheet .inv-footer { flex-direction: column; gap: 4px; }
+.invoice-print-actions { flex-wrap: wrap; }
+.invoice-print-actions > button { flex: 1 1 140px; }
+.invoice-sheet .table-wrap { margin-inline: -4px; }
+
+.row-actions { flex-wrap: wrap; gap: 8px; }
+.items-head { flex-wrap: wrap; gap: 8px; }
+.detail-summary { gap: 8px; }
+
+/* تخطيط الصفحات المالية */
+.calc-total { flex-wrap: wrap; gap: 8px; }
+.service-detail, .expense-detail { font-size: 13px; }
+
+/* الحمل والرسم الزمني */
+.pregnancy-header { flex-direction: column; align-items: stretch; gap: 10px; }
+.pregnancy-timeline { padding-inline-start: 0; padding-inline-end: 12px; }
+.timeline-item { gap: 9px; }
+.timeline-vitals { font-size: 11px; }
+.staff-picker-list { max-height: 42vh; }
+
+/* العناصر المرنة الصغيرة */
+.med-item { flex-wrap: wrap; }
+.med-check { flex: 1 1 140px; }
+.med-note, .med-sev { flex: 1 1 120px; }
+.stat { min-width: 0; }
+.file-info { flex-wrap: wrap; }
+.report-bars strong { font-size: clamp(20px, 6vw, 25px); }
+
+/* صفحة الدخول */
+.login-shell { grid-template-columns: 1fr; }
+.login-panel { padding: 26px 18px; }
+.login-panel h1 { font-size: clamp(24px, 7vw, 30px); }
+.login-form input { min-height: var(--tap); }
+
+/* ===== 12) واجهة تثبيت التطبيق (PWA) ===== */
+.install-bar {
+  position: fixed; z-index: 140;
+  inset-inline: 12px;
+  bottom: calc(12px + var(--safe-bottom));
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: #fff; border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px 14px; box-shadow: 0 18px 44px #0d3a3830;
+}
+.install-bar-icon {
+  flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+  background: #df8b67; color: #fff; display: grid; place-items: center;
+  font-size: 22px; font-weight: 700;
+}
+.install-bar-text { flex: 1 1 160px; min-width: 0; }
+.install-bar-text strong { display: block; color: var(--ink); font-size: 14px; }
+.install-bar-text span { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+.install-bar-actions { display: flex; gap: 8px; flex: 1 1 auto; }
+.install-bar-actions > button { flex: 1 1 110px; }
+.install-steps { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.install-steps li { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: #4d5b5d; }
+.install-steps b { color: var(--ink); }
+.install-step-icon {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px;
+  background: #eef5f3; color: var(--teal); display: grid; place-items: center; font-size: 17px;
+}
+
+/* إشعار تحديث التطبيق */
+.update-toast {
+  position: fixed; z-index: 150;
+  inset-inline: 12px;
+  bottom: calc(12px + var(--safe-bottom));
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: #173c3d; color: #e8f3f0; border-radius: 14px;
+  padding: 12px 14px; box-shadow: 0 18px 44px #0d3a3850;
+}
+.update-toast p { margin: 0; flex: 1 1 150px; font-size: 13px; }
+.update-toast button { flex: 0 0 auto; }
+
+@media (min-width: 640px) {
+  .install-bar, .update-toast { inset-inline: auto; inset-inline-start: auto; inset-inline-end: 20px; max-width: 420px; }
+}
+/* ===== 13) الترقية التدريجية ===== */
+@media (min-width: 640px) {
+  .main-content { padding: calc(20px + var(--safe-top)) 20px calc(30px + var(--safe-bottom)); }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .report-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+  .form-row.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+  .toolbar .input { width: auto; min-width: 150px; }
+  .toolbar .input.sm { min-width: 120px; }
+  .toolbar > button { width: auto; }
+  .report-bars { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .inv-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .med-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .welcome-band { flex-direction: row; align-items: center; }
+  .welcome-band .top-actions > button { flex: 0 0 auto; }
+  .report-hero { flex-direction: row; align-items: center; }
+  .report-hero .top-actions > button { flex: 0 0 auto; }
+  .report-hero .secondary-button { margin-top: 0; }
+  .data-panel, .full-panel { padding: 18px; }
+  .tabs, .tab-bar { margin-inline: 0; padding-inline: 0; }
+  .paper-head { flex-direction: row; align-items: center; }
+  .paper-actions > button { flex: 0 0 auto; }
+  .invoice-sheet .inv-head { flex-direction: row; }
+  .invoice-sheet .inv-parties { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .invoice-sheet .inv-meta { text-align: left; }
+  .invoice-sheet .inv-summary { justify-content: flex-end; }
+  .invoice-sheet .inv-summary table { width: auto; min-width: 280px; }
+  .invoice-sheet .inv-footer { flex-direction: row; }
+  .invoice-summary { justify-content: flex-end; }
+  .invoice-summary .sum-row { min-width: 280px; width: auto; }
+  .pregnancy-header { flex-direction: row; align-items: center; }
+  /* النوافذ تعود مركزية */
+  .modal-backdrop { align-items: center; padding: 20px; }
+  .modal-card, .modal-card.wide, .patient-modal {
+    width: min(560px, 100%); border-radius: 16px;
+    padding: 25px; max-height: 90vh; max-height: 92dvh;
+  }
+  .modal-card.wide { width: min(880px, 100%); }
+  .modal-header { position: static; margin-bottom: 20px; padding-bottom: 17px; }
+  .modal-actions { position: static; box-shadow: none; }
+  .modal-actions > button { flex: 0 0 auto; }
+}
+@media (min-width: 768px) {
+  /* الجداول تعود جداول حقيقية بتمرير أفقي (التابلت يتحمل ذلك) */
+  .table-cards { overflow-x: auto; }
+  table { font-size: 11px; white-space: nowrap; }
+}
+
+@media (min-width: 1024px) {
+  /* عودة الشريط الجانبي الثابت (نفس قيم App.css الأصلية حرفياً) */
+  .app-shell { display: flex; }
+  .sidebar {
+    position: static; width: 250px; min-width: 250px;
+    inset-inline-start: auto; transform: none; transition: none;
+    box-shadow: none; z-index: auto; overflow-y: visible;
+    padding: 28px 16px 20px;
+  }
+/* ===== 13-ب) صفحة الصلاحيات: أصناف استجابة بدل الأنماط المضمنة (المنطق كما هو) ===== */
+.perm-error { color: #b00020; font-size: 13px; margin-bottom: 10px; }
+.perm-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.perm-aside-title { margin: 4px 0 8px; }
+.perm-role-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 5px; }
+.perm-role-btn {
+  width: 100%; text-align: start; min-height: 44px; padding: 8px 11px;
+  border: 1px solid var(--line); border-radius: 9px; background: #fff; cursor: pointer;
+  font-size: 13px; color: var(--ink);
+}
+.perm-role-btn.selected { border-color: var(--teal); font-weight: 700; background: #f2f9f7; }
+.perm-role-btn.inactive { opacity: 0.55; }
+.perm-new-role { margin-top: 12px; display: grid; gap: 8px; }
+.perm-new-role input, .perm-name-input, .perm-desc-input {
+  min-height: 42px; padding: 8px 11px; border: 1px solid var(--line);
+  border-radius: 9px; font-size: 14px; width: 100%; box-sizing: border-box;
+}
+.perm-new-role button, .perm-meta-bar button { min-height: 44px; padding: 9px 14px; }
+.perm-meta-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.perm-name-input { max-width: 220px; flex: 1 1 170px; width: auto; }
+.perm-desc-input { flex: 1 1 200px; min-width: 0; width: auto; }
+.perm-group { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.perm-group legend { padding-inline: 6px; font-size: 13px; }
+.perm-check {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 3px 0; padding: 5px 0; font-size: 13px; line-height: 1.55;
+}
+.perm-check input[type='checkbox'] { width: 20px; height: 20px; flex: 0 0 auto; accent-color: var(--teal); margin-top: 1px; }
+.perm-check code { word-break: break-word; overflow-wrap: anywhere; }
+.perm-save { margin-top: 12px; min-height: 44px; padding: 10px 18px; }
+
+@media (max-width: 767px) {
+  .perm-layout { grid-template-columns: 1fr; }
+  .perm-name-input { max-width: none; width: 100%; }
+  .perm-desc-input { width: 100%; }
+  .perm-meta-bar button { flex: 1 1 46%; }
+}
+
+/* ===== 14) الطباعة: لا تطبع عناصر واجهة التطبيق ===== */
+  .sidebar-head { display: block; }
+  .nav-close { display: none; }
+  .sidebar-brand { padding: 0 12px 45px; }
+  .sidebar-brand strong { font-size: 23px; }
+  .sidebar-bottom { margin-top: auto; gap: 20px; }
+  .support-note { padding: 0 12px; }
+  .drawer-profile { display: none; }
+  .nav-overlay { display: none; }
+  .main-content { flex: 1; max-width: 1500px; padding: 36px clamp(22px, 4vw, 64px); overflow: hidden; }
+  .menu-button { display: none; }
+  .topbar { margin-bottom: 31px; gap: 16px; }
+  .topbar h1 { font-size: 26px; }
+  .eyebrow { font-size: 11px; }
+  .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; }
+  .content-grid { grid-template-columns: 1.4fr 1fr; gap: 18px; }
+  .form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form-row.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .data-panel, .full-panel { padding: 21px; border-radius: 13px; }
+  .record-block { padding: 18px; }
+  .date-chip { border-right: 1px solid #b9d9d1; padding-right: 27px; border-inline-start: 0; padding-inline-start: 0; }
+  .top-actions .profile { display: flex; }
+  .tab-grid.two { grid-template-columns: 1fr 1fr; gap: 20px; }
+  .welcome-band { padding: 24px 28px; }
+  .report-hero { padding: 27px; }
+  .profile strong, .profile span { max-width: 190px; }
+}
+
+@media (min-width: 1440px) {
+  .main-content { padding-inline: 64px; }
+}
+
+/* ===== 14) الطباعة: لا تطبع عناصر واجهة التطبيق ===== */
+@media print {
+  .sidebar, .nav-overlay, .menu-button, .install-bar, .update-toast, .tabs, .toolbar, .pagination { display: none !important; }
+  .table-wrap { overflow: visible !important; }
+  .table-cards table, .table-cards thead, .table-cards tbody,
+  .table-cards tr, .table-cards th, .table-cards td { display: revert; }
+  .table-cards td::before { content: none; }
+}

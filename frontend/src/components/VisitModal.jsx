@@ -246,19 +246,19 @@ function VitalsTab({ visitId, data, reload, setError }) {
 
       <h4>القياسات المسجلة في هذه الزيارة</h4>
       {data.vitals.length === 0 ? <Empty text="لا توجد قياسات بعد" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>الوقت</th><th>الوزن</th><th>الطول</th><th>الضغط</th><th>النبض</th><th>الحرارة</th><th>SpO2</th><th>الألم</th><th>بواسطة</th><th></th></tr></thead>
             <tbody>
               {data.vitals.map((vt) => (
                 <tr key={vt.vital_id}>
                   <td>{fmtDateTime(vt.recorded_at)}</td>
-                  <td>{vt.weight_kg ?? '—'}</td><td>{vt.height_cm ?? '—'}</td>
-                  <td>{vt.systolic ? `${vt.systolic}/${vt.diastolic}` : '—'}</td>
-                  <td>{vt.pulse ?? '—'}</td><td>{vt.temperature ?? '—'}</td>
-                  <td>{vt.spo2 ?? '—'}</td><td>{vt.pain_score ?? '—'}</td>
-                  <td>{vt.recorded_by_name || '—'}</td>
-                  <td><button type="button" className="text-button danger" onClick={async () => { try { await api.clinical.deleteVitals(visitId, vt.vital_id); reload() } catch (err) { setError(err.message) } }}>حذف</button></td>
+                  <td data-label="الوزن">{vt.weight_kg ?? '—'}</td><td data-label="الطول">{vt.height_cm ?? '—'}</td>
+                  <td data-label="الضغط">{vt.systolic ? `${vt.systolic}/${vt.diastolic}` : '—'}</td>
+                  <td data-label="النبض">{vt.pulse ?? '—'}</td><td data-label="الحرارة">{vt.temperature ?? '—'}</td>
+                  <td data-label="SpO2">{vt.spo2 ?? '—'}</td><td data-label="الألم">{vt.pain_score ?? '—'}</td>
+                  <td data-label="بواسطة">{vt.recorded_by_name || '—'}</td>
+                  <td className="cell-actions" data-label="إجراءات"><button type="button" className="text-button danger" onClick={async () => { try { await api.clinical.deleteVitals(visitId, vt.vital_id); reload() } catch (err) { setError(err.message) } }}>حذف</button></td>
                 </tr>
               ))}
             </tbody>
@@ -309,17 +309,17 @@ function DiagnosesTab({ visitId, data, reload, setError }) {
       </form>
 
       {data.diagnoses.length === 0 ? <Empty text="لا توجد تشخيصات بعد" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>النوع</th><th>التشخيص</th><th>ICD</th><th>بواسطة</th><th></th></tr></thead>
             <tbody>
               {data.diagnoses.map((d) => (
                 <tr key={d.diagnosis_id}>
                   <td><span className="chip small">{TYPE_LABELS[d.diagnosis_type] || d.diagnosis_type}</span></td>
-                  <td>{d.description}</td>
-                  <td dir="ltr">{d.icd_code || '—'}</td>
-                  <td>{d.created_by_name || '—'}</td>
-                  <td><button type="button" className="text-button danger" onClick={async () => { try { await api.clinical.deleteDiagnosis(visitId, d.diagnosis_id); reload() } catch (err) { setError(err.message) } }}>حذف</button></td>
+                  <td data-label="التشخيص">{d.description}</td>
+                  <td dir="ltr" data-label="ICD">{d.icd_code || '—'}</td>
+                  <td data-label="بواسطة">{d.created_by_name || '—'}</td>
+                  <td className="cell-actions" data-label="إجراءات"><button type="button" className="text-button danger" onClick={async () => { try { await api.clinical.deleteDiagnosis(visitId, d.diagnosis_id); reload() } catch (err) { setError(err.message) } }}>حذف</button></td>
                 </tr>
               ))}
             </tbody>
@@ -394,14 +394,19 @@ function LabsTab({ visitId, data, reload, setError }) {
                 )}
               </div>
               {o.results?.length > 0 && (
+                <div className="table-wrap table-cards">
                 <table><thead><tr><th>المؤشر</th><th>النتيجة</th><th>الوحدة</th><th>المعدل الطبيعي</th><th>حالة</th></tr></thead><tbody>
                   {o.results.map((r) => (
                     <tr key={r.result_id}>
-                      <td>{r.analyte}</td><td><strong>{r.result_value || '—'}</strong></td><td>{r.unit || '—'}</td><td>{r.reference_range || '—'}</td>
-                      <td>{r.is_abnormal ? <span className="chip small chip-warn">شاذ</span> : <span className="chip small">طبيعي</span>}</td>
+                      <td>{r.analyte}</td>
+                      <td data-label="النتيجة"><strong>{r.result_value || '—'}</strong></td>
+                      <td data-label="الوحدة">{r.unit || '—'}</td>
+                      <td data-label="المعدل الطبيعي">{r.reference_range || '—'}</td>
+                      <td data-label="الحالة">{r.is_abnormal ? <span className="chip small chip-warn">شاذ</span> : <span className="chip small">طبيعي</span>}</td>
                     </tr>
                   ))}
                 </tbody></table>
+                </div>
               )}
               {resultEditor?.orderId === o.order_id && (
                 <div className="results-editor">
@@ -524,18 +529,18 @@ function AttachmentsTab({ visitId, data, reload, setError }) {
       </form>
 
       {data.attachments.length === 0 ? <Empty text="لا توجد مرفقات" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>الاسم</th><th>النوع</th><th>الحجم</th><th>بواسطة</th><th>التاريخ</th><th></th></tr></thead>
             <tbody>
               {data.attachments.map((a) => (
                 <tr key={a.attachment_id}>
                   <td>{a.file_name}</td>
-                  <td>{KIND_LABELS[a.kind] || a.kind}</td>
-                  <td>{a.size_bytes ? `${Math.round(a.size_bytes / 1024)} KB` : '—'}</td>
-                  <td>{a.uploaded_by_name || '—'}</td>
-                  <td>{fmtDateTime(a.created_at)}</td>
-                  <td>
+                  <td data-label="النوع">{KIND_LABELS[a.kind] || a.kind}</td>
+                  <td data-label="الحجم">{a.size_bytes ? `${Math.round(a.size_bytes / 1024)} KB` : '—'}</td>
+                  <td data-label="بواسطة">{a.uploaded_by_name || '—'}</td>
+                  <td data-label="التاريخ">{fmtDateTime(a.created_at)}</td>
+                  <td className="cell-actions" data-label="إجراءات">
                     <button type="button" className="text-button" onClick={() => api.clinical.downloadAttachment(a.attachment_id).catch((err) => setError(err.message))}>تنزيل</button> {' '}
                     <button type="button" className="text-button danger" onClick={async () => { if (!window.confirm('حذف المرفق؟')) return; try { await api.clinical.deleteAttachment(a.attachment_id); reload() } catch (err) { setError(err.message) } }}>حذف</button>
                   </td>
@@ -602,17 +607,17 @@ function ReferralsTab({ visitId, data, reload, setError }) {
       </form>
 
       {data.referrals.length === 0 ? <Empty text="لا توجد إحالات" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>السبب</th><th>العيادة</th><th>التخصص</th><th>الحالة</th><th>التاريخ</th></tr></thead>
             <tbody>
               {data.referrals.map((r) => (
                 <tr key={r.referral_id}>
                   <td>{r.reason}</td>
-                  <td>{r.to_clinic_name || '—'}</td>
-                  <td>{r.to_specialty_name || '—'}</td>
-                  <td><span className="chip small">{r.status}</span></td>
-                  <td>{fmtDateTime(r.created_at)}</td>
+                  <td data-label="العيادة">{r.to_clinic_name || '—'}</td>
+                  <td data-label="التخصص">{r.to_specialty_name || '—'}</td>
+                  <td data-label="الحالة"><span className="chip small">{r.status}</span></td>
+                  <td data-label="التاريخ">{fmtDateTime(r.created_at)}</td>
                 </tr>
               ))}
             </tbody>

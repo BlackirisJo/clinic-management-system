@@ -1,16 +1,31 @@
 import { useEffect, useRef } from 'react'
 
-// نافذة منبثقة عامة
+// قفل تمرير الصفحة أثناء فتح أي نافذة (مهم على الهاتف حتى لا تتحرك الخلفية)
+let scrollLocks = 0
+function lockBodyScroll() {
+  scrollLocks += 1
+  if (scrollLocks === 1) document.body.style.overflow = 'hidden'
+  return () => {
+    scrollLocks = Math.max(0, scrollLocks - 1)
+    if (scrollLocks === 0) document.body.style.overflow = ''
+  }
+}
+
+// نافذة منبثقة عامة — على الهاتف تظهر كـ Bottom-Sheet، وعلى الشاشات الأكبر نافذة مركزية
 export function Modal({ title, subtitle, onClose, children, wide }) {
   const ref = useRef(null)
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    const unlock = lockBodyScroll()
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      unlock()
+    }
   }, [onClose])
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
-      <section ref={ref} className={`modal-card${wide ? ' wide' : ''}`}>
+      <section ref={ref} className={`modal-card${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
         <div className="modal-header">
           <div><span className="eyebrow">{subtitle || 'نظام إدارة العيادات'}</span><h2>{title}</h2></div>
           <button className="modal-close" onClick={onClose} aria-label="إغلاق">×</button>

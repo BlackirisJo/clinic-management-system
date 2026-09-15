@@ -482,16 +482,16 @@ function UltrasoundSection({ pregnancy, ultrasounds, visitId, reload, setError }
 function PregnancyAttachments({ attachments, setError }) {
   if (attachments.length === 0) return <Empty text="لا توجد مرفقات للحمل" />
   return (
-    <div className="table-wrap">
+    <div className="table-wrap table-cards">
       <table>
         <thead><tr><th>الاسم</th><th>النوع</th><th>التاريخ</th><th></th></tr></thead>
         <tbody>
           {attachments.map((a) => (
             <tr key={a.attachment_id}>
               <td>{a.file_name}</td>
-              <td>{a.kind}</td>
-              <td>{fmtDateTime(a.created_at)}</td>
-              <td><button type="button" className="text-button" onClick={() => api.clinical.downloadAttachment(a.attachment_id).catch((err) => setError(err.message))}>تنزيل</button></td>
+              <td data-label="النوع">{a.kind}</td>
+              <td data-label="التاريخ">{fmtDateTime(a.created_at)}</td>
+              <td className="cell-actions" data-label="إجراءات"><button type="button" className="text-button" onClick={() => api.clinical.downloadAttachment(a.attachment_id).catch((err) => setError(err.message))}>تنزيل</button></td>
             </tr>
           ))}
         </tbody>

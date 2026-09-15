@@ -39,7 +39,7 @@ export default function UsersView() {
       <Notice kind="error">{error}</Notice>
       {loading ? <Loading text="جارِ تحميل المستخدمين" /> : rows.length === 0 ? <Empty text="لا يوجد مستخدمون" /> : (
         <>
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الدور</th><th>العيادة</th><th>الحالة</th><th>الترخيص</th><th>تاريخ الإنشاء</th><th>إجراءات</th></tr></thead>
               <tbody>
@@ -48,13 +48,13 @@ export default function UsersView() {
                   return (
                     <tr key={u.user_id}>
                       <td>{u.full_name}</td>
-                      <td dir="ltr">{u.username}</td>
-                      <td>{ROLE_LABELS[u.role_name] || u.role_name}</td>
-                      <td>{u.clinic_name || '—'}</td>
-                      <td><span className={`status ${st.cls}`}>{st.label}</span></td>
-                      <td>{u.medical_license_no || '—'}</td>
-                      <td>{fmtDate(u.created_at)}</td>
-                      <td><button className="text-button" onClick={() => setEditing(u)}>تعديل</button></td>
+                      <td dir="ltr" data-label="اسم المستخدم">{u.username}</td>
+                      <td data-label="الدور">{ROLE_LABELS[u.role_name] || u.role_name}</td>
+                      <td data-label="العيادة">{u.clinic_name || '—'}</td>
+                      <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>
+                      <td data-label="الترخيص">{u.medical_license_no || '—'}</td>
+                      <td data-label="تاريخ الإنشاء">{fmtDate(u.created_at)}</td>
+                      <td className="cell-actions"><button className="text-button" onClick={() => setEditing(u)}>تعديل</button></td>
                     </tr>
                   )
                 })}

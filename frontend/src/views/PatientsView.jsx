@@ -62,19 +62,24 @@ export function PrescriptionItemsModal({ prescriptionId, onClose }) {
           </div>
           {rx.notes ? <div className="paper-notes"><b>ملاحظات:</b> {rx.notes}</div> : null}
           {items.length === 0 ? <Empty text="لا توجد أدوية مسجلة في هذه الروشتة" /> : (
-            <table>
-              <thead><tr><th>#</th><th>الدواء</th><th>الجرعة</th><th>التردد</th><th>المدة</th><th>تعليمات التوقيت</th><th>التكرار</th></tr></thead>
-              <tbody>
-                {items.map((it, i) => (
-                  <tr key={it.item_id ?? i}>
-                    <td>{i + 1}</td>
-                    <td>{it.trade_name}{it.scientific_name ? ` (${it.scientific_name})` : ''}</td>
-                    <td>{it.dosage}</td><td>{it.frequency}</td><td>{it.duration}</td>
-                    <td>{it.timing_instructions || '—'}</td><td>{it.repeats_count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap table-cards">
+              <table>
+                <thead><tr><th>#</th><th>الدواء</th><th>الجرعة</th><th>التردد</th><th>المدة</th><th>تعليمات التوقيت</th><th>التكرار</th></tr></thead>
+                <tbody>
+                  {items.map((it, i) => (
+                    <tr key={it.item_id ?? i}>
+                      <td className="hide-sm" data-label="#">{i + 1}</td>
+                      <td className="cell-title">{it.trade_name}{it.scientific_name ? ` (${it.scientific_name})` : ''}</td>
+                      <td data-label="الجرعة">{it.dosage}</td>
+                      <td data-label="التردد">{it.frequency}</td>
+                      <td data-label="المدة">{it.duration}</td>
+                      <td data-label="تعليمات التوقيت">{it.timing_instructions || '—'}</td>
+                      <td data-label="التكرار">{it.repeats_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           <div className="paper-actions">
             <button className="primary-button compact" onClick={() => window.print()}>طباعة</button>
@@ -126,7 +131,7 @@ export default function PatientsView() {
       <Notice kind="error">{error}</Notice>
       {loading ? <Loading text="جارِ تحميل المرضى" /> : rows.length === 0 ? <Empty text="لا توجد سجلات مرضى مطابقة" /> : (
         <>
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead>
                 <tr><th>المريض</th><th>الرقم الوطني</th><th>الهاتف</th><th>النوع</th><th>تاريخ الميلاد</th><th>تاريخ التسجيل</th><th>إجراءات</th></tr>
@@ -135,12 +140,12 @@ export default function PatientsView() {
                 {rows.map((p) => (
                   <tr key={p.patient_id}>
                     <td><span className="table-avatar">{p.full_name?.[0] || 'م'}</span>{p.full_name}{p.is_shared ? <span className="badge shared-chip">مشترك</span> : null}</td>
-                    <td dir="ltr">{p.national_id || '—'}</td>
-                    <td dir="ltr">{p.phone}</td>
-                    <td>{GENDER_LABELS[p.gender] || p.gender}</td>
-                    <td>{fmtDate(p.date_of_birth, true)}</td>
-                    <td>{fmtDate(p.created_at, true)}</td>
-                    <td><button className="text-button" onClick={() => setSelected(p)}>الملف الكامل ←</button></td>
+                    <td dir="ltr" data-label="الرقم الوطني">{p.national_id || '—'}</td>
+                    <td dir="ltr" data-label="الهاتف">{p.phone}</td>
+                    <td data-label="النوع">{GENDER_LABELS[p.gender] || p.gender}</td>
+                    <td data-label="تاريخ الميلاد">{fmtDate(p.date_of_birth, true)}</td>
+                    <td data-label="تاريخ التسجيل">{fmtDate(p.created_at, true)}</td>
+                    <td className="cell-actions"><button className="text-button" onClick={() => setSelected(p)}>الملف الكامل ←</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -444,16 +449,19 @@ function VisitsTab({ patient, user }) {
       </div>
       <Notice kind="error">{error}</Notice>
       {visits === null ? <Loading /> : visits.length === 0 ? <Empty text="لا توجد زيارات مسجلة" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>التاريخ</th><th>العيادة</th><th>التخصص</th><th>الطبيب</th><th>الحالة</th><th>الملاحظات</th><th></th></tr></thead>
             <tbody>
               {visits.map((v) => (
                 <tr key={v.visit_id}>
-                  <td>{fmtDateTime(v.visit_date)}</td><td>{v.clinic_name || '—'}</td><td>{v.specialty_name || '—'}</td><td>{v.doctor_name || '—'}</td>
-                  <td>{v.visit_status === 'OPEN' ? <span className="badge">مفتوحة</span> : v.visit_status === 'COMPLETED' ? <span className="muted-small">مكتملة</span> : <span className="muted-small">ملغاة</span>}</td>
-                  <td>{v.notes || '—'}</td>
-                  <td><button className="text-button" onClick={() => setOpenVisitId(v.visit_id)}>سجل الزيارة ←</button></td>
+                  <td>{fmtDateTime(v.visit_date)}</td>
+                  <td data-label="العيادة">{v.clinic_name || '—'}</td>
+                  <td data-label="التخصص">{v.specialty_name || '—'}</td>
+                  <td data-label="الطبيب">{v.doctor_name || '—'}</td>
+                  <td data-label="الحالة">{v.visit_status === 'OPEN' ? <span className="badge">مفتوحة</span> : v.visit_status === 'COMPLETED' ? <span className="muted-small">مكتملة</span> : <span className="muted-small">ملغاة</span>}</td>
+                  <td data-label="الملاحظات">{v.notes || '—'}</td>
+                  <td className="cell-actions"><button className="text-button" onClick={() => setOpenVisitId(v.visit_id)}>سجل الزيارة ←</button></td>
                 </tr>
               ))}
             </tbody>
@@ -464,16 +472,16 @@ function VisitsTab({ patient, user }) {
       <div className="record-block" style={{ marginTop: 16 }}>
         <h4>الروشتات الطبية</h4>
         {prescriptions.length === 0 ? <Empty text="لا توجد روشتات لهذا المريض" /> : (
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>الطبيب</th><th>الملاحظات</th><th>التاريخ</th><th></th></tr></thead>
               <tbody>
                 {prescriptions.map((rx) => (
                   <tr key={rx.prescription_id}>
                     <td>{rx.doctor_name || '—'}</td>
-                    <td>{rx.notes || '—'}</td>
-                    <td>{fmtDateTime(rx.created_at)}</td>
-                    <td><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td>
+                    <td data-label="الملاحظات">{rx.notes || '—'}</td>
+                    <td data-label="التاريخ">{fmtDateTime(rx.created_at)}</td>
+                    <td className="cell-actions"><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -592,12 +600,17 @@ function MedicalRecordTab({ patient }) {
       <div className="record-block">
         <h4>الزيارات</h4>
         {record.visits?.length === 0 ? <Empty text="لا توجد زيارات" /> : (
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>العيادة</th><th>الطبيب</th><th>التاريخ</th><th>الملاحظات</th></tr></thead>
               <tbody>
                 {record.visits.map((v) => (
-                  <tr key={v.visit_id}><td>{v.clinic_name || '—'}</td><td>{v.doctor_name || '—'}</td><td>{fmtDateTime(v.visit_date)}</td><td>{v.notes || '—'}</td></tr>
+                  <tr key={v.visit_id}>
+                    <td>{v.clinic_name || '—'}</td>
+                    <td data-label="الطبيب">{v.doctor_name || '—'}</td>
+                    <td data-label="التاريخ">{fmtDateTime(v.visit_date)}</td>
+                    <td data-label="الملاحظات">{v.notes || '—'}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -607,12 +620,17 @@ function MedicalRecordTab({ patient }) {
       <div className="record-block">
         <h4>الروشتات الطبية</h4>
         {record.prescriptions?.length === 0 ? <Empty text="لا توجد روشتات" /> : (
-          <div className="table-wrap">
+          <div className="table-wrap table-cards">
             <table>
               <thead><tr><th>الطبيب</th><th>الملاحظات</th><th>التاريخ</th><th></th></tr></thead>
               <tbody>
                 {record.prescriptions.map((rx) => (
-                  <tr key={rx.prescription_id}><td>{rx.doctor_name || '—'}</td><td>{rx.notes || '—'}</td><td>{fmtDateTime(rx.created_at)}</td><td><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td></tr>
+                  <tr key={rx.prescription_id}>
+                    <td>{rx.doctor_name || '—'}</td>
+                    <td data-label="الملاحظات">{rx.notes || '—'}</td>
+                    <td data-label="التاريخ">{fmtDateTime(rx.created_at)}</td>
+                    <td className="cell-actions"><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -655,17 +673,17 @@ function SharesTab({ patient }) {
       </div>
       <Notice kind="error">{error}</Notice>
       {shares === null ? <Loading /> : shares.length === 0 ? <Empty text="لا توجد مشاركات" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>العيادة المستهدفة</th><th>المستوى</th><th>الحالة</th><th>انتهاء</th><th>إجراءات</th></tr></thead>
             <tbody>
               {shares.map((s) => (
                 <tr key={s.share_id}>
-                  <td>{s.clinic_name || '—'}</td>
-                  <td>{s.access_level === 'WRITE' ? 'قراءة وكتابة' : 'قراءة فقط'}</td>
-                  <td>{s.status === 'ACTIVE' ? 'نشطة' : 'ملغاة'}</td>
-                  <td>{fmtDate(s.expires_at)}</td>
-                  <td>
+                  <td data-label="العيادة المستهدفة">{s.clinic_name || '—'}</td>
+                  <td data-label="المستوى">{s.access_level === 'WRITE' ? 'قراءة وكتابة' : 'قراءة فقط'}</td>
+                  <td data-label="الحالة">{s.status === 'ACTIVE' ? 'نشطة' : 'ملغاة'}</td>
+                  <td data-label="انتهاء">{fmtDate(s.expires_at)}</td>
+                  <td className="cell-actions">
                     {s.status === 'ACTIVE' ? (
                       <button className="text-button" onClick={() => revoke(s.share_id)} disabled={doing}>إلغاء المشاركة</button>
                     ) : '—'}

@@ -57,12 +57,17 @@ function MedicationsTab() {
       </div>
       <Notice kind="error">{error}</Notice>
       {rows === null ? <Loading /> : rows.length === 0 ? <Empty text="لا توجد أدوية مطابقة" /> : (
-        <div className="table-wrap">
+        <div className="table-wrap table-cards">
           <table>
             <thead><tr><th>الاسم التجاري</th><th>الاسم العلمي</th><th>الجرعة الافتراضية</th><th>التعليمات</th></tr></thead>
             <tbody>
               {rows.map((m) => (
-                <tr key={m.medication_id}><td>{m.trade_name}</td><td>{m.scientific_name}</td><td>{m.default_dosage || '—'}</td><td>{m.instructions || '—'}</td></tr>
+                <tr key={m.medication_id}>
+                  <td data-label="الاسم التجاري">{m.trade_name}</td>
+                  <td data-label="الاسم العلمي">{m.scientific_name}</td>
+                  <td data-label="الجرعة الافتراضية">{m.default_dosage || '—'}</td>
+                  <td data-label="التعليمات">{m.instructions || '—'}</td>
+                </tr>
               ))}
             </tbody>
           </table>
