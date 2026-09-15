@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
 import { fmtTime, fmtDate, APPOINTMENT_STATUS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
+import { PatientSearchSelect } from '../components/SearchSelect'
 
 const LIMIT = 10
 const ALL_STATUS = ['SCHEDULED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW']
@@ -110,7 +111,6 @@ function AppointmentForm({ onClose, onSaved }) {
     reason: '',
     notes: '',
   })
-  const [patients, setPatients] = useState([])
   const [doctors, setDoctors] = useState([])
   const [clinics, setClinics] = useState([])
   const [loadingDoctors, setLoadingDoctors] = useState(false)
@@ -164,9 +164,7 @@ function AppointmentForm({ onClose, onSaved }) {
           setForm(prev => ({ ...prev, clinic_id: '' }))
           loadDoctorsForClinic('')
         }
-        // تحميل المرضى
-        const patientResult = await api.patients.list({ limit: 100 })
-        setPatients(patientResult.patients || [])
+        // المرضى يُبحثون من جهة الخادم داخل PatientSearchSelect (لا تحميل مسبق لأول 100 فقط)
       } catch (err) {
         setError(err.message || 'تعذر تحميل البيانات')
         setClinics([])
@@ -220,10 +218,7 @@ function AppointmentForm({ onClose, onSaved }) {
             )}
           </Field>
           <Field label="المريض" required>
-            <select required value={form.patient_id} onChange={(e) => setForm({ ...form, patient_id: e.target.value })}>
-              <option value="">اختر المريض...</option>
-              {patients.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.full_name} {p.phone ? `(${p.phone})` : ''}</option>)}
-            </select>
+            <PatientSearchSelect value={form.patient_id} onChange={(id) => setForm(prev => ({ ...prev, patient_id: id }))} required />
           </Field>
         </div>
         <Field label="الطبيب" required hint={loadingDoctors ? 'جارِ تحميل الأطباء...' : doctors.length === 0 ? 'لا يوجد أطباء في هذه العيادة' : undefined}>

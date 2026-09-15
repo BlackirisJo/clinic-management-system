@@ -58,7 +58,7 @@ export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
         AND s.status = 'ACTIVE' AND s.expires_at > NOW()
     ) AS is_shared
     FROM patients p
-    WHERE $1::int[] IS NULL OR p.clinic_id = ANY($1::int[]) OR EXISTS (
+    WHERE ($1::int[] IS NULL OR p.clinic_id = ANY($1::int[]) OR EXISTS (
       SELECT 1 FROM patient_clinic_shares s
       WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($1::int[])
         AND s.status = 'ACTIVE' AND s.expires_at > NOW()
@@ -69,7 +69,7 @@ export const getPatients = async (req: AuthenticatedRequest, res: Response) => {
     ) OR EXISTS (
       SELECT 1 FROM visits v
       WHERE v.patient_id = p.patient_id AND v.clinic_id = ANY($1::int[])
-    )`;
+    ))`;
     const params: any[] = [clinicIds];
 
     if (search) {

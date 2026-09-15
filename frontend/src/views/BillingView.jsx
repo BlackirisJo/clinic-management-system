@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
 import { fmtMoney, fmtDate, fmtNumber, PAYMENT_TYPES, INVOICE_STATUS, fmtInvoiceNumber } from '../lib/format'
 import { Field, Loading, Empty, Notice, Modal } from '../components/ui'
+import { PatientSearchSelect } from '../components/SearchSelect'
 
 export default function BillingView() {
   const [tab, setTab] = useState('invoices')
@@ -75,7 +76,6 @@ function KpisTable() {
 
 function InvoiceForm() {
   const { user } = useAuth()
-  const [patients, setPatients] = useState([])
   const [clinics, setClinics] = useState([])
   const [doctors, setDoctors] = useState([])
   const [services, setServices] = useState([])
@@ -91,14 +91,12 @@ function InvoiceForm() {
     let cancelled = false
     async function boot() {
       try {
-        const [pRes, cRes, dRes, sRes] = await Promise.all([
-          api.patients.list({ limit: 100 }).catch((err) => { console.error('patients load error:', err); return { patients: [] } }),
+        const [cRes, dRes, sRes] = await Promise.all([
           api.clinics.financialDirectory().catch((err) => { console.error('clinics directory error:', err); return { clinics: [] } }),
           api.users.doctors({ limit: 100 }).catch((err) => { console.error('doctors load error:', err); return { doctors: [] } }),
           api.billing.listServices({ limit: 100 }).catch((err) => { console.error('services load error:', err); return { services: [] } }),
         ])
         if (cancelled) return
-        setPatients(pRes.patients || [])
         const dirClinics = cRes.clinics || []
         setClinics(dirClinics)
         setDoctors(dRes.doctors || [])
@@ -169,10 +167,7 @@ function InvoiceForm() {
     <form className="patient-form" onSubmit={submit}>
       <div className="form-row">
         <Field label="المريض" required>
-          <select required value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-            <option value="">اختر المريض بالاسم...</option>
-            {patients.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.full_name}{p.phone ? ` (${p.phone})` : ''}</option>)}
-          </select>
+          <PatientSearchSelect value={patientId} onChange={setPatientId} required />
         </Field>
         <Field label="طريقة الدفع" required>
           <select value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>

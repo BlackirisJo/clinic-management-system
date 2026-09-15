@@ -494,3 +494,10 @@ td { padding: 11px 8px; }
   .table-cards tr, .table-cards th, .table-cards td { display: revert; }
   .table-cards td::before { content: none; }
 }
+/* ===== 15) الاختيار البحثي: أهداف لمس مريحة وقائمة أقصر على الهاتف ===== */
+@media (max-width: 767px) {
+  .search-select .ss-input { min-height: var(--tap); }
+  .ss-option { min-height: var(--tap); align-content: center; }
+  .ss-panel { max-height: 45vh; }
+}
+

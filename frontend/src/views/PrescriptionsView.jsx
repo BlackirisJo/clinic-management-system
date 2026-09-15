@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { fmtDateTime } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice } from '../components/ui'
+import { PatientSearchSelect, MedicationSearchSelect } from '../components/SearchSelect'
 import { useAuth } from '../auth/AuthContext'
 import ImportMedicationsModal from '../components/ImportMedicationsModal'
 
@@ -113,32 +114,29 @@ function AddMedicationModal({ onClose, onSaved }) {
   )
 }
 function PrescriptionsTab() {
-  const [patients, setPatients] = useState([])
   const [patientId, setPatientId] = useState('')
   const [visits, setVisits] = useState(null)
   const [visitId, setVisitId] = useState('')
-  const [medications, setMedications] = useState([])
   const [items, setItems] = useState([])
   const [notes, setNotes] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState(null)
 
-  useEffect(() => {
-    api.patients.list({ limit: 100 })
-      .then((r) => setPatients(r.patients || []))
-      .catch(() => setPatients([]))
-    api.prescriptions.listMedications({})
-      .then((r) => setMedications(r.medications || []))
-      .catch(() => setMedications([]))
-  }, [])
-
+  // المرضى والأدوية يُجلَبان من جهة الخادم عند البحث (SearchSelect) بدل تحميل أول 100/50 فقط
   useEffect(() => {
     if (!patientId) { setVisits(null); setVisitId(''); return }
     api.patients.visits(patientId)
       .then((r) => setVisits(r.visits || []))
       .catch(() => { setVisits([]); setError('تعذر تحميل زيارات المريض') })
   }, [patientId])
+
+  // تغيير المريض يُبطل الزيارة المختارة سابقًا (الزيارة تخص مريضًا واحدًا)
+  function changePatient(id) {
+    if (String(id) === String(patientId)) return
+    setPatientId(id)
+    setVisitId('')
+  }
 
   function addItem() {
     setItems((prev) => [...prev, { medication_id: '', dosage: '', frequency: '', duration: '', timing_instructions: '', repeats_count: 1 }])
@@ -183,10 +181,7 @@ function PrescriptionsTab() {
       <form className="patient-form prescription-form" onSubmit={submit}>
         <div className="form-row">
           <Field label="المريض" required>
-            <select required value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-              <option value="">اختر المريض...</option>
-              {patients.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.full_name}</option>)}
-            </select>
+            <PatientSearchSelect value={patientId} onChange={changePatient} required />
           </Field>
           <Field label="الزيارة" required hint={visits?.length === 0 ? 'لا توجد زيارات لهذا المريض' : undefined}>
             <select required value={visitId} onChange={(e) => setVisitId(e.target.value)} disabled={!patientId}>
@@ -207,10 +202,7 @@ function PrescriptionsTab() {
               <div className="item-card" key={i}>
                 <div className="form-row">
                   <Field label="الدواء" required>
-                    <select required value={it.medication_id} onChange={(e) => updateItem(i, 'medication_id', e.target.value)}>
-                      <option value="">اختر الدواء...</option>
-                      {medications.map((m) => <option key={m.medication_id} value={m.medication_id}>{m.trade_name} ({m.scientific_name})</option>)}
-                    </select>
+                    <MedicationSearchSelect value={it.medication_id} onChange={(id) => updateItem(i, 'medication_id', id)} required />
                   </Field>
                   <Field label="الجرعة" required><input required placeholder="مثال: 500 ملغ" value={it.dosage} onChange={(e) => updateItem(i, 'dosage', e.target.value)} /></Field>
                 </div>

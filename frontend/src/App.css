@@ -171,3 +171,21 @@
 .danger-note{background:#fbe9e7;border-radius:10px;padding:12px 15px;margin-bottom:14px}
 .danger-note p{margin:0 0 6px;color:#8f4a41;font-size:12px}
 .danger-note p:last-child{margin:0}
+/* ===== اختيار بحثي (Search Select): مربع بحث مع قائمة نتائج ===== */
+.search-select{position:relative;display:block}
+.search-select.disabled{opacity:.65}
+.search-select .ss-input{display:block;width:100%;border:1px solid #dbe5e2;border-radius:9px;margin-top:7px;padding-block:11px;padding-inline:38px 34px;background:#fff;outline:0}
+.search-select .ss-input:focus{border-color:var(--teal);box-shadow:0 0 0 3px #187d7817}
+.ss-icon{position:absolute;inset-inline-start:12px;top:7px;bottom:0;display:flex;align-items:center;color:#9aa8a7;font-size:12px;pointer-events:none}
+.ss-clear{position:absolute;inset-inline-end:8px;top:7px;bottom:0;margin-block:auto;width:24px;height:24px;border:0;border-radius:7px;background:#f0f5f3;color:#63777a;font-size:15px;line-height:1}
+.ss-mirror{position:absolute;inset-block-start:7px;inset-block-end:0;inset-inline-start:0;inset-inline-end:0;width:auto;height:auto;margin:0;padding:0;border:0;background:transparent;color:transparent;opacity:0;pointer-events:none}
+.ss-panel{position:absolute;inset-inline:0;top:calc(100% + 4px);z-index:5;background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:0 16px 38px #123b3c26;max-height:280px;overflow:auto;padding:5px}
+.ss-list{list-style:none;display:grid;gap:2px;margin:0;padding:0}
+.ss-option{display:grid;gap:2px;padding:9px 11px;border-radius:8px;color:#3f5352;font-size:12px;cursor:pointer}
+.ss-option.active{background:#eef5f3}
+.ss-option.selected{background:#e4f1ee;font-weight:600}
+.ss-option-meta{color:#9aa8a7;font-size:10px;unicode-bidi:plaintext}
+.ss-state{display:flex;align-items:center;gap:8px;padding:10px 11px;color:#9aa8a7;font-size:11px}
+.ss-state.error{background:#fbe9e7;border-radius:8px;color:#a6554b}
+.ss-more{border-top:1px dashed var(--line);margin-top:4px;padding:8px 11px 4px;color:#a0acab;font-size:10px}
+
