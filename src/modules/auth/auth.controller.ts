@@ -42,9 +42,14 @@ export const login = async (req: Request, res: Response) => {
     });
     const tokenPayload = jwt.decode(token) as { jti?: string; exp?: number } | null;
     if (tokenPayload?.jti && tokenPayload.exp) {
+      // وصف الجهاز من ترويسة الطلب (نص خام مقتطع — بلا fingerprinting)
+      const uaHeader = req.headers['user-agent'];
+      const userAgent = typeof uaHeader === 'string' ? uaHeader.slice(0, 512) : null;
+      // كل تسجيل دخول = جلسة مستقلة، تبدأ بحضور (last_seen_at) من لحظة الإنشاء
       await pool.query(
-        `INSERT INTO user_sessions (user_id, jti, expires_at) VALUES ($1, $2, to_timestamp($3))`,
-        [user.user_id, tokenPayload.jti, tokenPayload.exp]
+        `INSERT INTO user_sessions (user_id, jti, expires_at, last_seen_at, user_agent)
+         VALUES ($1, $2, to_timestamp($3), NOW(), $4)`,
+        [user.user_id, tokenPayload.jti, tokenPayload.exp, userAgent]
       );
     }
     await pool.query(`INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, metadata) VALUES ($1, $2, 'LOGIN_SUCCESS', 'AUTH', $3)`, [user.user_id, user.clinic_id, JSON.stringify({ ip: req.ip })]);
@@ -68,6 +73,32 @@ export const logout = async (req: AuthenticatedRequest, res: Response) => {
 export const logoutAll = async (req: AuthenticatedRequest, res: Response) => {
   await pool.query('UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [req.user?.userId]);
   return res.status(200).json({ message: 'تم إنهاء جميع الجلسات بنجاح' });
+};
+
+// نبضة القلب (Heartbeat): تحديث last_seen_at للجلسة الحالية المستخرجة من JWT.
+// لا يُقبل أي معرف جلسة/مستخدم من الواجهة — المصدر هو التوكن الموثق عبر authenticateJWT
+// (الذي يضمن أصلًا: جلسة موجودة وغير ملغاة وغير منتهية ومستخدم ACTIVE).
+export const heartbeat = async (req: AuthenticatedRequest, res: Response) => {
+  const jti = req.authToken?.jti;
+  const userId = req.user?.userId;
+  if (!jti || !userId) return res.status(401).json({ message: 'المستخدم غير موثق' });
+
+  try {
+    // شرط دفاعي إضافي (جلسة غير ملغاة وغير منتهية) لحماية من أي تغير حالي بين الوسيط والمعالج
+    const result = await pool.query(
+      `UPDATE user_sessions SET last_seen_at = NOW()
+       WHERE jti = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > NOW()
+       RETURNING session_id`,
+      [jti, userId]
+    );
+    if (!result.rowCount) {
+      return res.status(403).json({ message: 'انتهت صلاحية جلستك أو تم إنهاؤها من قبل مدير النظام', code: 'SESSION_REVOKED' });
+    }
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error('Heartbeat Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم' });
+  }
 };
 
 // تغيير كلمة المرور (يتطلب كلمة المرور الحالية) — يُصفّر is_force_password_change

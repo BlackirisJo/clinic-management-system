@@ -1,34 +1,49 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import { ROLE_LABELS, USER_STATUS, fmtDate } from '../lib/format'
+import { ROLE_LABELS, USER_STATUS, fmtDate, fmtRelative, fmtDateTime } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
+import { useAuth } from '../auth/AuthContext'
 
 const LIMIT = 10
 const ROLES = ['DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST', 'SYSTEM_ADMIN', 'SUPER_ADMIN']
+// تحديث قائمة الاتصال (Online/Offline) أثناء فتح الشاشة — منفصل تماماً عن نبضة المستخدم الحالي
+const PRESENCE_POLL_MS = 15000
 
 export default function UsersView() {
+  const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [sessionsOf, setSessionsOf] = useState(null)
+  const [deleting, setDeleting] = useState(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  // حذف المستخدمين — حارس واجهة فقط؛ الحماية الحقيقية في الخادم (SUPER_ADMIN فقط، حسب الدور نفسه)
+  const canDelete = user?.roleName === 'SUPER_ADMIN'
+
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     setError('')
     try {
       const result = await api.users.list({ page, limit: LIMIT })
       setRows(result.users || [])
     } catch (err) {
       setError(err.message || 'تعذر تحميل المستخدمين — قد لا تملك صلاحية إدارة المستخدمين')
-      setRows([])
+      if (!silent) setRows([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [page])
 
   useEffect(() => { load() }, [load])
+
+  // تحديث دوري صامت للحضور (15 ثانية) — لا يُرسل heartbeat ولا يُعيد تحميل الصفحة
+  useEffect(() => {
+    const timer = setInterval(() => { load(true) }, PRESENCE_POLL_MS)
+    return () => clearInterval(timer)
+  }, [load])
 
   return (
     <section className="full-panel">
@@ -47,14 +62,21 @@ export default function UsersView() {
                   const st = USER_STATUS[u.status] || { label: u.status, cls: '' }
                   return (
                     <tr key={u.user_id}>
-                      <td>{u.full_name}</td>
+                      <td>
+                        <span className={`presence-dot ${u.is_online ? 'online' : 'offline'}`} aria-hidden="true" title={u.is_online ? 'متصل الآن' : 'غير متصل'} />
+                        {u.full_name}
+                      </td>
                       <td dir="ltr" data-label="اسم المستخدم">{u.username}</td>
                       <td data-label="الدور">{ROLE_LABELS[u.role_name] || u.role_name}</td>
                       <td data-label="العيادة">{u.clinic_name || '—'}</td>
                       <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>
                       <td data-label="الترخيص">{u.medical_license_no || '—'}</td>
                       <td data-label="تاريخ الإنشاء">{fmtDate(u.created_at)}</td>
-                      <td className="cell-actions"><button className="text-button" onClick={() => setEditing(u)}>تعديل</button></td>
+                      <td className="cell-actions">
+                        <button className="text-button" onClick={() => setSessionsOf(u)}>الجلسات</button>
+                        <button className="text-button" onClick={() => setEditing(u)}>تعديل</button>
+                        {canDelete && <button className="text-button danger" onClick={() => setDeleting(u)}>حذف</button>}
+                      </td>
                     </tr>
                   )
                 })}
@@ -67,6 +89,8 @@ export default function UsersView() {
 
       {showAdd && <CreateUserModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load() }} />}
       {editing && <EditUserModal user={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />}
+      {sessionsOf && <SessionsModal user={sessionsOf} onClose={() => setSessionsOf(null)} onChanged={() => load(true)} />}
+      {deleting && <DeleteUserModal user={deleting} onClose={() => setDeleting(null)} onSaved={() => { setDeleting(null); load() }} />}
     </section>
   )
 }
@@ -216,6 +240,157 @@ function EditUserModal({ user, onClose, onSaved }) {
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={onClose}>إغلاق</button>
           <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'حفظ التعديلات'}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+// نافذة إدارة جلسات مستخدم محدد — عرض كل جلسة ككيان مستقل وإنهاء ما يُختار منها فقط
+function SessionsModal({ user: target, onClose, onChanged }) {
+  const [sessions, setSessions] = useState(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [confirmAll, setConfirmAll] = useState(false)
+  const [confirmOne, setConfirmOne] = useState(null)
+
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      const result = await api.users.sessions(target.user_id)
+      setSessions(result.sessions || [])
+    } catch (err) {
+      setError(err.message || 'تعذر تحميل الجلسات')
+      setSessions([])
+    }
+  }, [target.user_id])
+
+  useEffect(() => { load() }, [load])
+
+  async function revoke(sessionId) {
+    setBusy(true)
+    setError('')
+    try {
+      await api.users.revokeSession(target.user_id, sessionId)
+      setConfirmOne(null)
+      await load()
+      onChanged()
+    } catch (err) {
+      setError(err.message || 'تعذر إنهاء الجلسة')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function revokeAll() {
+    setBusy(true)
+    setError('')
+    try {
+      await api.users.revokeAllSessions(target.user_id)
+      setConfirmAll(false)
+      await load()
+      onChanged()
+    } catch (err) {
+      setError(err.message || 'تعذر إنهاء الجلسات')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const activeSessions = (sessions || []).filter((s) => !s.revoked_at)
+
+  return (
+    <Modal title={`جلسات ${target.full_name}`} subtitle="إدارة الجلسات — كل جلسة مستقلة عن الأخرى" onClose={onClose}>
+      {sessions === null ? <Loading text="جارِ تحميل الجلسات" /> : (
+        <div className="sessions-list">
+          {sessions.length === 0 ? <Empty text="لا توجد جلسات مسجلة" /> : sessions.map((s) => (
+            <div key={s.session_id} className={`session-item${s.revoked_at ? ' revoked' : ''}`}>
+              <div className="session-head">
+                <span className={`presence-dot ${s.revoked_at || !s.is_online ? 'offline' : 'online'}`} aria-hidden="true" />
+                <strong>{s.device}</strong>
+                <span className={`status ${s.revoked_at ? 'cancelled' : s.is_online ? 'completed' : 'scheduled'}`}>
+                  {s.revoked_at ? 'منتهية' : s.is_online ? 'متصل' : 'غير متصل'}
+                </span>
+              </div>
+              <div className="session-meta">
+                <span>آخر نشاط: {fmtRelative(s.last_seen_at)}</span>
+                <span>بدأت: {fmtDateTime(s.created_at)}</span>
+                <span>تنتهي: {fmtDateTime(s.expires_at)}</span>
+              </div>
+              {confirmOne === s.session_id ? (
+                <div className="session-confirm">
+                  <p>هل أنت متأكد من إنهاء هذه الجلسة؟ سيتم تسجيل خروج المستخدم من الجهاز المحدد فقط.</p>
+                  <div className="modal-actions">
+                    <button type="button" className="secondary-button compact" onClick={() => setConfirmOne(null)}>إلغاء</button>
+                    <button className="primary-button compact" disabled={busy} onClick={() => revoke(s.session_id)}>{busy ? 'جارِ التنفيذ...' : 'تأكيد الإنهاء'}</button>
+                  </div>
+                </div>
+              ) : (
+                !s.revoked_at && (
+                  <div className="session-actions">
+                    <button type="button" className="text-button danger" onClick={() => setConfirmOne(s.session_id)}>إنهاء هذه الجلسة</button>
+                  </div>
+                )
+              )}
+            </div>
+          ))}
+          <Notice kind="error">{error}</Notice>
+          {activeSessions.length > 0 && (
+            confirmAll ? (
+              <div className="session-confirm">
+                <p>سيتم تسجيل خروج المستخدم من جميع الأجهزة والمتصفحات الحالية ({activeSessions.length} جلسة نشطة).</p>
+                <div className="modal-actions">
+                  <button type="button" className="secondary-button compact" onClick={() => setConfirmAll(false)}>إلغاء</button>
+                  <button className="primary-button compact" disabled={busy} onClick={revokeAll}>{busy ? 'جارِ التنفيذ...' : 'تأكيد إنهاء الكل'}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="modal-actions">
+                <button type="button" className="secondary-button compact" onClick={() => setConfirmAll(true)}>إنهاء جميع الجلسات</button>
+              </div>
+            )
+          )}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+// حذف المستخدم (Soft Delete في الخادم): تعطيل الحساب + إنهاء جميع جلساته + إخفاؤه من القائمة.
+// تأكيد بكتابة اسم المستخدم — والسجلات الطبية والتاريخية تبقى محفوظة دون أي تغيير.
+function DeleteUserModal({ user: target, onClose, onSaved }) {
+  const [confirmText, setConfirmText] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const matched = confirmText.trim() === target.username
+
+  async function submit() {
+    setBusy(true)
+    setError('')
+    try {
+      await api.users.remove(target.user_id)
+      onSaved()
+    } catch (err) {
+      setError(err.message || 'تعذر حذف المستخدم')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={`حذف ${target.full_name}`} subtitle="إجراء حساس — يُخفي الحساب نهائياً من القائمة" onClose={onClose}>
+      <div className="danger-note">
+        <p>سيتم تعطيل الحساب وإنهاء جميع جلساته في كل الأجهزة، وإخفاؤه من قائمة المستخدمين.</p>
+        <p>السجلات الطبية والتاريخية المرتبطة به (الزيارات، الفواتير، سجلات التدقيق) تبقى محفوظة دون أي تغيير.</p>
+      </div>
+      <form className="patient-form" onSubmit={(e) => { e.preventDefault(); if (matched && !busy) submit() }}>
+        <Field label="تأكيد الحذف" required hint={`اكتب اسم المستخدم ${target.username} للتأكيد`}>
+          <input dir="ltr" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoComplete="off" spellCheck={false} />
+        </Field>
+        <Notice kind="error">{error}</Notice>
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>إلغاء</button>
+          <button className="primary-button danger" disabled={!matched || busy}>{busy ? 'جارِ التنفيذ...' : 'حذف المستخدم'}</button>
         </div>
       </form>
     </Modal>

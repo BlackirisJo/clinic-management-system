@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import rateLimit from 'express-rate-limit';
-import { login, logout, logoutAll, changePassword } from './auth.controller';
+import { login, logout, logoutAll, changePassword, heartbeat } from './auth.controller';
 import { authenticateJWT, AuthenticatedRequest } from '../../middlewares/auth.middleware';
 import { pool } from '../../config/database';
 
@@ -32,6 +32,8 @@ router.get('/me', authenticateJWT, async (req: AuthenticatedRequest, res: Respon
 });
 router.post('/logout', authenticateJWT, logout);
 router.post('/logout-all', authenticateJWT, logoutAll);
+// نبضة الحضور — تُحدّث last_seen_at للجلسة الحالية المستخرجة من JWT فقط
+router.post('/heartbeat', authenticateJWT, heartbeat);
 router.post('/change-password', authenticateJWT, changePassword);
 
 export default router;

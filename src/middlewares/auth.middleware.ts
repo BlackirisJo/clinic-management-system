@@ -96,14 +96,15 @@ export const authenticateJWT = async (
       jti?: string;
     };
 
-    if (!decoded.jti) return res.status(403).json({ message: 'الجلسة غير صالحة' });
+    // إشارة صريحة للواجهة أن الجلسة غير صالحة (تنتهي بمعالجة مركزية وإعادة لتسجيل الدخول)
+    if (!decoded.jti) return res.status(403).json({ message: 'الجلسة غير صالحة', code: 'SESSION_REVOKED' });
     const session = await pool.query(
       `SELECT 1 FROM user_sessions s JOIN users u ON u.user_id = s.user_id
        WHERE s.jti = $1 AND s.user_id = $2 AND s.revoked_at IS NULL
          AND s.expires_at > NOW() AND u.status = 'ACTIVE'`,
       [decoded.jti, decoded.userId]
     );
-    if (!session.rowCount) return res.status(403).json({ message: 'الجلسة منتهية أو ملغاة' });
+    if (!session.rowCount) return res.status(403).json({ message: 'انتهت صلاحية جلستك أو تم إنهاؤها من قبل مدير النظام', code: 'SESSION_REVOKED' });
 
     // جلب اسم الدور والصلاحيات المرتبطة بـ role_id من قاعدة البيانات
     const roleAndPermissionsQuery = await pool.query(
@@ -136,7 +137,8 @@ export const authenticateJWT = async (
 
     return next();
   } catch (error) {
-    return res.status(403).json({ message: 'رمز التوكن غير صالح أو منتهي الصلاحية' });
+    // توكن غير صالح أو منتهي الصلاحية — الواجهة تعامله كنهاية جلسة وتعيد المستخدم لتسجيل الدخول
+    return res.status(403).json({ message: 'رمز التوكن غير صالح أو منتهي الصلاحية', code: 'SESSION_REVOKED' });
   }
 };
 

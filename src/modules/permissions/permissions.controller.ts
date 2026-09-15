@@ -7,6 +7,10 @@ import type { AuthenticatedRequest } from '../../middlewares/auth.middleware';
 // (حماية من انغلاق النظام — Lockout Protection — المرحلة 9)
 const LOCKOUT_PERMISSION_KEY = 'MANAGE_PERMISSIONS';
 
+// صلاحيات محجوزة لأعلى دور إداري فقط (SUPER_ADMIN) — لا يجوز إسنادها لأي دور آخر
+// عبر واجهة إدارة الصلاحيات، حتى لا تتجاوز الأدوار الأقل صلاحياتها المقصودة.
+const SUPER_ADMIN_ONLY_PERMISSIONS = ['DELETE_USERS'];
+
 // تسجيل العمليات الحساسة في سجل التدقيق (المرحلة 10) — بدون أي بيانات حساسة
 const logAudit = async (
   userId: number | undefined,
@@ -155,6 +159,10 @@ export const createRole = async (req: AuthenticatedRequest, res: Response) => {
     );
     const roleId = (created.rows[0] as { role_id: number }).role_id;
     if (permission_keys && permission_keys.length > 0) {
+      if (permission_keys.some((key) => SUPER_ADMIN_ONLY_PERMISSIONS.includes(key))) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ message: 'هذه الصلاحية محجوزة لأعلى دور إداري فقط ولا يمكن إسنادها هنا' });
+      }
       const perms = await client.query('SELECT permission_id FROM permissions WHERE permission_key = ANY($1)', [permission_keys]);
       if (perms.rowCount !== new Set(permission_keys).size) {
         await client.query('ROLLBACK');
@@ -224,6 +232,9 @@ export const setRolePermissions = async (req: AuthenticatedRequest, res: Respons
     }
     if (role.role_name === 'SUPER_ADMIN') {
       return res.status(400).json({ message: 'لا يمكن تعديل صلاحيات دور SUPER_ADMIN — هو مصدر الحماية من انغلاق النظام' });
+    }
+    if (permission_keys.some((key) => SUPER_ADMIN_ONLY_PERMISSIONS.includes(key))) {
+      return res.status(403).json({ message: 'هذه الصلاحية محجوزة لأعلى دور إداري فقط ولا يمكن إسنادها هنا' });
     }
     await client.query('BEGIN');
     const perms = await client.query('SELECT permission_id FROM permissions WHERE permission_key = ANY($1)', [permission_keys]);

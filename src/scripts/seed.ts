@@ -34,6 +34,7 @@ const PERMISSIONS = [
 
   // النسخ الاحتياطي
     { key: 'MANAGE_PERMISSIONS', group: 'System', desc: 'إدارة الأدوار والصلاحيات وربطها بالمستخدمين' },
+  { key: 'DELETE_USERS', group: 'System', desc: 'حذف/تعطيل حسابات المستخدمين مع إنهاء جميع جلساتهم' },
   { key: 'MANAGE_BACKUPS', group: 'System', desc: 'إنشاء وتنزيل النسخ الاحتياطية' },
   { key: 'VIEW_BACKUP_LOGS', group: 'System', desc: 'عرض سجلات النسخ الاحتياطي' },
   { key: 'RESTORE_BACKUPS', group: 'System', desc: 'استرجاع النسخ الاحتياطية' },
@@ -100,9 +101,11 @@ const seedDatabase = async () => {
     console.log('3. منح كافة الصلاحيات لأدوار الإدارة...');
     const adminRoles = await client.query(`SELECT role_id FROM roles WHERE role_name IN ('SUPER_ADMIN', 'SYSTEM_ADMIN')`);
 
-    const allPermissions = await client.query(`SELECT permission_id FROM permissions`);
+    const allPermissions = await client.query(`SELECT permission_id, permission_key FROM permissions`);
     for (const roleRow of adminRoles.rows) {
       for (const pRow of allPermissions.rows) {
+        // حذف المستخدمين متاح لأعلى دور إداري فقط — لا يُمنح تلقائياً لـ SYSTEM_ADMIN
+        if (pRow.permission_key === 'DELETE_USERS' && roleRow.role_name !== 'SUPER_ADMIN') continue;
         await client.query(
           `INSERT INTO role_permissions (role_id, permission_id)
            VALUES ($1, $2)

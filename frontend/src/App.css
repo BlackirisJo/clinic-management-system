@@ -148,3 +148,26 @@
   .modal-card{box-shadow:none;border:none;max-height:none;width:100%;max-width:none;margin:0}
   .modal-header,.modal-close,.invoice-print-actions{display:none !important}
 }
+
+/* ===== ????? ??????????: ?????? ???????? ===== */
+/* ???? ???????: ????? ????? = ????? ?????? = ??? ???? */
+.presence-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;display:inline-block}
+.presence-dot.online{background:#4caf7d;box-shadow:0 0 0 4px #4caf7d25}
+.presence-dot.offline{background:#c3cdc9;box-shadow:0 0 0 4px #c3cdc925}
+/* ????? ??????? ???? ??????? */
+.sessions-list{display:grid;gap:12px;max-height:60vh;overflow:auto}
+.session-item{border:1px solid var(--line);border-radius:11px;padding:13px 15px;display:grid;gap:8px}
+.session-item.revoked{opacity:.55;background:#f7f9f8}
+.session-head{display:flex;align-items:center;gap:9px}
+.session-head strong{font-size:13px;color:var(--ink)}
+.session-head .status{margin-inline-start:auto}
+.session-meta{display:grid;gap:3px;color:#8a9896;font-size:11px}
+.session-confirm{border-top:1px dashed var(--line);padding-top:10px}
+.session-confirm p{margin:0 0 8px;color:#a6554b;font-size:12px}
+.session-actions{display:flex;justify-content:flex-end}
+/* ?? ????? ?????? */
+.text-button.danger{color:#a6554b}
+.primary-button.danger{background:#a6554b;box-shadow:0 7px 17px #a6554b25}
+.danger-note{background:#fbe9e7;border-radius:10px;padding:12px 15px;margin-bottom:14px}
+.danger-note p{margin:0 0 6px;color:#8f4a41;font-size:12px}
+.danger-note p:last-child{margin:0}

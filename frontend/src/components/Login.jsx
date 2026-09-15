@@ -3,7 +3,7 @@ import { useAuth } from '../auth/AuthContext'
 import { Notice } from './ui'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, sessionEndedMessage } = useAuth()
   const [form, setForm] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -31,6 +31,8 @@ export default function Login() {
         <p className="muted">سجّل الدخول لمتابعة عمل العيادة اليوم.</p>
 
         <form onSubmit={submit} className="login-form">
+          <Notice kind="error">{sessionEndedMessage}</Notice>
+
           <label>
             اسم المستخدم
             <input

@@ -41,9 +41,14 @@ async function request(path, { method = 'GET', body, params, isForm } = {}) {
     throw new Error('تعذّر الاتصال بالخادم، تحقق من تشغيل الخادم')
   }
 
-  if (res.status === 401) unauthorizedHandler?.()
+  // معالجة مركزية لانتهاء الجلسة (401) — فقط عند وجود توكن فعلي
+  if (token && res.status === 401) unauthorizedHandler?.()
 
   const data = await res.json().catch(() => ({}))
+
+  // معالجة مركزية لإنهاء الجلسة من قبل مدير — إشارة الخادم الصريحة SESSION_REVOKED
+  // (لا تُطلق مع رفض الصلاحيات 403 العادي)
+  if (token && data && data.code === 'SESSION_REVOKED') unauthorizedHandler?.(data.message)
   if (!res.ok) {
     const message = data.message || data.error || `خطأ في الطلب (${res.status})`
     throw new Error(message)
@@ -103,6 +108,8 @@ export const api = {
     me: () => request('/api/auth/me'),
     logout: () => request('/api/auth/logout', { method: 'POST' }),
     logoutAll: () => request('/api/auth/logout-all', { method: 'POST' }),
+    // نبضة الحضور — تُحدّث last_seen_at للجلسة الحالية فقط (الخادم يستنتج الجلسة من التوكن)
+    heartbeat: () => request('/api/auth/heartbeat', { method: 'POST' }),
     changePassword: (body) => request('/api/auth/change-password', { method: 'POST', body }),
   },
   patients: {
@@ -214,6 +221,10 @@ export const api = {
     list: (params) => request('/api/users', { params }),
     create: (body) => request('/api/users', { method: 'POST', body }),
     update: (id, body) => request(`/api/users/${id}`, { method: 'PATCH', body }),
+    sessions: (userId) => request(`/api/users/${userId}/sessions`),
+    revokeSession: (userId, sessionId) => request(`/api/users/${userId}/sessions/${sessionId}/revoke`, { method: 'POST' }),
+    revokeAllSessions: (userId) => request(`/api/users/${userId}/sessions/revoke-all`, { method: 'POST' }),
+    remove: (id) => request(`/api/users/${id}`, { method: 'DELETE' }),
   },
   permissions: {
     options: () => request('/api/permissions/options'),

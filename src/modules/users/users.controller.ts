@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { pool } from '../../config/database';
 import { AuthenticatedRequest, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
 import { hashPassword } from '../../utils/auth';
+import { parseDeviceLabel } from '../../utils/device';
 
 export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
   const isGlobal = isGlobalFinanceRole(req);
@@ -14,7 +15,8 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
   const status = typeof req.query.status === 'string' ? req.query.status : null;
   try {
     const params: unknown[] = [];
-    let where = 'TRUE';
+    // المستخدمون المحذوفون (Soft Delete) مخفيون عن القائمة النشطة — سجلاتهم التاريخية تبقى سليمة
+    let where = 'u.deleted_at IS NULL';
 
     // نطاق العيادات:
     // - المدير العام: يرى كل المستخدمين ما لم يحدد عيادة صراحة (ويتضمن وقتها الإسنادات الإضافية clinic_staff)
@@ -22,7 +24,7 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
     if (isGlobal) {
       if (requestedClinic) {
         params.push(requestedClinic);
-        where = `(u.clinic_id = $${params.length} OR EXISTS (
+        where += ` AND (u.clinic_id = $${params.length} OR EXISTS (
           SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $${params.length}
         ))`;
       }
@@ -31,12 +33,12 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
       if (requestedClinic) {
         if (!ids.includes(requestedClinic)) return res.status(403).json({ message: 'لا يمكنك عرض مستخدمي عيادة غير مسندة لك' });
         params.push(requestedClinic);
-        where = `(u.clinic_id = $${params.length} OR EXISTS (
+        where += ` AND (u.clinic_id = $${params.length} OR EXISTS (
           SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = $${params.length}
         ))`;
       } else if (ids.length > 0) {
         params.push(ids);
-        where = `(u.clinic_id = ANY($${params.length}::int[]) OR EXISTS (
+        where += ` AND (u.clinic_id = ANY($${params.length}::int[]) OR EXISTS (
           SELECT 1 FROM clinic_staff cs WHERE cs.user_id = u.user_id AND cs.clinic_id = ANY($${params.length}::int[])
         ))`;
       }
@@ -59,7 +61,15 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
     const result = await pool.query(
       `SELECT u.user_id, u.full_name, u.username, u.phone, u.status, u.is_force_password_change,
               u.medical_license_no, u.sub_specialty, u.direct_phone, u.last_login_at,
-              u.created_at, r.role_name, c.clinic_id, c.clinic_name
+              u.created_at, r.role_name, c.clinic_id, c.clinic_name,
+              -- حالة الاتصال مشتقة من user_sessions (بلا N+1) — جلسة نشطة حديثة واحدة تكفي
+              EXISTS (
+                SELECT 1 FROM user_sessions us
+                WHERE us.user_id = u.user_id
+                  AND us.revoked_at IS NULL
+                  AND us.expires_at > NOW()
+                  AND us.last_seen_at >= NOW() - INTERVAL '60 seconds'
+              ) AS is_online
        FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN clinics c ON c.clinic_id = u.clinic_id
        WHERE ${where}
@@ -171,11 +181,11 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
   const body = req.body;
   const managerIsGlobal = isGlobalFinanceRole(req);
   const current = await pool.query(
-    `SELECT u.user_id, u.role_id, u.clinic_id, r.role_name
+    `SELECT u.user_id, u.role_id, u.clinic_id, u.deleted_at, r.role_name
      FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
      WHERE u.user_id = $1`, [targetId]
   );
-  if (!current.rowCount) return res.status(404).json({ message: 'المستخدم غير موجود' });
+  if (!current.rowCount || current.rows[0].deleted_at) return res.status(404).json({ message: 'المستخدم غير موجود' });
   if (!managerIsGlobal && current.rows[0].clinic_id !== req.user?.clinicId) return res.status(403).json({ message: 'لا يمكنك تعديل مستخدم من عيادة أخرى' });
   if (targetId === req.user?.userId && (body.role_name || body.status === 'SUSPENDED' || body.clinic_id !== undefined)) {
     return res.status(400).json({ message: 'لا يمكنك تغيير دور أو عيادة أو حالة حسابك الحالي' });
@@ -225,5 +235,253 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     console.error('Update User Error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء تعديل المستخدم' });
+  }
+};
+
+// ——————————————————————————————————————————————————————————————
+// إدارة جلسات المستخدم (Presence / Sessions) — مبنية على جدول user_sessions الحالي.
+// لا يُكشف jti ولا أي توكن للواجهة — معرفات الجلسات الداخلية (session_id) فقط.
+// ——————————————————————————————————————————————————————————————
+
+interface TargetUserRow {
+  user_id: number;
+  username: string;
+  clinic_id: number | null;
+  deleted_at: Date | null;
+  role_name: string | null;
+}
+
+const parseTargetId = (req: AuthenticatedRequest): number | null => {
+  const targetId = Number(req.params.id);
+  return Number.isInteger(targetId) && targetId > 0 ? targetId : null;
+};
+
+// الحواجز المشتركة لإدارة حساب مستخدم آخر:
+// 1) موجود وغير محذوف  2) نطاق العيادة (نفس نمط updateUser)  3) حماية الدور الأعلى
+// 4) selfBlocked: المسارات الإدارية ترفض استهداف الحساب الحالي منعاً لإنهاء
+//    جلسة المدير نفسه بالخطأ — له مساراته الخاصة /api/auth/logout و /api/auth/logout-all.
+const resolveManageableTarget = async (
+  req: AuthenticatedRequest,
+  targetId: number,
+  res: Response,
+  selfBlocked: boolean
+): Promise<TargetUserRow | null> => {
+  const current = await pool.query(
+    `SELECT u.user_id, u.username, u.clinic_id, u.deleted_at, r.role_name
+     FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
+     WHERE u.user_id = $1`, [targetId]
+  );
+  const target = current.rows[0] as TargetUserRow | undefined;
+  if (!target || target.deleted_at) {
+    res.status(404).json({ message: 'المستخدم غير موجود' });
+    return null;
+  }
+  const managerIsGlobal = isGlobalFinanceRole(req);
+  if (!managerIsGlobal && target.clinic_id !== req.user?.clinicId) {
+    res.status(403).json({ message: 'لا يمكنك إدارة مستخدم من عيادة أخرى' });
+    return null;
+  }
+  // حماية الحسابات الإدارية: مدير أقل صلاحية لا يدير جلسات/حساب مدير أعلى منه
+  if (target.role_name === 'SUPER_ADMIN' && req.user?.roleName !== 'SUPER_ADMIN') {
+    res.status(403).json({ message: 'لا يمكنك إدارة حساب مدير أعلى منك' });
+    return null;
+  }
+  if (selfBlocked && targetId === req.user?.userId) {
+    res.status(400).json({ message: 'لا يمكنك إدارة جلسات حسابك الحالي من هنا — استخدم تسجيل الخروج' });
+    return null;
+  }
+  return target;
+};
+
+// قائمة جلسات مستخدم محدد — معلومات آمنة فقط (بلا jti ولا توكنات)
+export const listUserSessions = async (req: AuthenticatedRequest, res: Response) => {
+  const targetId = parseTargetId(req);
+  if (targetId === null) return res.status(400).json({ message: 'معرف المستخدم غير صالح' });
+  try {
+    const target = await resolveManageableTarget(req, targetId, res, false);
+    if (!target) return;
+    const sessions = await pool.query(
+      `SELECT session_id, created_at, last_seen_at, expires_at, revoked_at, user_agent,
+              (revoked_at IS NULL AND expires_at > NOW() AND last_seen_at >= NOW() - INTERVAL '60 seconds') AS is_online
+       FROM user_sessions
+       WHERE user_id = $1
+       ORDER BY (revoked_at IS NOT NULL) ASC, created_at DESC`,
+      [targetId]
+    );
+    return res.status(200).json({
+      sessions: sessions.rows.map((row) => ({
+        session_id: Number(row.session_id),
+        device: parseDeviceLabel(row.user_agent),
+        created_at: row.created_at,
+        last_seen_at: row.last_seen_at,
+        expires_at: row.expires_at,
+        revoked_at: row.revoked_at,
+        is_online: Boolean(row.is_online),
+      })),
+    });
+  } catch (error) {
+    console.error('List User Sessions Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء جلب جلسات المستخدم' });
+  }
+};
+
+// إنهاء جلسة واحدة محددة — بلا مساس بأي جلسة أخرى لنفس المستخدم
+export const revokeUserSession = async (req: AuthenticatedRequest, res: Response) => {
+  const targetId = parseTargetId(req);
+  const sessionId = Number(req.params.sessionId);
+  if (targetId === null) return res.status(400).json({ message: 'معرف المستخدم غير صالح' });
+  if (!Number.isInteger(sessionId) || sessionId <= 0) return res.status(400).json({ message: 'معرف الجلسة غير صالح' });
+  try {
+    const target = await resolveManageableTarget(req, targetId, res, true);
+    if (!target) return;
+    const session = await pool.query(
+      'SELECT session_id, revoked_at FROM user_sessions WHERE session_id = $1 AND user_id = $2',
+      [sessionId, targetId]
+    );
+    if (!session.rowCount) return res.status(404).json({ message: 'الجلسة غير موجودة لهذا المستخدم' });
+    if (session.rows[0].revoked_at) return res.status(400).json({ message: 'الجلسة ملغاة مسبقاً' });
+    // إلغاء هذه الجلسة فقط — لا حذف للسجل ولا مساس ببقية الجلسات
+    const revoked = await pool.query(
+      `UPDATE user_sessions SET revoked_at = NOW()
+       WHERE session_id = $1 AND user_id = $2 AND revoked_at IS NULL
+       RETURNING session_id`,
+      [sessionId, targetId]
+    );
+    if (!revoked.rowCount) return res.status(400).json({ message: 'الجلسة ملغاة مسبقاً' });
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
+         VALUES ($1, $2, 'USER_SESSION_REVOKED', 'USER_SESSION', $3, $4)`,
+        [req.user?.userId, req.user?.clinicId, sessionId, JSON.stringify({ target_user_id: targetId })]
+      );
+    } catch (auditError) {
+      console.error('Session revoke audit failed:', auditError);
+    }
+    return res.status(200).json({ success: true, message: 'تم إنهاء الجلسة المحددة وسيتم تسجيل خروج المستخدم منها' });
+  } catch (error) {
+    console.error('Revoke User Session Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء إنهاء الجلسة' });
+  }
+};
+
+// إنهاء جميع جلسات المستخدم — بدون حذف سجلات الجلسات
+export const revokeAllUserSessions = async (req: AuthenticatedRequest, res: Response) => {
+  const targetId = parseTargetId(req);
+  if (targetId === null) return res.status(400).json({ message: 'معرف المستخدم غير صالح' });
+  try {
+    const target = await resolveManageableTarget(req, targetId, res, true);
+    if (!target) return;
+    const revoked = await pool.query(
+      `UPDATE user_sessions SET revoked_at = NOW()
+       WHERE user_id = $1 AND revoked_at IS NULL
+       RETURNING session_id`,
+      [targetId]
+    );
+    const revokedCount = revoked.rowCount ?? 0;
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
+         VALUES ($1, $2, 'USER_SESSIONS_REVOKED', 'USER', $3, $4)`,
+        [req.user?.userId, req.user?.clinicId, targetId, JSON.stringify({ target_user_id: targetId, revoked_count: revokedCount })]
+      );
+    } catch (auditError) {
+      console.error('Sessions revoke-all audit failed:', auditError);
+    }
+    return res.status(200).json({ success: true, revokedCount, message: 'تم إنهاء جميع جلسات المستخدم' });
+  } catch (error) {
+    console.error('Revoke All User Sessions Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء إنهاء الجلسات' });
+  }
+};
+
+// حذف المستخدم — حذف ناعم إجبارياً (نظام طبي):
+// الزيارات والفواتير والروشتات وسجلات التدقيق مرتبطة بمعرف المستخدم بقيود NOT NULL،
+// والحذف الفعلي سيدمر بيانات طبية/تاريخية. لذلك: تعطيل + وسم deleted_at + إنهاء كل الجلسات.
+export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
+  const targetId = parseTargetId(req);
+  if (targetId === null) return res.status(400).json({ message: 'معرف المستخدم غير صالح' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // قفل صف الهدف داخل المعاملة لمنع تغير حالته أثناء العملية
+    const current = await client.query(
+      `SELECT u.user_id, u.username, u.clinic_id, u.deleted_at, r.role_name
+       FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 FOR UPDATE OF u`, [targetId]
+    );
+    const target = current.rows[0] as TargetUserRow | undefined;
+    if (!target || target.deleted_at) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'المستخدم غير موجود' });
+    }
+    // لا يجوز لأي مدير حذف نفسه — حتى لو نُفذ الطلب يدوياً
+    if (targetId === req.user?.userId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'لا يمكنك حذف حسابك الحالي' });
+    }
+    const managerIsGlobal = isGlobalFinanceRole(req);
+    if (!managerIsGlobal && target.clinic_id !== req.user?.clinicId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'لا يمكنك حذف مستخدم من عيادة أخرى' });
+    }
+    // مدير أقل صلاحية لا يحذف مديراً أعلى منه
+    if (target.role_name === 'SUPER_ADMIN' && req.user?.roleName !== 'SUPER_ADMIN') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ message: 'لا يمكنك حذف حساب مدير أعلى منك' });
+    }
+
+    // 1) إنهاء جميع جلسات المستخدم داخل نفس المعاملة (لا يبقى JWT صالحاً على أي جهاز)
+    const revoked = await client.query(
+      `UPDATE user_sessions SET revoked_at = NOW()
+       WHERE user_id = $1 AND revoked_at IS NULL
+       RETURNING session_id`, [targetId]
+    );
+    const revokedCount = revoked.rowCount ?? 0;
+
+    // 2) الحذف الناعم: تعطيل + وسم الحذف — دون أي حذف فعلي للصف أو السجلات المرتبطة
+    const deleted = await client.query(
+      `UPDATE users SET status = 'SUSPENDED', deleted_at = NOW(), updated_at = NOW()
+       WHERE user_id = $1 AND deleted_at IS NULL
+       RETURNING user_id`, [targetId]
+    );
+    if (!deleted.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'المستخدم غير موجود' });
+    }
+
+    // 3) حماية من انغلاق النظام: يجب أن يبقى مدير نشط واحد على الأقل غير المستهدف
+    const remaining = await client.query(
+      `SELECT COUNT(*)::int AS cnt
+       FROM users u
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id <> $1 AND u.deleted_at IS NULL AND u.status = 'ACTIVE'
+         AND (
+           r.role_name IN ('SUPER_ADMIN', 'SYSTEM_ADMIN')
+           OR EXISTS (
+             SELECT 1 FROM role_permissions rp
+             JOIN permissions p ON p.permission_id = rp.permission_id
+             WHERE rp.role_id = u.role_id AND p.permission_key = 'MANAGE_USERS'
+           )
+         )`, [targetId]
+    );
+    if ((remaining.rows[0] as { cnt: number }).cnt === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'لا يمكنك حذف آخر مدير نشط في النظام' });
+    }
+
+    // 4) سجل التدقيق داخل نفس المعاملة — بلا بيانات حساسة (لا كلمات مرور/توكنات/jti)
+    await client.query(
+      `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id, metadata)
+       VALUES ($1, $2, 'USER_DELETED', 'USER', $3, $4)`,
+      [req.user?.userId, req.user?.clinicId, targetId, JSON.stringify({ target_username: target.username, mode: 'soft_delete', revoked_sessions: revokedCount })]
+    );
+    await client.query('COMMIT');
+    return res.status(200).json({ success: true, message: 'تم حذف المستخدم وإنهاء جميع جلساته' });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('Delete User Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء حذف المستخدم' });
+  } finally {
+    client.release();
   }
 };

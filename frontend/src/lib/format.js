@@ -46,6 +46,23 @@ export const todayLabel = () => {
   }
 }
 
+// "آخر نشاط" بنص نسبي عربي — يُستخدم في قائمة جلسات المستخدم
+export const fmtRelative = (value) => {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return String(value)
+  const seconds = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000))
+  if (seconds < 15) return 'منذ لحظات'
+  if (seconds < 60) return `منذ ${seconds} ثانية`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `منذ ${minutes} دقيقة`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `منذ ${hours} ساعة`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `منذ ${days} يوم`
+  return fmtDate(value)
+}
+
 // خرائط الحالات إلى العبارات العربية
 export const GENDER_LABELS = { MALE: 'ذكر', FEMALE: 'أنثى' }
 
