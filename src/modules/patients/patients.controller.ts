@@ -118,6 +118,14 @@ export const createVisit = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ message: 'الطبيب المحدد غير مسند لهذه العيادة' });
     }
 
+    // وصول المريض — إحدى الحالات الثلاث:
+    // 1) المريض مملوك للعيادة نفسها (patients.clinic_id = العيادة الهدف).
+    // 2) مشاركة WRITE نشطة إلى العيادة الهدف (patient_clinic_shares — كما هي دون تغيير).
+    // 3) حالة المركز الطبي الداخلي: الموظف المسند لأكثر من عيادة داخل نفس المركز
+    //    يعمل في العيادتين دون مشاركات — الحد الآمن (لا يوجد مفهوم "مركز" في المخطط):
+    //    أن يكون عضواً في عيادة مالك المريض وفي العيادة الهدف معاً ضمن نطاقه
+    //    (accessibleClinicIds = الأساسية + clinic_staff). المدراء (نطاق null) يبقى
+    //    سلوكهم كما هو (ملكية أو مشاركة) دون توسيع.
     const ownership = await pool.query(
       `SELECT p.clinic_id AS owner_clinic_id,
               EXISTS (SELECT 1 FROM patient_clinic_shares s
@@ -128,7 +136,14 @@ export const createVisit = async (req: AuthenticatedRequest, res: Response) => {
       [patient_id, clinic_id]
     );
     const patientAccess = ownership.rows[0];
-    const canUsePatient = patientAccess && (patientAccess.owner_clinic_id === Number(clinic_id) || patientAccess.can_write);
+    const targetClinicId = Number(clinic_id);
+    const ownerClinicId = patientAccess ? Number(patientAccess.owner_clinic_id) : null;
+    const sameOwnerClinic = Boolean(patientAccess) && ownerClinicId === targetClinicId;
+    const internalCenterCase = Boolean(patientAccess) && !sameOwnerClinic
+      && Array.isArray(userClinicIds)
+      && userClinicIds.includes(ownerClinicId as number)
+      && userClinicIds.includes(targetClinicId);
+    const canUsePatient = Boolean(patientAccess) && (sameOwnerClinic || Boolean(patientAccess?.can_write) || internalCenterCase);
     if (!canUsePatient || ownership.rows.length !== 1) {
       return res.status(403).json({ message: 'بيانات الزيارة لا تنتمي إلى العيادة المحددة' });
     }

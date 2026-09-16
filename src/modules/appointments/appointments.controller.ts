@@ -39,19 +39,32 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ message: 'الطبيب المحدد غير موجود أو غير مسند لهذه العيادة' });
     }
 
-    // المريض يجب أن يكون من العيادة نفسها أو مشارَاً إليها بصلاحية كتابة (WRITE) نشطة.
-    const patientOwnership = await pool.query(
-      `SELECT 1 FROM patients p
-       WHERE p.patient_id = $1 AND (
-         p.clinic_id = $2 OR EXISTS (
-           SELECT 1 FROM patient_clinic_shares s
-           WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
-             AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()
-         )
-       )`,
+    // وصول المريض — إحدى الحالات الثلاث:
+    // 1) المريض مملوك للعيادة نفسها (patients.clinic_id = العيادة الهدف).
+    // 2) مشاركة WRITE نشطة إلى العيادة الهدف (patient_clinic_shares — كما هي دون تغيير).
+    // 3) حالة المركز الطبي الداخلي: الموظف المسند لأكثر من عيادة داخل نفس المركز
+    //    يعمل في العيادتين دون مشاركات — الحد الآمن (لا يوجد مفهوم "مركز" في المخطط):
+    //    أن يكون عضواً في عيادة مالك المريض وفي العيادة الهدف معاً ضمن نطاقه
+    //    (accessibleClinicIds = الأساسية + clinic_staff). المدراء (نطاق null) يبقى
+    //    سلوكهم كما هو (ملكية أو مشاركة) دون توسيع.
+    const ownership = await pool.query(
+      `SELECT p.clinic_id AS owner_clinic_id,
+              EXISTS (SELECT 1 FROM patient_clinic_shares s
+                      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
+                        AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()) AS can_write
+       FROM patients p
+       WHERE p.patient_id = $1`,
       [patient_id, clinic_id]
     );
-    if (!patientOwnership.rowCount) {
+    const patientRow = ownership.rows[0];
+    const targetClinicId = Number(clinic_id);
+    const ownerClinicId = patientRow ? Number(patientRow.owner_clinic_id) : null;
+    const sameOwnerClinic = Boolean(patientRow) && ownerClinicId === targetClinicId;
+    const internalCenterCase = Boolean(patientRow) && !sameOwnerClinic
+      && Array.isArray(userClinicIds)
+      && userClinicIds.includes(ownerClinicId as number)
+      && userClinicIds.includes(targetClinicId);
+    if (!patientRow || (!sameOwnerClinic && !patientRow.can_write && !internalCenterCase)) {
       return res.status(400).json({ message: 'المريض غير مسجل في هذه العيادة أو غير مشارَك إليها' });
     }
 

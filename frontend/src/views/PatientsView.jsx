@@ -501,6 +501,9 @@ function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSave
   const isGlobal = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
   const { clinics, loading: clinicsLoading } = useClinicDirectory(true)
   const userClinicLabel = clinicNameById(clinics, user?.clinicId) || (user?.clinicId ? `العيادة #${user.clinicId}` : '')
+  // العيادات المسندة للمستخدم فقط (الأساسية + الإسنادات الإضافية clinic_staff)
+  const myClinicIds = (user?.clinicIds?.length ? user.clinicIds : (user?.clinicId ? [user.clinicId] : [])).map(Number)
+  const myClinics = clinics.filter((c) => myClinicIds.includes(Number(c.clinic_id)))
   const [form, setForm] = useState({
     clinic_id: isGlobal ? '' : (user?.clinicId || ''),
     doctor_id: '',
@@ -511,9 +514,18 @@ function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSave
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // قيمة افتراضية: العيادة الأساسية إن كانت ضمن المسندة، وإلا أول عيادة مسندة
+  useEffect(() => {
+    if (isGlobal || form.clinic_id) return
+    const ids = (user?.clinicIds?.length ? user.clinicIds : (user?.clinicId ? [user.clinicId] : [])).map(Number)
+    const mine = clinics.filter((c) => ids.includes(Number(c.clinic_id)))
+    const preferred = mine.find((c) => Number(c.clinic_id) === Number(user?.clinicId)) || mine[0]
+    if (preferred) setForm((prev) => ({ ...prev, clinic_id: String(preferred.clinic_id) }))
+  }, [isGlobal, form.clinic_id, clinics, user])
+
   // تحميل الأطباء المسندين للعيادة المختارة فقط (وليس كل الأطباء)
   useEffect(() => {
-    const clinicId = isGlobal ? form.clinic_id : (user?.clinicId || '')
+    const clinicId = form.clinic_id
     if (!clinicId) {
       setDoctors([])
       setLoadingDoctors(false)
@@ -524,7 +536,7 @@ function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSave
       .then((result) => setDoctors(result.doctors || []))
       .catch(() => setDoctors([]))
       .finally(() => setLoadingDoctors(false))
-  }, [form.clinic_id, user?.clinicId, isGlobal])
+  }, [form.clinic_id])
 
   async function submit(e) {
     e.preventDefault()
@@ -546,12 +558,16 @@ function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSave
   return (
     <Modal title={`تسجيل زيارة لـ ${patient.full_name}`} subtitle="الزيارات الطبية" onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label="العيادة المختصة" required hint={isGlobal ? 'اختر العيادة بالاسم — يُحال إليها المريض مباشرة' : `عيادتك الحالية: ${userClinicLabel || '—'}`}>
+        <Field label="العيادة المختصة" required hint={isGlobal ? 'اختر العيادة بالاسم — يُحال إليها المريض مباشرة' : myClinics.length > 1 ? 'عياداتك المسندة — اختر عيادة الزيارة' : `عيادتك الحالية: ${userClinicLabel || '—'}`}>
           {isGlobal ? (
             <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value, doctor_id: '' })}>
               <option value="">اختر العيادة بالاسم...</option>
               {clinicsLoading ? <option disabled>جارِ تحميل العيادات...</option> : null}
               {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
+            </select>
+          ) : myClinics.length > 1 ? (
+            <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value, doctor_id: '' })}>
+              {myClinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
             </select>
           ) : (
             <input required value={userClinicLabel} readOnly />

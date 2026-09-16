@@ -148,21 +148,26 @@ function AppointmentForm({ onClose, onSaved }) {
           setClinics(allClinics)
           setForm(prev => ({ ...prev, clinic_id: '' }))
           loadDoctorsForClinic('')
-        } else if (user?.clinicId) {
-          const mine = allClinics.find((c) => Number(c.clinic_id) === Number(user.clinicId))
-          if (mine) {
-            setClinics([mine])
-            setForm(prev => ({ ...prev, clinic_id: String(mine.clinic_id) }))
-          } else {
-            // لا توجد عيادة مُطابقة في الدليل — اعرض الكل بشكل مقروء حتى يختار، ثم نقيد لاحقاً إذا أردت
-            setClinics([{ clinic_id: user.clinicId, clinic_name: mine?.clinic_name || `العيادة #${user.clinicId}`, specialty_name: undefined }])
-            setForm(prev => ({ ...prev, clinic_id: String(user.clinicId) }))
-          }
-          loadDoctorsForClinic(String(user.clinicId))
         } else {
-          setClinics(allClinics)
-          setForm(prev => ({ ...prev, clinic_id: '' }))
-          loadDoctorsForClinic('')
+          // الموظف: قيّد الخيارات على العيادات المسندة إليه فقط (الأساسية + الإسنادات الإضافية clinic_staff)
+          // عيادة واحدة → حقل ثابت؛ أكثر من عيادة → قائمة اختيار من عياداته فقط
+          const myIds = (user?.clinicIds?.length ? user.clinicIds : (user?.clinicId ? [user.clinicId] : [])).map(Number)
+          const mine = allClinics.filter((c) => myIds.includes(Number(c.clinic_id)))
+          if (mine.length > 0) {
+            setClinics(mine)
+            const preferred = mine.find((c) => Number(c.clinic_id) === Number(user?.clinicId)) || mine[0]
+            setForm(prev => ({ ...prev, clinic_id: String(preferred.clinic_id) }))
+            loadDoctorsForClinic(String(preferred.clinic_id))
+          } else if (user?.clinicId) {
+            // لا عيادة مُطابقة في الدليل — اعرض العيادة الأساسية باسم افتراضي
+            setClinics([{ clinic_id: user.clinicId, clinic_name: `العيادة #${user.clinicId}`, specialty_name: undefined }])
+            setForm(prev => ({ ...prev, clinic_id: String(user.clinicId) }))
+            loadDoctorsForClinic(String(user.clinicId))
+          } else {
+            setClinics(allClinics)
+            setForm(prev => ({ ...prev, clinic_id: '' }))
+            loadDoctorsForClinic('')
+          }
         }
         // المرضى يُبحثون من جهة الخادم داخل PatientSearchSelect (لا تحميل مسبق لأول 100 فقط)
       } catch (err) {
@@ -205,10 +210,14 @@ function AppointmentForm({ onClose, onSaved }) {
     <Modal title="حجز موعد جديد" subtitle="المواعيد" onClose={onClose} wide>
       <form className="patient-form" onSubmit={submit}>
         <div className="form-row">
-          <Field label="العيادة" required hint={isGlobal ? 'اختر العيادة بالاسم لتصفية الأطباء' : 'عيادتك الحالية'}>
+          <Field label="العيادة" required hint={isGlobal ? 'اختر العيادة بالاسم لتصفية الأطباء' : clinics.length > 1 ? 'عياداتك المسندة — اختر عيادة المواجهة' : 'عيادتك الحالية'}>
             {isGlobal ? (
               <select required value={form.clinic_id} onChange={(e) => handleClinicChange(e.target.value)}>
                 <option value="">اختر العيادة بالاسم...</option>
+                {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
+              </select>
+            ) : clinics.length > 1 ? (
+              <select required value={form.clinic_id} onChange={(e) => handleClinicChange(e.target.value)}>
                 {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
               </select>
             ) : clinics.length === 0 ? (
