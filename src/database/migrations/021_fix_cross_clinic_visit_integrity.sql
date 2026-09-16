@@ -1,0 +1,22 @@
+-- ============================================================================
+-- Migration 021 — إزالة الـcomposite FK المちなみに貢献الزيارات跨诊所
+-- ============================================================================
+-- السبب:
+--   migration 008 أضافت constraint visits_patient_clinic_fk التي تمنع
+--   إنشاء زيارة في عيادة مختلفة عن عيادة المريض الأصلية.
+--   هذا يتعارض مع patient_clinic_shares WRITE share model الذي يسمح
+--   للعيادات الأخرى بإنشاء زيارات للمريض المشارك.
+--
+-- التعديل:
+--   إزالة الـcomposite FK constraint فقط، الاحتفاظ بـindependent FKs:
+--   - visits.patient_id → patients(patient_id)  (يمنع orphan patients)
+--   - visits.clinic_id → clinics(clinic_id)     (يمنع invalid clinics)
+--   - visits.doctor_id → users(user_id)         (يمنع invalid doctors)
+--
+-- السلامة:
+--   - لا يحذف أي بيانات (مرضى، زيارات، مواعيد، مشاركات)
+--   - لا يغير usuario semantics
+--   - DROP CONSTRAINT IF EXISTS آمن حتى لو constraint غير موجود
+-- ============================================================================
+
+ALTER TABLE visits DROP CONSTRAINT IF EXISTS visits_patient_clinic_fk;
