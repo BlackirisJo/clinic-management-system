@@ -1,8 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'crypto';
 
 // اختبار تكامل شامل لنظام المركز الطبي متعدد التخصصات
 // يُشغّل مقابل خادم حي: INTEGRATION_BASE_URL + INTEGRATION_USERNAME + INTEGRATION_PASSWORD
+//
+// عزل الاختبار (test-only، دون أي تغيير في كود الإنتاج):
+// - runId فريد لكل تشغيل (timestamp + عشوائي) لكل الأسماء — يعمل فوق قاعدة بيانات
+//   تحوي بيانات تشغيل حقيقية أو بقايا اختبارات سابقة دون أي تصادم.
+// - الطاقم (طبيبان + طبيب "غريب" + ممرضة) يُنشأ ذاتياً بأسماء فريدة — لا افتراض
+//   وجود طبيب/ممرض مسبقين ولا اعتماد على بيانات أنشأتها اختبارات أخرى.
+// - التنظيف عبر t.after يحذف فقط ما أنشأه هذا الاختبار (يزيل الإسنادات ثم يحذف
+//   الحسابات حذفاً ناعماً) — ولا يمس أي مستخدم/عيادة/مريض حقيقي.
 const baseUrl = process.env.INTEGRATION_BASE_URL;
 const username = process.env.INTEGRATION_USERNAME;
 const password = process.env.INTEGRATION_PASSWORD;
@@ -21,7 +30,10 @@ const api = (token: string | null) => async (method: string, path: string, body?
   return { status: res.status, data };
 };
 
-test('medical center integration: clinic → specialty → staff → patient → visit → clinical data → pregnancy', { skip: !integrationEnabled }, async () => {
+test('medical center integration: clinic → specialty → staff → patient → visit → clinical data → pregnancy', { skip: !integrationEnabled }, async (t) => {
+  // معرف فريد لكل تشغيل — يمنع تصادم الأسماء مع بيانات سابقة أو تشغيلات متوازية
+  const runId = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
+
   // 1) تسجيل الدخول كمدير
   const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
@@ -40,22 +52,75 @@ test('medical center integration: clinic → specialty → staff → patient →
   assert.ok(obgyn, 'النسائية والتوليد موجودة');
   assert.ok(obgyn.module.workflow.length > 0, 'workflow التخصص معرف');
 
-  // 3) إنشاء عيادة جديدة بتخصص + إسناد طبيب وممرض موجودين
-  const users = await call('GET', '/api/users?limit=100') as any;
-  assert.equal(users.status, 200);
-  const doctor = users.data.users.find((u: any) => u.role_name === 'DOCTOR' && u.status === 'ACTIVE');
-  const nurse = users.data.users.find((u: any) => u.role_name === 'NURSE' && u.status === 'ACTIVE');
-  assert.ok(doctor && nurse, 'يوجد طبيب وممرض نشطون');
+  // 3أ) عيادة حاضنة فارغة: إنشاء دور تشغيلي (طبيب/ممرض) يشترط عيادة — تُنشأ حاضنة
+  //     اختبار خاصة بدل الاعتماد على عيادة حقيقية أو على clinic_id الخاص بالمدير.
+  const anchor = await call('POST', '/api/clinics', {
+    clinic_name: `عيادة حاضنة اختبار ${runId}`,
+    specialty_id: obgyn.specialty_id,
+  }) as any;
+  assert.equal(anchor.status, 201, JSON.stringify(anchor.data));
+  const anchorClinicId = Number(anchor.data.clinic.clinic_id);
 
-  const suffix = Date.now();
+  // 3ب) إنشاء طاقم الاختبار ذاتياً — لا افتراض وجود طبيب/ممرض نشطين في قاعدة البيانات
+  const createdUserIds: number[] = [];
+  let clinicId = 0;
+  // التنظيف (يُنفَّذ دائماً حتى عند فشل الاختبار): إزالة إسنادات عيادة الاختبار ثم
+  // حذف حسابات الاختبار المنشأة فقط — لا يمس أي مستخدم حقيقي. الخطوة الأخيرة في
+  // الاختبار تُسجّل الخروج عمداً، لذا تُنشأ جلسة تنظيف بديلة عند الحاجة.
+  t.after(async () => {
+    if (!createdUserIds.length) return;
+    let cleanupToken = token;
+    const probe = await call('GET', '/api/auth/me');
+    if (probe.status !== 200) {
+      const relogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      assert.equal(relogin.status, 200, 'فشل إنشاء جلسة التنظيف');
+      cleanupToken = ((await relogin.json()) as { token: string }).token;
+    }
+    const cleanupCall = api(cleanupToken);
+    if (clinicId) {
+      for (const userId of createdUserIds) {
+        // يُقبل 200 أو 404 (الممرض أُزيل أصلاً في خطوة سابقة / لم يُسند إطلاقاً)
+        await cleanupCall('DELETE', `/api/clinics/${clinicId}/staff/${userId}`);
+      }
+    }
+    for (const userId of createdUserIds) {
+      const del = await cleanupCall('DELETE', `/api/users/${userId}`) as any;
+      assert.equal(del.status, 200, `فشل حذف حساب الاختبار #${userId}: ${JSON.stringify(del.data)}`);
+    }
+    await cleanupCall('POST', '/api/auth/logout');
+  });
+  const createStaffUser = async (label: string, role_name: 'DOCTOR' | 'NURSE') => {
+    const res = await call('POST', '/api/users', {
+      full_name: `اختبار تكامل ${label} ${runId}`,
+      username: `clin_${label}_${runId}`,
+      password: 'IntegrationTest#2026',
+      role_name,
+      clinic_id: anchorClinicId,
+    }) as any;
+    assert.equal(res.status, 201, JSON.stringify(res.data));
+    const user = res.data.user as { user_id: number; status: string };
+    createdUserIds.push(Number(user.user_id));
+    assert.equal(user.status, 'ACTIVE', `حساب الاختبار ${label} نشط عند الإنشاء`);
+    return user;
+  };
+  const doctor = await createStaffUser('doc_a', 'DOCTOR');
+  const nurse = await createStaffUser('nurse_a', 'NURSE');
+  const secondDoctor = await createStaffUser('doc_b', 'DOCTOR');
+  const foreignDoctor = await createStaffUser('doc_c', 'DOCTOR');
+
+  // 3ج) إنشاء عيادة الاختبار بتخصصها وإسناد الطاقم إليها عند الإنشاء
   const created = await call('POST', '/api/clinics', {
-    clinic_name: `عيادة تجريبية متكاملة ${suffix}`,
+    clinic_name: `عيادة تجريبية متكاملة ${runId}`,
     specialty_id: obgyn.specialty_id,
     doctor_ids: [doctor.user_id],
     nurse_ids: [nurse.user_id],
   }) as any;
   assert.equal(created.status, 201, JSON.stringify(created.data));
-  const clinicId = created.data.clinic.clinic_id as number;
+  clinicId = Number(created.data.clinic.clinic_id);
 
   // 4) تفاصيل العيادة تعيد التخصص والطاقم المقسم حسب الدور
   const detail = await call('GET', `/api/clinics/${clinicId}`) as any;
@@ -65,14 +130,12 @@ test('medical center integration: clinic → specialty → staff → patient →
   assert.ok(detail.data.doctors.some((d: any) => d.user_id === doctor.user_id), 'الطبيب مسند');
   assert.ok(detail.data.nurses.some((n: any) => n.user_id === nurse.user_id), 'الممرض مسند');
 
-  // 5) إسناد مستخدم موجود إضافياً (طبيب ثانٍ) — يعمل في أكثر من عيادة
-  const secondDoctor = users.data.users.find((u: any) => u.role_name === 'DOCTOR' && u.status === 'ACTIVE' && u.user_id !== doctor.user_id);
-  if (secondDoctor) {
-    const assign = await call('POST', `/api/clinics/${clinicId}/staff`, { user_id: secondDoctor.user_id }) as any;
-    assert.equal(assign.status, 200, JSON.stringify(assign.data));
-    const stillThere = await call('GET', `/api/users?role=DOCTOR&limit=100`) as any;
-    assert.ok(stillThere.data.users.some((u: any) => u.user_id === secondDoctor.user_id), 'المستخدم ما زال في النظام');
-  }
+  // 5) إسناد طبيب ثانٍ أنشأناه — نفس الحساب يعمل في أكثر من عيادة (الأساسية + الإسناد الإضافي)
+  const assign = await call('POST', `/api/clinics/${clinicId}/staff`, { user_id: secondDoctor.user_id }) as any;
+  assert.equal(assign.status, 200, JSON.stringify(assign.data));
+  const stillThere = await call('GET', `/api/users?role=DOCTOR&search=${encodeURIComponent(runId)}&limit=100`) as any;
+  assert.equal(stillThere.status, 200);
+  assert.ok(stillThere.data.users.some((u: any) => u.user_id === secondDoctor.user_id), 'المستخدم ما زال في النظام');
   // إعادة جلب تفاصيل العيادة بعد الإسناد الإضافي — حتى تكون "قائمة الفريق" حديثة
   // (كان الجلب السابق قبل إسناد الطبيب الثاني فيختار الاختبار طبيباً أصبح مسنداً فعلاً).
   const freshDetail = await call('GET', `/api/clinics/${clinicId}`) as any;
@@ -80,16 +143,16 @@ test('medical center integration: clinic → specialty → staff → patient →
 
   // 6) رفض إسناد ممرض في قائمة الأطباء (تحقق الدور)
   const wrongRole = await call('POST', '/api/clinics', {
-    clinic_name: `عيادة خاطئة ${suffix}`, specialty_id: obgyn.specialty_id, doctor_ids: [nurse.user_id],
+    clinic_name: `عيادة خاطئة ${runId}`, specialty_id: obgyn.specialty_id, doctor_ids: [nurse.user_id],
   }) as any;
   assert.equal(wrongRole.status, 400, 'إسناد ممرض كطبيب مرفوض');
 
   // 7) إنشاء مريضة في العيادة الجديدة (المدير يحدد العيادة)
   const patientRes = await call('POST', '/api/patients', {
-    full_name: `مريضة تجريبية ${suffix}`,
+    full_name: `مريضة تجريبية ${runId}`,
     document_type: 'OTHER',
-    document_number: `TC-${suffix}`,
-    phone: `0790${String(suffix).slice(-7)}`,
+    document_number: `TC-${runId}`,
+    phone: `0790${runId}`,
     gender: 'FEMALE',
     date_of_birth: '1995-04-12',
     clinic_id: clinicId,
@@ -104,14 +167,12 @@ test('medical center integration: clinic → specialty → staff → patient →
   assert.equal(visitRes.status, 201, JSON.stringify(visitRes.data));
   const visitId = visitRes.data.visit.visit_id as number;
 
-  // 9) رفض طبيب غير مسند للعيادة (يُعاد جلب الفريق بعد كل الإسنادات)
-  const foreignDoctor = users.data.users.find((u: any) => u.role_name === 'DOCTOR' && !staffAfterAssignments.some((s: any) => Number(s.user_id) === Number(u.user_id)));
-  if (foreignDoctor) {
-    const badVisit = await call('POST', '/api/patients/visits', {
-      patient_id: patientId, clinic_id: clinicId, doctor_id: foreignDoctor.user_id,
-    }) as any;
-    assert.equal(badVisit.status, 400, 'زيارة بطبيب غير مسند مرفوضة');
-  }
+  // 9) رفض طبيب غير مسند للعيادة — طبيب الاختبار "الغريب" (أنشأناه ولم يُسند لهذه العيادة إطلاقاً)
+  assert.ok(!staffAfterAssignments.some((s: any) => Number(s.user_id) === Number(foreignDoctor.user_id)), 'الطبيب الغريب غير مسند لعيادة الاختبار');
+  const badVisit = await call('POST', '/api/patients/visits', {
+    patient_id: patientId, clinic_id: clinicId, doctor_id: foreignDoctor.user_id,
+  }) as any;
+  assert.equal(badVisit.status, 400, 'زيارة بطبيب غير مسند مرفوضة');
 
   // 10) البيانات السريرية: شكوى/فحص/تقييم/خطة
   const clinical = await call('PATCH', `/api/clinical/visits/${visitId}`, {
@@ -252,7 +313,8 @@ test('medical center integration: clinic → specialty → staff → patient →
   // 23) إزالة الممرض من العيادة — حسابه يبقى في النظام دون حذف
   const remove = await call('DELETE', `/api/clinics/${clinicId}/staff/${nurse.user_id}`) as any;
   assert.equal(remove.status, 200);
-  const userStill = await call('GET', '/api/users?role=NURSE&limit=100') as any;
+  const userStill = await call('GET', `/api/users?role=NURSE&search=${encodeURIComponent(runId)}&limit=100`) as any;
+  assert.equal(userStill.status, 200);
   assert.ok(userStill.data.users.some((u: any) => u.user_id === nurse.user_id), 'حساب الممرض لم يُحذف');
 
   // 24) الوظائف القديمة تعمل: العيادات والمرضى والتقارير والمواعيد

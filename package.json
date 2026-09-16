@@ -11,7 +11,9 @@
     "seed": "tsx src/scripts/seed.ts",
     "seed:medications": "tsx src/scripts/importMedications.ts",
     "wipe": "tsx src/scripts/wipeAllData.ts",
-    "test": "npm run build && node --test dist/tests/*.test.js"
+    "test": "npm run build && node --test --test-concurrency=1 dist/tests/*.test.js",
+    "test:integration": "npm run build && node --test --test-concurrency=1 dist/tests/integration.test.js dist/tests/sessions.integration.test.js dist/tests/clinical.integration.test.js dist/tests/cross-clinic-visit.regression.test.js dist/tests/receptionist.multiclinic.integration.test.js",
+    "test:cross-clinic": "npm run build && node --test dist/tests/cross-clinic-visit.regression.test.js"
   },
   "keywords": [],
   "author": "",

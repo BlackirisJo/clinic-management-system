@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'crypto';
 
 // اختبار تكامل شامل لإدارة الجلسات والحضور والحذف الآمن للمستخدمين.
 // لا يعمل إلا عند توفر خادم حي (نفس نمط integration.test.ts):
@@ -28,7 +29,9 @@ const call = async (path: string, options: { method?: string; token?: string; bo
   return { status: res.status, data };
 };
 
-const suffix = Date.now().toString(36);
+// لاحقة فريدة لكل تشغيل (timestamp + عشوائي) — أسماء المستخدمين فريدة في قاعدة
+// البيانات حتى بعد الحذف الناعم، فلا يصطدم التشغيل ببيانات تشغيل سابقة
+const suffix = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
 const targetUsername = `sess_test_${suffix}`;
 const sysadminUsername = `sess_admin_${suffix}`;
 const targetPassword = 'TargetPassword123!';
@@ -302,6 +305,11 @@ test('DELETE_USERS cannot be granted to any role and SYSTEM_ADMIN can never dele
 });
 
 test('cleanup: remove test users', { skip }, async () => {
+  // إذا فشل تسجيل دخول المدير أثناء التجهيز فسيكون التوكن فارغاً — تُنشأ جلسة تنظيف بديلة
+  if (!state.adminToken) {
+    const relogin = await call('/api/auth/login', { method: 'POST', body: { username: adminUser, password: adminPassword } });
+    if (relogin.status === 200) state.adminToken = relogin.data.token;
+  }
   for (const id of createdUserIds) {
     if (!id) continue;
     await call(`/api/users/${id}`, { method: 'DELETE', token: state.adminToken });
