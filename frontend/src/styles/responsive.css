@@ -314,6 +314,8 @@ td { padding: 11px 8px; }
 .login-panel { padding: 26px 18px; }
 .login-panel h1 { font-size: clamp(24px, 7vw, 30px); }
 .login-form input { min-height: var(--tap); }
+.lang-switch.login { margin-bottom: 18px; }
+.lang-option { min-height: var(--tap); padding: 10px 18px; }
 
 /* ===== 12) واجهة تثبيت التطبيق (PWA) ===== */
 .install-bar {

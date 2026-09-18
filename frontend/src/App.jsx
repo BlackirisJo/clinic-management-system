@@ -2,6 +2,7 @@ import { useState } from 'react'
 import './App.css'
 import './styles/responsive.css'
 import { AuthProvider, useAuth } from './auth/AuthContext'
+import { I18nProvider } from './i18n'
 import Login from './components/Login'
 import Layout, { navItemsForRole } from './components/Layout'
 import ChangePasswordModal from './components/ChangePasswordModal'
@@ -62,11 +63,13 @@ function Shell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Shell />
-      {/* واجهات PWA: دعوة التثبيت وإشعار التحديث (لا تظهر في الوضع المثبّت/التطوير) */}
-      <InstallPrompt />
-      <UpdateNotice />
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <Shell />
+        {/* واجهات PWA: دعوة التثبيت وإشعار التحديث (لا تظهر في الوضع المثبّت/التطوير) */}
+        <InstallPrompt />
+        <UpdateNotice />
+      </AuthProvider>
+    </I18nProvider>
   )
 }

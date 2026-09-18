@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
+import { useT } from '../i18n'
 import { fmtMoney, fmtDate, fmtNumber, PAYMENT_TYPES, INVOICE_STATUS, fmtInvoiceNumber } from '../lib/format'
 import { Field, Loading, Empty, Notice, Modal } from '../components/ui'
 import { PatientSearchSelect } from '../components/SearchSelect'
 
 export default function BillingView() {
   const [tab, setTab] = useState('invoices')
+  const t = useT()
   return (
     <section className="full-panel">
       <div className="panel-heading">

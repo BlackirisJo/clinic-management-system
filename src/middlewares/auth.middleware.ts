@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../config/database';
+import { ApiErrorCode } from '../utils/apiErrors';
 
 export interface AuthenticatedRequest extends Request {
   authToken?: {
@@ -73,13 +74,14 @@ export const authenticateJWT = async (
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'تنسيق التوكن غير صالح أو غير موجود' });
+    // Phase 3: code مستقر للترجمة في الواجهة — message والـ status كما هما تماماً
+    return res.status(401).json({ message: 'تنسيق التوكن غير صالح أو غير موجود', code: ApiErrorCode.TOKEN_MISSING });
   }
 
   const token = authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ message: 'رمز التوكن غير موجود' });
+    return res.status(401).json({ message: 'رمز التوكن غير موجود', code: ApiErrorCode.TOKEN_INVALID });
   }
 
   try {
@@ -97,14 +99,15 @@ export const authenticateJWT = async (
     };
 
     // إشارة صريحة للواجهة أن الجلسة غير صالحة (تنتهي بمعالجة مركزية وإعادة لتسجيل الدخول)
-    if (!decoded.jti) return res.status(403).json({ message: 'الجلسة غير صالحة', code: 'SESSION_REVOKED' });
+    // Phase 3: INVALID_SESSION يميّز توكناً بلا jti — نفس shape الـ SESSION_REVOKED ولا يغيّر أي status
+    if (!decoded.jti) return res.status(403).json({ message: 'الجلسة غير صالحة', code: ApiErrorCode.INVALID_SESSION });
     const session = await pool.query(
       `SELECT 1 FROM user_sessions s JOIN users u ON u.user_id = s.user_id
        WHERE s.jti = $1 AND s.user_id = $2 AND s.revoked_at IS NULL
          AND s.expires_at > NOW() AND u.status = 'ACTIVE'`,
       [decoded.jti, decoded.userId]
     );
-    if (!session.rowCount) return res.status(403).json({ message: 'انتهت صلاحية جلستك أو تم إنهاؤها من قبل مدير النظام', code: 'SESSION_REVOKED' });
+    if (!session.rowCount) return res.status(403).json({ message: 'انتهت صلاحية جلستك أو تم إنهاؤها من قبل مدير النظام', code: ApiErrorCode.SESSION_REVOKED });
 
     // جلب اسم الدور والصلاحيات المرتبطة بـ role_id من قاعدة البيانات
     const roleAndPermissionsQuery = await pool.query(
@@ -117,7 +120,7 @@ export const authenticateJWT = async (
     );
 
     if (roleAndPermissionsQuery.rows.length === 0) {
-      return res.status(403).json({ message: 'الدور الخاص بك غير معرف بالنظام' });
+      return res.status(403).json({ message: 'الدور الخاص بك غير معرف بالنظام', code: ApiErrorCode.ROLE_UNKNOWN });
     }
 
     const roleName = roleAndPermissionsQuery.rows[0]?.role_name;
@@ -138,7 +141,7 @@ export const authenticateJWT = async (
     return next();
   } catch (error) {
     // توكن غير صالح أو منتهي الصلاحية — الواجهة تعامله كنهاية جلسة وتعيد المستخدم لتسجيل الدخول
-    return res.status(403).json({ message: 'رمز التوكن غير صالح أو منتهي الصلاحية', code: 'SESSION_REVOKED' });
+    return res.status(403).json({ message: 'رمز التوكن غير صالح أو منتهي الصلاحية', code: ApiErrorCode.TOKEN_EXPIRED });
   }
 };
 
@@ -146,7 +149,7 @@ export const authenticateJWT = async (
 export const requirePermission = (requiredPermission: string) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return res.status(401).json({ message: 'المستخدم غير موثق' });
+      return res.status(401).json({ message: 'المستخدم غير موثق', code: ApiErrorCode.UNAUTHENTICATED });
     }
 
     // السماح لكل من SUPER_ADMIN و SYSTEM_ADMIN بتجاوز الفحص
@@ -160,6 +163,7 @@ export const requirePermission = (requiredPermission: string) => {
 
     return res.status(403).json({
       message: 'عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء',
+      code: ApiErrorCode.FORBIDDEN,
     });
   };
 };

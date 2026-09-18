@@ -17,6 +17,7 @@ import clinicsRoutes from './modules/clinics/clinics.routes';
 import medicationImportRoutes from './modules/prescriptions/medication.import.routes';
 import clinicalRoutes from './modules/clinical/clinical.routes';
 import permissionsRoutes from './modules/permissions/permissions.routes';
+import { ApiErrorCode } from './utils/apiErrors';
 
 const app: Application = express();
 
@@ -60,22 +61,24 @@ app.use('/api/clinical', clinicalRoutes);
 app.use('/api/permissions', permissionsRoutes);
 
 // معالجة المسارات غير الموجودة (404 Not Found)
+// Phase 3: code مستقر للترجمة — message والـ status كما هما
 app.use((req: Request, res: Response) => {
-  res.status(404).json({ message: 'المسار المطلوب غير موجود على الخادم' });
+  res.status(404).json({ message: 'المسار المطلوب غير موجود على الخادم', code: ApiErrorCode.ROUTE_NOT_FOUND });
 });
 
 // معالج الأخطاء العام (Global Error Handler)
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   // أخطاء رفع الملفات (Multer أو فلتر types) هي أخطاء من العميل — 400 وليس 500
   if (err instanceof multer.MulterError || err?.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ message: err.message || 'حجم الملف يتجاوز الحد المسموح' });
+    return res.status(400).json({ message: err.message || 'حجم الملف يتجاوز الحد المسموح', code: ApiErrorCode.FILE_TOO_LARGE });
   }
   if (typeof err?.message === 'string' && (err.message.includes('CSV') || err.message.includes('غير مسموح'))) {
-    return res.status(400).json({ message: err.message });
+    return res.status(400).json({ message: err.message, code: ApiErrorCode.FILE_INVALID });
   }
   console.error('❌ Unhandled Server Error:', err.stack || err.message);
   res.status(500).json({
     message: 'حدث خطأ داخلي في الخادم',
+    code: ApiErrorCode.INTERNAL_ERROR,
     error: process.env.NODE_ENV === 'development' ? err.message : undefined,
   });
 });

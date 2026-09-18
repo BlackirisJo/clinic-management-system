@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+﻿import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import { useAuth } from '../auth/AuthContext'
 import { fmtTime, fmtDate, APPOINTMENT_STATUS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
 import { PatientSearchSelect } from '../components/SearchSelect'
+import { useT } from '../i18n'
+
 
 const LIMIT = 10
 const ALL_STATUS = ['SCHEDULED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW']

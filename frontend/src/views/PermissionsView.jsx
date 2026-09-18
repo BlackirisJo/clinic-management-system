@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useAuth, hasPermission } from '../auth/AuthContext'
+import { useT } from '../i18n'
 import { ROLE_LABELS } from '../lib/format'
 
 // صفحة إدارة الصلاحيات (المرحلة 3) — إدارة الأدوار والصلاحيات من داخل النظام بدون تعديل الكود
 // الظهور مشروط بصلاحية MANAGE_PERMISSIONS، والحماية الحقيقية والنهائية في الخادم
 export default function PermissionsView() {
   const { user } = useAuth()
+  const t = useT()
   const [groups, setGroups] = useState([])
   const [roles, setRoles] = useState([])
   const [selectedId, setSelectedId] = useState(null)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { fmtNumber, fmtDateTime } from '../lib/format'
+import { useT } from '../i18n'
 import { Field, Modal, Loading, Empty, Notice, Paginator } from '../components/ui'
 
 const LIMIT = 10
@@ -13,6 +14,7 @@ export default function BackupsView() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [showUpload, setShowUpload] = useState(false)
+  const t = useT()
 
   const load = useCallback(async () => {
     setLoading(true)

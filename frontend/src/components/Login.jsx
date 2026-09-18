@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { Notice } from './ui'
+import LanguageSwitcher from './LanguageSwitcher'
+import { useT } from '../i18n'
 
 export default function Login() {
   const { login, sessionEndedMessage } = useAuth()
+  const t = useT()
   const [form, setForm] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -16,7 +19,7 @@ export default function Login() {
     try {
       await login(form.username.trim(), form.password)
     } catch (err) {
-      setError(err.message || 'بيانات الدخول غير صحيحة أو الخادم غير متاح')
+      setError(err.message || t('login.error.generic'))
     } finally {
       setLoading(false)
     }
@@ -25,16 +28,17 @@ export default function Login() {
   return (
     <main className="login-shell">
       <section className="login-panel">
-        <div className="brand-mark">ن</div>
-        <p className="eyebrow">نظام إدارة العيادات</p>
-        <h1>مرحبًا بعودتك</h1>
-        <p className="muted">سجّل الدخول لمتابعة عمل العيادة اليوم.</p>
+        <LanguageSwitcher variant="login" />
+        <div className="brand-mark">{t('brand.mark')}</div>
+        <p className="eyebrow">{t('login.eyebrow')}</p>
+        <h1>{t('login.title')}</h1>
+        <p className="muted">{t('login.subtitle')}</p>
 
         <form onSubmit={submit} className="login-form">
           <Notice kind="error">{sessionEndedMessage}</Notice>
 
           <label>
-            اسم المستخدم
+            {t('login.username')}
             <input
               required
               type="text"
@@ -53,7 +57,7 @@ export default function Login() {
           </label>
 
           <label>
-            كلمة المرور
+            {t('login.password')}
             <input
               required
               type="password"
@@ -73,7 +77,7 @@ export default function Login() {
             type="submit"
             disabled={loading}
           >
-            {loading ? 'جارِ الدخول...' : 'دخول إلى النظام'}
+            {loading ? t('login.submitting') : t('login.submit')}
           </button>
         </form>
       </section>
@@ -81,11 +85,11 @@ export default function Login() {
       <aside className="login-aside">
         <span>2026</span>
         <strong>
-          رعاية أهدأ.
+          {t('login.aside.titleLine1')}
           <br />
-          قرارات أوضح.
+          {t('login.aside.titleLine2')}
         </strong>
-        <p>مساحة تشغيل موحدة لفرق العيادة والمرضى والتقارير.</p>
+        <p>{t('login.aside.text')}</p>
       </aside>
     </main>
   )

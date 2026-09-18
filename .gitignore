@@ -23,3 +23,12 @@ dist/
 # Temporary scripts & SQL
 tmp_*.js
 tmp_*.sql
+# Temporary AI/build/diagnostic reports
+*-diff.txt
+*diff*.txt
+*status*.txt
+*build*.txt
+*i18n*.txt
+*keys*.txt
+*loaded*.txt
+*inv-check.txt

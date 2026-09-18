@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+﻿import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { fmtDate, fmtDateTime } from '../lib/format'
+import { useT } from '../i18n'
 import { Field, Loading, Empty, Notice } from './ui'
 
 const RISK_LABELS = { NORMAL: 'حمل طبيعي', HIGH: 'حمل عالي الخطورة' }
@@ -13,6 +14,7 @@ export default function PregnancyPanel({ patientId, visitId }) {
   const [active, setActive] = useState(null)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const t = useT()
 
   const loadList = useCallback(async () => {
     setError('')

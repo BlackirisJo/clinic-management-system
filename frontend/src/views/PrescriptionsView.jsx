@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+﻿import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { fmtDateTime } from '../lib/format'
+import { useT } from '../i18n'
 import { Modal, Field, Loading, Empty, Notice } from '../components/ui'
 import { PatientSearchSelect, MedicationSearchSelect } from '../components/SearchSelect'
 import { useAuth } from '../auth/AuthContext'
@@ -8,6 +9,7 @@ import ImportMedicationsModal from '../components/ImportMedicationsModal'
 
 export default function PrescriptionsView() {
   const [tab, setTab] = useState('medications')
+  const t = useT()
   return (
     <section className="full-panel">
       <div className="panel-heading">

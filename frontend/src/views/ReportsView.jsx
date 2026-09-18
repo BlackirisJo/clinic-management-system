@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+﻿import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { fmtMoney, fmtNumber, fmtDateTime, fmtDate, fmtTime, PAYMENT_TYPES, APPOINTMENT_STATUS } from '../lib/format'
+import { useT } from '../i18n'
 import { Loading, Empty, Notice, downloadCSV } from '../components/ui'
 import { useAuth } from '../auth/AuthContext'
 
@@ -13,6 +14,7 @@ const REPORT_TABS = [
 ]
 
 export default function ReportsView() {
+  const t = useT()
   const { user } = useAuth()
   const [tab, setTab] = useState('overview')
   const [filters, setFilters] = useState({ date_from: '', date_to: '', clinic_id: '' })
