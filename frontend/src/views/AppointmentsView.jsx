@@ -4,6 +4,7 @@ import { fmtTime, fmtDate, APPOINTMENT_STATUS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
 import { PatientSearchSelect } from '../components/SearchSelect'
 import { useT } from '../i18n'
+import { useAuth } from '../auth/AuthContext'
 
 
 const LIMIT = 10
