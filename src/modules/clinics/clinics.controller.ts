@@ -1,7 +1,22 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest, financeClinicScope } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, accessibleClinicIds, canManageAllClinics, financeClinicScope } from '../../middlewares/auth.middleware';
 import { hashPassword } from '../../utils/auth';
+
+// ————— P1: نطاق إدارة العيادات — مصدر واحد للحقيقة —————
+// الإدارة الشاملة (SUPER_ADMIN / SYSTEM_ADMIN) تعمل على أي عيادة.
+// غير ذلك: يُسمح له فقط بالعيادات ضمن نطاقه (الأساسية + الإسنادات الإضافية) عبر accessibleClinicIds.
+const canManageClinic = (req: AuthenticatedRequest, clinicId: number): boolean => {
+  if (canManageAllClinics(req)) return true;
+  return (accessibleClinicIds(req) ?? []).includes(Number(clinicId));
+};
+
+// يعيد true إذا رُفض الطلب (خارج النطاق) — لإيقاف المعالجة فوراً
+const denyClinicOutOfScope = (req: AuthenticatedRequest, res: Response, clinicId: number): boolean => {
+  if (canManageClinic(req, clinicId)) return false;
+  res.status(403).json({ message: 'لا يمكنك إدارة عيادة غير مسندة لك' });
+  return true;
+};
 
 // أدوات مساعدة: التحقق من أدوار المستخدمين قبل إسنادهم للعيادة
 const verifyStaffIds = async (ids: number[], expectedRole: 'DOCTOR' | 'NURSE'): Promise<{ ok: boolean; message?: string }> => {
@@ -108,6 +123,10 @@ export const getClinic = async (req: AuthenticatedRequest, res: Response) => {
 
 // 3. إضافة عيادة جديدة بتخصصها وطاقمها (مدير النظام فقط)
 export const createClinic = async (req: AuthenticatedRequest, res: Response) => {
+  // P1: إنشاء عيادة جديدة إدارة شاملة فقط — العيادة الجديدة خارج نطاق أي مستخدم مقيّد بالتعريف
+  if (!canManageAllClinics(req)) {
+    return res.status(403).json({ message: 'إنشاء العيادات متاح للإدارة الشاملة فقط' });
+  }
   const clinic_name = String(req.body?.clinic_name ?? '').trim();
   const specialty_id = req.body?.specialty_id ? Number(req.body.specialty_id) : null;
   const doctor_ids: number[] = Array.isArray(req.body?.doctor_ids) ? req.body.doctor_ids.map(Number) : [];
@@ -151,6 +170,8 @@ export const createClinic = async (req: AuthenticatedRequest, res: Response) => 
 // 4. تعديل عيادة (الاسم، التخصص، الحالة، الطاقم) — مدير النظام فقط
 export const updateClinic = async (req: AuthenticatedRequest, res: Response) => {
   const clinicId = Number(req.params.clinicId);
+  // P1: نطاق العيادة — لا إدارة لعيادة خارج نطاق المستخدم
+  if (denyClinicOutOfScope(req, res, clinicId)) return;
   const clinic_name = req.body?.clinic_name !== undefined ? String(req.body.clinic_name).trim() : undefined;
   const is_active = typeof req.body?.is_active === 'boolean' ? req.body.is_active : undefined;
   const specialty_id = req.body?.specialty_id !== undefined ? (req.body.specialty_id === null ? null : Number(req.body.specialty_id)) : undefined;
@@ -195,15 +216,25 @@ export const updateClinic = async (req: AuthenticatedRequest, res: Response) => 
 
     if (replaceStaff) {
       // استبدال قائمة الطاقم (إزالة الارتباط لا تحذف حساب المستخدم)
-      await pool.query('DELETE FROM clinic_staff WHERE clinic_id = $1', [clinicId]);
+      // P2: لا تُمسّ صفوف حسابات الإدارة العليا في clinic_staff
+      await pool.query(
+        `DELETE FROM clinic_staff cs
+         USING users u, roles r
+         WHERE u.user_id = cs.user_id AND r.role_id = u.role_id
+           AND cs.clinic_id = $1
+           AND r.role_name NOT IN ('SUPER_ADMIN', 'SYSTEM_ADMIN')`,
+        [clinicId]
+      );
       await assignStaff(clinicId, [...doctor_ids, ...nurse_ids], req.user?.userId);
       // إصلاح العيادة الأساسية لمن أُزيل من عيادته الأساسية: تُنقل لأسند آخر أو تُلغى
+      // P2: مع استثناء حسابات الإدارة العليا — لا تعديل/تصفير clinic_id لمدير النظام
       await pool.query(
         `UPDATE users u SET clinic_id = (
            SELECT cs.clinic_id FROM clinic_staff cs WHERE cs.user_id = u.user_id ORDER BY cs.assigned_at ASC LIMIT 1
          )
          WHERE u.clinic_id = $1
-           AND NOT EXISTS (SELECT 1 FROM clinic_staff cs2 WHERE cs2.user_id = u.user_id AND cs2.clinic_id = $1)`,
+           AND NOT EXISTS (SELECT 1 FROM clinic_staff cs2 WHERE cs2.user_id = u.user_id AND cs2.clinic_id = $1)
+           AND NOT EXISTS (SELECT 1 FROM roles r2 WHERE r2.role_id = u.role_id AND r2.role_name IN ('SUPER_ADMIN', 'SYSTEM_ADMIN'))`,
         [clinicId]
       );
     }
@@ -256,6 +287,8 @@ export const listClinicStaff = async (req: AuthenticatedRequest, res: Response) 
 export const addClinicStaff = async (req: AuthenticatedRequest, res: Response) => {
   const clinicId = Number(req.params.clinicId);
   const { full_name, username, password, role_name, sub_specialty, user_id } = req.body;
+  // P1: نطاق العيادة — الإسناد داخل عيادات المستخدم فقط
+  if (denyClinicOutOfScope(req, res, clinicId)) return;
 
   try {
     const clinic = await pool.query('SELECT clinic_id, is_active FROM clinics WHERE clinic_id = $1', [clinicId]);
@@ -335,6 +368,8 @@ export const updateClinicStaff = async (req: AuthenticatedRequest, res: Response
   const clinicId = req.params.clinicId;
   const userId = req.params.userId;
   const { full_name, sub_specialty, status, password } = req.body;
+  // P1: نطاق العيادة — لا تعديل لعيادة خارج نطاق المستخدم
+  if (denyClinicOutOfScope(req, res, Number(clinicId))) return;
 
   try {
     // منع التعديل على حسابات الإدارة من هذه الشاشة
@@ -381,6 +416,8 @@ export const updateClinicStaff = async (req: AuthenticatedRequest, res: Response
 export const removeClinicStaff = async (req: AuthenticatedRequest, res: Response) => {
   const clinicId = Number(req.params.clinicId);
   const userId = Number(req.params.userId);
+  // P1: نطاق العيادة — لا إزالة لعيادة خارج نطاق المستخدم
+  if (denyClinicOutOfScope(req, res, clinicId)) return;
   try {
     const result = await pool.query(
       `DELETE FROM clinic_staff cs
@@ -399,7 +436,8 @@ export const removeClinicStaff = async (req: AuthenticatedRequest, res: Response
          SELECT cs.clinic_id FROM clinic_staff cs WHERE cs.user_id = u.user_id ORDER BY cs.assigned_at ASC LIMIT 1
        )
        WHERE u.user_id = $1 AND u.clinic_id = $2
-         AND NOT EXISTS (SELECT 1 FROM clinic_staff cs2 WHERE cs2.user_id = u.user_id AND cs2.clinic_id = $2)`,
+         AND NOT EXISTS (SELECT 1 FROM clinic_staff cs2 WHERE cs2.user_id = u.user_id AND cs2.clinic_id = $2)
+         AND NOT EXISTS (SELECT 1 FROM roles r2 WHERE r2.role_id = u.role_id AND r2.role_name IN ('SUPER_ADMIN', 'SYSTEM_ADMIN'))`,
       [userId, clinicId]
     );
 

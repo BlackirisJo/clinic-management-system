@@ -411,8 +411,8 @@ export const uploadAttachment = async (req: AuthenticatedRequest, res: Response)
     // وفحص السونار (إن حُدّد) يجب أن يعود لنفس سجل الحمل — حتى لا يُربط مرفق بسجلات عيادة/مريض آخر.
     if (pregnancyId) {
       const pregnancyCheck = await pool.query(
-        'SELECT 1 FROM pregnancies WHERE pregnancy_id = $1 AND patient_id = $2',
-        [pregnancyId, visit.patient_id]
+        `SELECT 1 FROM pregnancies WHERE pregnancy_id = $1 AND patient_id = $2 AND clinic_id = $3`,
+        [pregnancyId, visit.patient_id, visit.clinic_id]
       );
       if (!pregnancyCheck.rowCount) {
         return res.status(400).json({ message: 'سجل الحمل المحدد غير موجود لهذه المريضة' });
@@ -421,8 +421,8 @@ export const uploadAttachment = async (req: AuthenticatedRequest, res: Response)
         const ultrasoundCheck = await pool.query(
           `SELECT 1 FROM ultrasound_exams us
            JOIN pregnancies pr ON pr.pregnancy_id = us.pregnancy_id
-           WHERE us.us_id = $1 AND pr.patient_id = $2`,
-          [ultrasoundId, visit.patient_id]
+           WHERE us.us_id = $1 AND pr.patient_id = $2 AND pr.clinic_id = $3`,
+          [ultrasoundId, visit.patient_id, visit.clinic_id]
         );
         if (!ultrasoundCheck.rowCount) {
           return res.status(400).json({ message: 'فحص السونار المحدد غير موجود لهذه المريضة' });
