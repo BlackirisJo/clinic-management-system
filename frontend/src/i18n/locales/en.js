@@ -493,6 +493,7 @@ export default {
   'patients.save': 'Save Patient',
   'patients.detail.fileNumber': 'File #{{id}}',
   'patients.tabVisits': 'Visits',
+  'patients.tabs.shares': 'Shares',
   'patients.tabMedical': 'Medical Data',
   'patients.tabUnifiedRecord': 'Unified Medical Record',
   'patients.medical.loadError': 'Failed to load medical data',

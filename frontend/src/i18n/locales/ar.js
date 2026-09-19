@@ -497,6 +497,7 @@ export default {
   'patients.save': 'حفظ المريض',
   'patients.detail.fileNumber': 'رقم الملف #{{id}}',
   'patients.tabVisits': 'الزيارات',
+  'patients.tabs.shares': 'المشاركات',
   'patients.tabMedical': 'البيانات الطبية',
   'patients.tabUnifiedRecord': 'السجل الطبي الموحد',
   'patients.medical.loadError': 'تعذر تحميل البيانات الطبية',

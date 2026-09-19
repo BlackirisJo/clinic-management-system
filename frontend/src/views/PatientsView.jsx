@@ -148,7 +148,7 @@ export default function PatientsView() {
                     <td data-label={t('patients.table.genderType')}>{GENDER_LABELS[p.gender] || p.gender}</td>
                     <td data-label={t('patients.table.birthDate')}>{fmtDate(p.date_of_birth, true)}</td>
                     <td data-label={t('patients.table.registeredAt')}>{fmtDate(p.created_at, true)}</td>
-                    <td className="cell-actions"><button className="text-button" onClick={() => setSelected(p)}>{t('patients.viewFile')}</button></td>
+                    <td className="cell-actions"><button className="text-button" onClick={() => setSelected(p)}>{t('patients.openFile')}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -201,7 +201,7 @@ function AddPatientModal({ user, onClose, onSaved }) {
       await api.patients.create({ ...form, national_id: form.national_id || undefined, clinic_id: form.clinic_id ? Number(form.clinic_id) : undefined })
       onSaved()
     } catch (err) {
-      setError(err.message || t('patients.create.error'))
+      setError(err.message || t('patients.add.saveError'))
     } finally { setSaving(false) }
   }
 
@@ -211,18 +211,18 @@ function AddPatientModal({ user, onClose, onSaved }) {
         <Field label={t('patients.fullName')} required>
           <input required minLength={3} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
         </Field>
-        <Field label={t('patients.clinicLabel')} required
+        <Field label={t('patients.clinicField')} required
           hint={clinicsLoading ? t('patients.loadingClinics') : (isGlobal ? t('patients.clinicHintGlobal') : t('patients.clinicHintAssigned'))}>
           {clinicsLoading ? (
             <select disabled><option>{t('patients.loadingClinics')}</option></select>
           ) : isGlobal ? (
             <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
-              <option value="">{t('patients.clinicSelect.global')}</option>
+              <option value="">{t('patients.add.selectClinic')}</option>
               {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
             </select>
           ) : (
             <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
-              <option value="">{t('patients.clinicSelect.local')}</option>
+              <option value="">{t('patients.myClinicsOption')}</option>
               {clinics
                 .filter((c) => (user?.clinicIds || (user?.clinicId ? [user.clinicId] : [])).map(Number).includes(Number(c.clinic_id)))
                 .map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
@@ -253,7 +253,7 @@ function AddPatientModal({ user, onClose, onSaved }) {
         <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>
-          <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('patients.create.submit')}</button>
+          <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('patients.save')}</button>
         </div>
       </form>
     </Modal>
@@ -263,7 +263,7 @@ function PatientDetailModal({ patient, user, onClose }) {
   const t = useT()
   const [tab, setTab] = useState('visits')
   return (
-    <Modal title={patient.full_name} subtitle={t('patients.detail.subtitle', { id: patient.patient_id })} onClose={onClose} wide>
+    <Modal title={patient.full_name} subtitle={t('patients.detail.fileNumber', { id: patient.patient_id })} onClose={onClose} wide>
       <div className="detail-summary">
         <span>{GENDER_LABELS[patient.gender] || patient.gender}</span>
         <span dir="ltr">{patient.phone}</span>
@@ -272,9 +272,9 @@ function PatientDetailModal({ patient, user, onClose }) {
         <span>{fmtDate(patient.date_of_birth, true)}</span>
       </div>
       <div className="tabs">
-        <button className={tab === 'visits' ? 'tab active' : 'tab'} onClick={() => setTab('visits')}>{t('patients.tabs.visits')}</button>
-        <button className={tab === 'medical' ? 'tab active' : 'tab'} onClick={() => setTab('medical')}>{t('patients.tabs.medical')}</button>
-        <button className={tab === 'record' ? 'tab active' : 'tab'} onClick={() => setTab('record')}>{t('patients.tabs.record')}</button>
+        <button className={tab === 'visits' ? 'tab active' : 'tab'} onClick={() => setTab('visits')}>{t('patients.tabVisits')}</button>
+        <button className={tab === 'medical' ? 'tab active' : 'tab'} onClick={() => setTab('medical')}>{t('patients.tabMedical')}</button>
+        <button className={tab === 'record' ? 'tab active' : 'tab'} onClick={() => setTab('record')}>{t('patients.tabUnifiedRecord')}</button>
         <button className={tab === 'shares' ? 'tab active' : 'tab'} onClick={() => setTab('shares')}>{t('patients.tabs.shares')}</button>
       </div>
       <div className="tab-content">
@@ -325,7 +325,7 @@ function MedicalProfileTab({ patient, user }) {
       const result = await api.patients.medicalProfile(patient.patient_id)
       applyResult(result)
     } catch (err) {
-      setError(err.message || t('patients.error.loadMedical'))
+      setError(err.message || t('patients.medical.loadError'))
     } finally { setLoading(false) }
   }, [patient.patient_id, applyResult])
 
@@ -347,23 +347,23 @@ function MedicalProfileTab({ patient, user }) {
       applyResult(result)
       setDone(true)
     } catch (err) {
-      setError(err.message || t('patients.error.saveMedical'))
+      setError(err.message || t('patients.medical.saveError'))
     } finally { setSaving(false) }
   }
 
-  if (loading) return <Loading text={t('patients.loadingMedical')} />
+  if (loading) return <Loading text={t('patients.medical.loading')} />
 
   return (
     <div className="tab-inner">
       <form className="patient-form" onSubmit={submit}>
         <div className="form-row">
-          <Field label={t('patients.bloodType')}>
+          <Field label={t('patients.medical.bloodType')}>
             <select value={extras.blood_type} disabled={!canEdit} onChange={(e) => setExtras({ ...extras, blood_type: e.target.value })}>
-              <option value="">{t('patients.bloodType.notSpecified')}</option>
+              <option value="">{t('patients.medical.unspecified')}</option>
               {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
             </select>
           </Field>
-          <Field label={t('patients.currentMeds')} hint={t('patients.currentMedsHint')}>
+          <Field label={t('patients.medical.currentMedications')} hint={t('patients.medical.currentMedicationsHint')}>
             <textarea rows="2" disabled={!canEdit} value={extras.current_medications} onChange={(e) => setExtras({ ...extras, current_medications: e.target.value })} />
           </Field>
         </div>
@@ -377,7 +377,7 @@ function MedicalProfileTab({ patient, user }) {
                   <input type="checkbox" disabled={!canEdit} checked={Boolean(allergySel[key]?.checked)} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], checked: e.target.checked } })} />
                   <span>{ALLERGEN_LABELS[key]}</span>
                 </label>
-                <input className="med-note" placeholder={t('patients.allergy.note')} disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
+                <input className="med-note" placeholder={t('patients.medical.allergyNotePlaceholder')} disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
               </div>
             ))}
           </div>
@@ -392,26 +392,26 @@ function MedicalProfileTab({ patient, user }) {
                   <input type="checkbox" disabled={!canEdit} checked={Boolean(condSel[key]?.checked)} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], checked: e.target.checked } })} />
                   <span>{CHRONIC_CONDITION_LABELS[key]}</span>
                 </label>
-                <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label={t('patients.severity')}>
+                <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label={t('patients.medical.severityAria')}>
                   {Object.entries(CONDITION_SEVERITY_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
                 </select>
-                <input className="med-note" placeholder={t('patients.severity.placeholder')} disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
+                <input className="med-note" placeholder={t('patients.medical.notePlaceholder')} disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
               </div>
             ))}
           </div>
         </div>
 
-        <Field label={t('patients.generalNotes')}>
+        <Field label={t('patients.medical.notes')}>
           <textarea rows="3" disabled={!canEdit} value={extras.medical_notes} onChange={(e) => setExtras({ ...extras, medical_notes: e.target.value })} />
         </Field>
         <Notice kind="error">{error}</Notice>
-        {done && <Notice kind="success">{t('patients.success.medicalSave')}</Notice>}
+        {done && <Notice kind="success">{t('patients.medical.savedSuccess')}</Notice>}
         {canEdit ? (
           <div className="modal-actions">
-            <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('patients.saveMedical')}</button>
+            <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('patients.medical.save')}</button>
           </div>
         ) : (
-          <p className="profile-meta">{t('patients.viewOnly')}</p>
+          <p className="profile-meta">{t('patients.medical.readOnly')}</p>
         )}
         {profile?.updated_at ? <p className="profile-meta">{t('patients.lastUpdated')}: {fmtDateTime(profile.updated_at)}{profile.updated_by_name ? ` — بواسطة ${profile.updated_by_name}` : ''}</p> : null}
       </form>
@@ -452,7 +452,7 @@ function VisitsTab({ patient, user }) {
   return (
     <div className="tab-inner">
       <div className="toolbar">
-        <button className="primary-button compact" onClick={() => setShowAdd(true)}>{t('patients.addVisit')}</button>
+        <button className="primary-button compact" onClick={() => setShowAdd(true)}>{t('patients.visits.add')}</button>
       </div>
       <Notice kind="error">{error}</Notice>
       {visits === null ? <Loading /> : visits.length === 0 ? <Empty text={t('patients.visits.empty')} /> : (
@@ -598,7 +598,7 @@ function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSave
         <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>
-          <button className="primary-button" disabled={saving}>{saving ? t('patients.addVisit.saving') : t('patients.addVisit.save')}</button>
+          <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('patients.addVisit.save')}</button>
         </div>
       </form>
     </Modal>
