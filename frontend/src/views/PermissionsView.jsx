@@ -97,7 +97,7 @@ const savePermissions = async () => {
     )
 
     if (!updatedRole) {
-      throw new Error('تعذر العثور على الدور بعد حفظ الصلاحيات')
+      throw new Error(t('permissions.notFound'))
     }
 
     setSelected(
@@ -109,9 +109,9 @@ const savePermissions = async () => {
     setName(updatedRole.role_name || '')
     setDescription(updatedRole.description || '')
 
-    flash('تم حفظ الصلاحيات بنجاح')
+    flash(t('permissions.saved'))
   } catch (e) {
-    flash(e.message || 'تعذر حفظ الصلاحيات', true)
+    flash(e.message || t('permissions.saveError'), true)
 
     // في حالة الفشل نعيد تحميل الحالة الحقيقية من الخادم.
     await load(role.role_id)
@@ -125,7 +125,7 @@ const savePermissions = async () => {
     setBusy(true)
     try {
       const res = await api.permissions.updateRole(role.role_id, { role_name: name, description })
-      flash(res.message || 'تم التحديث')
+      flash(res.message || t('permissions.updated'))
       await load(role.role_id)
     } catch (e) {
       flash(e.message, true)
@@ -139,7 +139,7 @@ const savePermissions = async () => {
     setBusy(true)
     try {
       const res = await api.permissions.setRoleStatus(role.role_id, { is_active: !role.is_active })
-      flash(res.message || 'تم التحديث')
+      flash(res.message || t('permissions.updated'))
       await load(role.role_id)
     } catch (e) {
       flash(e.message, true)
@@ -149,11 +149,11 @@ const savePermissions = async () => {
   }
 
   const removeRole = async () => {
-    if (!role || !window.confirm(`حذف الدور "${role.role_name}" نهائياً؟`)) return
+    if (!role || !window.confirm(t('permissions.deleteConfirm', { name: role.role_name }))) return
     setBusy(true)
     try {
       const res = await api.permissions.deleteRole(role.role_id)
-      flash(res.message || 'تم الحذف')
+      flash(res.message || t('permissions.deleted'))
       setSelectedId(null)
       await load()
     } catch (e) {
@@ -164,11 +164,11 @@ const savePermissions = async () => {
   }
 
   const createRole = async () => {
-    if (!newRoleName.trim()) return flash('أدخل اسم الدور أولاً (أحرف إنجليزية كبيرة)', true)
+    if (!newRoleName.trim()) return flash(t('permissions.nameRequired'), true)
     setBusy(true)
     try {
       const res = await api.permissions.createRole({ role_name: newRoleName.trim(), description: newRoleDesc.trim() })
-      flash(res.message || 'تم الإنشاء')
+      flash(res.message || t('permissions.created'))
       setNewRoleName('')
       setNewRoleDesc('')
       await load(res.role_id)
@@ -180,17 +180,17 @@ const savePermissions = async () => {
   }
 
   if (!canManage) {
-    return <div>لا تمتلك صلاحية إدارة الصلاحيات</div>
+    return <div>{t('permissions.noPermission')}</div>
   }
 
   return (
     <div>
       {message && <div>{message}</div>}
       {error && <div className="perm-error">{error}</div>}
-      {busy && <p>جارِ التنفيذ...</p>}
+      {busy && <p>{t('permissions.loading')}</p>}
       <div className="perm-layout">
         <aside>
-          <h3 className="perm-aside-title">الأدوار</h3>
+          <h3 className="perm-aside-title">{t('permissions.heading.roles')}</h3>
           <ul className="perm-role-list">
             {roles.map((r) => (
               <li key={r.role_id}>
@@ -200,37 +200,37 @@ const savePermissions = async () => {
                 >
                   {ROLE_LABELS[r.role_name] || r.role_name}
                   {r.is_system ? ' ★' : ''}
-                  {!r.is_active ? ' (معطل)' : ''}
-                  <small> — {r.users_count} مستخدم</small>
+                  {!r.is_active ? ` (${t('permissions.inactive')})` : ''}
+                  <small> — {r.users_count} {t('permissions.userCount')}</small>
                 </button>
               </li>
             ))}
           </ul>
           <div className="perm-new-role">
-            <strong>دور جديد</strong>
+            <strong>{t('permissions.newRole')}</strong>
             <input placeholder="ROLE_NAME" value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} />
-            <input placeholder="وصف الدور" value={newRoleDesc} onChange={(e) => setNewRoleDesc(e.target.value)} />
-            <button onClick={createRole} disabled={busy}>+ إنشاء دور</button>
+            <input placeholder={t('permissions.roleDescription')} value={newRoleDesc} onChange={(e) => setNewRoleDesc(e.target.value)} />
+            <button onClick={createRole} disabled={busy}>{t('permissions.createRole')}</button>
           </div>
         </aside>
         <section>
           {!role ? (
-            <p>اختر دوراً من القائمة لعرض صلاحياته</p>
+            <p>{t('permissions.selectRole')}</p>
           ) : (
             <>
               <div className="perm-meta-bar">
                 <input value={name} disabled={isSystem} onChange={(e) => setName(e.target.value)} className="perm-name-input" />
-                <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="وصف الدور" className="perm-desc-input" />
-                <button onClick={saveMeta} disabled={busy || (isSystem && name !== role.role_name)}>حفظ البيانات</button>
+                <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('permissions.roleDescription')} className="perm-desc-input" />
+                <button onClick={saveMeta} disabled={busy || (isSystem && name !== role.role_name)}>{t('permissions.saveMeta')}</button>
                 {!isSystem && (
                   <>
-                    <button onClick={toggleActive} disabled={busy}>{role.is_active ? 'تعطيل' : 'تفعيل'}</button>
-                    <button onClick={removeRole} disabled={busy || role.users_count > 0}>حذف</button>
+                    <button onClick={toggleActive} disabled={busy}>{role.is_active ? t('permissions.disable') : t('permissions.enable')}</button>
+                    <button onClick={removeRole} disabled={busy || role.users_count > 0}>{t('permissions.delete')}</button>
                   </>
                 )}
               </div>
-              {role.users_count > 0 && !isSystem && <p><small>لا يمكن حذف الدور لارتباطه بحسابات — زر الحذف معطل</small></p>}
-              {isProtected && <p>⚠️ دور SUPER_ADMIN محمي — لا يمكن تعديل صلاحياته أو اسمه (حماية من انغلاق النظام)</p>}
+              {role.users_count > 0 && !isSystem && <p><small>{t('permissions.deleteProtected')}</small></p>}
+              {isProtected && <p>{t('permissions.superAdminProtected')}</p>}
               <div>
                 {groups.map((g) => (
                   <fieldset key={g.group} className="perm-group">
@@ -250,7 +250,7 @@ const savePermissions = async () => {
                 ))}
               </div>
               <button onClick={savePermissions} disabled={isProtected || busy} className="perm-save">
-                💾 حفظ الصلاحيات
+                {t('permissions.savePermissions')}
               </button>
             </>
           )}
