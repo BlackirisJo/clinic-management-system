@@ -1,4 +1,5 @@
 import { ApiErrorCode } from '../utils/apiErrors';
+import type { Request, Response, NextFunction } from 'express';
 
 export class AppError extends Error {
   statusCode: number;
@@ -25,3 +26,8 @@ export class AppError extends Error {
 export const isAppError = (err: unknown): err is AppError => {
   return err instanceof AppError;
 };
+
+export const asyncHandler = (
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>,
+) => (req: Request, res: Response, next: NextFunction) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
