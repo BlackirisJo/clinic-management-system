@@ -195,6 +195,23 @@ export const getPatientVisits = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
+// سياسة إدارة المشاركات (إنشاء/عرض/إلغاء) — مصدر واحد للحقيقة:
+// تُدار مشاركات المريض من عيادته المالكة فقط، أي يجب أن تكون عيادة المريض (patients.clinic_id)
+// ضمن نطاق عيادات المستخدم (أو مدير شاملاً بنطاق null). تلقي عيادة لمشاركة (READ/WRITE) يمنحها
+// وصولاً لبيانات السجل الطبي فقط، ولا يمنحها أي صلاحية على مشاركات المريض (لا عرض ولا إلغاء).
+const findPatientInOwnerScope = async (
+  patientId: unknown,
+  clinicIds: number[] | null
+): Promise<{ patient_id: number; owner_clinic_id: number } | null> => {
+  const result = await pool.query(
+    `SELECT p.patient_id, p.clinic_id AS owner_clinic_id
+     FROM patients p
+     WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]))`,
+    [patientId, clinicIds]
+  );
+  return result.rows[0] ?? null;
+};
+
 export const sharePatientRecord = async (req: AuthenticatedRequest, res: Response) => {
   const { patientId } = req.params;
   const { target_clinic_id, access_level = 'READ', expires_at } = req.body;
@@ -211,17 +228,12 @@ export const sharePatientRecord = async (req: AuthenticatedRequest, res: Respons
   try {
     // العيادة المالكة هي عيادة المريض الفعلية دائماً — ويشترط أن تكون ضمن نطاق عيادات المستخدم
     // (أو يكون المستخدم مديراً شاملاً)، فيمكن للمستخدمين متعددي العيادات المشاركة من أي عيادة مسندة لهم.
-    const patient = await pool.query(
-      `SELECT p.patient_id, p.clinic_id AS owner_clinic_id
-       FROM patients p
-       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]))`,
-      [patientId, accessibleClinicIds(req)]
-    );
+    const patient = await findPatientInOwnerScope(patientId, accessibleClinicIds(req));
     const targetClinic = await pool.query('SELECT 1 FROM clinics WHERE clinic_id = $1 AND is_active = TRUE', [target_clinic_id]);
-    if (!patient.rowCount || !targetClinic.rowCount) {
+    if (!patient || !targetClinic.rowCount) {
       return res.status(404).json({ message: 'المريض أو العيادة المستهدفة غير موجودة أو لا تملك صلاحية المشاركة' });
     }
-    const ownerClinicId = patient.rows[0].owner_clinic_id;
+    const ownerClinicId = patient.owner_clinic_id;
 
     const result = await pool.query(
       `INSERT INTO patient_clinic_shares
@@ -245,19 +257,11 @@ export const sharePatientRecord = async (req: AuthenticatedRequest, res: Respons
 
 export const listPatientShares = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // التحقق من إمكانية وصول المستخدم للمريض ضمن كامل نطاق عياداته
-    const patient = await pool.query(
-      `SELECT p.patient_id, p.clinic_id AS owner_clinic_id
-       FROM patients p
-       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]) OR EXISTS (
-         SELECT 1 FROM patient_clinic_shares s
-         WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($2::int[])
-           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
-       ))`,
-      [req.params.patientId, accessibleClinicIds(req)]
-    );
-    if (!patient.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
-    const ownerClinicId = patient.rows[0].owner_clinic_id;
+    // العرض من نطاق العيادة المالكة فقط (نفس سياسة sharePatientRecord) — لا تُعرض مشاركات المريض
+    // لعيادة مستهدفة بمشاركة، حتى لا تكتشف العيادة المستهدفة بقية العيادات المشارَك إليها ومستويات وصولها.
+    const patient = await findPatientInOwnerScope(req.params.patientId, accessibleClinicIds(req));
+    if (!patient) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
+    const ownerClinicId = patient.owner_clinic_id;
     const result = await pool.query(
       `SELECT s.share_id, s.patient_id, s.target_clinic_id, c.clinic_name,
               s.access_level, s.status, s.expires_at, s.created_at
@@ -276,19 +280,11 @@ export const listPatientShares = async (req: AuthenticatedRequest, res: Response
 
 export const revokePatientShare = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // التحقق من إمكانية وصول المستخدم للمريض قبل السماح بإلغاء مشاركاته
-    const patient = await pool.query(
-      `SELECT p.patient_id, p.clinic_id AS owner_clinic_id
-       FROM patients p
-       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR p.clinic_id = ANY($2::int[]) OR EXISTS (
-         SELECT 1 FROM patient_clinic_shares s
-         WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($2::int[])
-           AND s.status = 'ACTIVE' AND s.expires_at > NOW()
-       ))`,
-      [req.params.patientId, accessibleClinicIds(req)]
-    );
-    if (!patient.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
-    const ownerClinicId = patient.rows[0].owner_clinic_id;
+    // الإلغاء من نطاق العيادة المالكة فقط — العيادة المستهدفة بمشاركة لا تملك إلغاء مشاركات المريض،
+    // لا مشاركتها الخاصة ولا مشاركات العيادات الأخرى (منع تجاوز الصلاحيات عبر العيادات).
+    const patient = await findPatientInOwnerScope(req.params.patientId, accessibleClinicIds(req));
+    if (!patient) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
+    const ownerClinicId = patient.owner_clinic_id;
     const result = await pool.query(
       `UPDATE patient_clinic_shares SET status = 'REVOKED', revoked_at = NOW()
        WHERE share_id = $1 AND patient_id = $2 AND owner_clinic_id = $3 AND status = 'ACTIVE'
@@ -325,15 +321,30 @@ export const getUnifiedMedicalRecord = async (req: AuthenticatedRequest, res: Re
     );
     if (!access.rowCount) return res.status(404).json({ message: 'السجل غير موجود أو لا تملك صلاحية الوصول' });
 
+    // نفس scope الدالة المرجعية getPatientVisits (سطر 180): زيارات عيادات المستخدم فقط،
+    // أو زيارات مرتبطة بمشاركة نشطة إلى إحدى عياداته — لا تسريب من عيادات أخرى.
     const visits = await pool.query(
       `SELECT v.visit_id, v.clinic_id, c.clinic_name, v.doctor_id, u.full_name AS doctor_name, v.visit_date, v.notes
        FROM visits v JOIN clinics c ON c.clinic_id = v.clinic_id JOIN users u ON u.user_id = v.doctor_id
-       WHERE v.patient_id = $1 ORDER BY v.visit_date DESC`, [patientId]
+       WHERE v.patient_id = $1 AND ($2::int[] IS NULL OR v.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares sh
+         WHERE sh.patient_id = v.patient_id AND sh.target_clinic_id = ANY($2::int[])
+           AND sh.status = 'ACTIVE' AND sh.expires_at > NOW()
+       ))
+       ORDER BY v.visit_date DESC`, [patientId, clinicIds]
     );
+    // prescriptions بلا clinic_id في المخطط — scope عبر الزيارة المرتبطة (JOIN visits)
+    // بنفس قاعدة العيادات/المشاركات النشطة أعلاه.
     const prescriptions = await pool.query(
       `SELECT p.prescription_id, p.visit_id, p.doctor_id, u.full_name AS doctor_name, p.notes, p.created_at
        FROM prescriptions p JOIN users u ON u.user_id = p.doctor_id
-       WHERE p.patient_id = $1 ORDER BY p.created_at DESC`, [patientId]
+       JOIN visits v ON v.visit_id = p.visit_id
+       WHERE p.patient_id = $1 AND ($2::int[] IS NULL OR v.clinic_id = ANY($2::int[]) OR EXISTS (
+         SELECT 1 FROM patient_clinic_shares sh
+         WHERE sh.patient_id = p.patient_id AND sh.target_clinic_id = ANY($2::int[])
+           AND sh.status = 'ACTIVE' AND sh.expires_at > NOW()
+       ))
+       ORDER BY p.created_at DESC`, [patientId, clinicIds]
     );
     await pool.query(
       `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, resource_id)

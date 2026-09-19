@@ -1,11 +1,13 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
-import { AuthenticatedRequest, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
+import { AuthenticatedRequest, canManageAllClinics, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
 import { hashPassword } from '../../utils/auth';
 import { parseDeviceLabel } from '../../utils/device';
 
 export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
-  const isGlobal = isGlobalFinanceRole(req);
+  // P0.3: نطاق إدارة المستخدمين العام (كل العيادات) للأدوار الإدارية المخوّلة فعلياً فقط
+  // (SUPER_ADMIN / SYSTEM_ADMIN عبر canManageAllClinics) — لا يُمنح لمجرد امتلاك صلاحية مالية.
+  const isGlobal = canManageAllClinics(req);
   const requestedClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
@@ -84,6 +86,8 @@ export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
 // قائمة الأطباء المتاحين لحجز المواعيد — أطباء عيادات المستخدم المسندة (الأساسية أو clinic_staff)
 // وللمدير كل الأطباء (أو حسب العيادة المطلوبة)
 export const listDoctors = async (req: AuthenticatedRequest, res: Response) => {
+  // مقصود خارج تشديد P0.3: هذا دليل أطباء للقراءة فقط تستخدمه شاشة الفواتير لاختيار الطبيب
+  // بالاسم عبر العيادات (BillingView)، فهو نطاق مالي وليس إدارة مستخدمين — لذلك يبقى كما هو.
   const isGlobal = isGlobalFinanceRole(req);
   const requestedClinic = req.query.clinic_id ? Number(req.query.clinic_id) : null;
   try {
@@ -130,7 +134,8 @@ export const listDoctors = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createUser = async (req: AuthenticatedRequest, res: Response) => {
   const { full_name, username, password, role_name, clinic_id, phone, medical_license_no, sub_specialty, direct_phone } = req.body;
-  const managerIsGlobal = isGlobalFinanceRole(req);
+  // P0.3: الإنشاء عبر العيادات للأدوار الإدارية المخوّلة فقط — دور مالي لا يعبر نطاق عياداته
+  const managerIsGlobal = canManageAllClinics(req);
   const targetClinicId = clinic_id ?? req.user?.clinicId;
 
   if (!managerIsGlobal && targetClinicId !== req.user?.clinicId) {
@@ -179,7 +184,8 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
   const targetId = Number(req.params.id);
   const updates: Record<string, unknown> = {};
   const body = req.body;
-  const managerIsGlobal = isGlobalFinanceRole(req);
+  // P0.3: نفس سياسة createUser — النطاق العام للإدارة للأدوار الإدارية فقط
+  const managerIsGlobal = canManageAllClinics(req);
   const current = await pool.query(
     `SELECT u.user_id, u.role_id, u.clinic_id, u.deleted_at, r.role_name
      FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
@@ -276,7 +282,8 @@ const resolveManageableTarget = async (
     res.status(404).json({ message: 'المستخدم غير موجود' });
     return null;
   }
-  const managerIsGlobal = isGlobalFinanceRole(req);
+  // P0.3: إدارة الجلسات (عرض/إنهاء) بنفس نطاق الإدارة — لا نطاق مالي عام
+  const managerIsGlobal = canManageAllClinics(req);
   if (!managerIsGlobal && target.clinic_id !== req.user?.clinicId) {
     res.status(403).json({ message: 'لا يمكنك إدارة مستخدم من عيادة أخرى' });
     return null;
@@ -419,7 +426,8 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ message: 'لا يمكنك حذف حسابك الحالي' });
     }
-    const managerIsGlobal = isGlobalFinanceRole(req);
+    // P0.3: الحذف عبر العيادات للأدوار الإدارية المخوّلة فقط — لا لمجرد صلاحية مالية
+    const managerIsGlobal = canManageAllClinics(req);
     if (!managerIsGlobal && target.clinic_id !== req.user?.clinicId) {
       await client.query('ROLLBACK');
       return res.status(403).json({ message: 'لا يمكنك حذف مستخدم من عيادة أخرى' });
