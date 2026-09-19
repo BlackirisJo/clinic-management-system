@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { pool } from '../../config/database';
 import { comparePassword, generateToken, hashPassword } from '../../utils/auth';
 import jwt from 'jsonwebtoken';
+import { ApiErrorCode } from '../../utils/apiErrors';
 import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
 
 export const login = async (req: Request, res: Response) => {
@@ -47,9 +48,9 @@ export const login = async (req: Request, res: Response) => {
       const userAgent = typeof uaHeader === 'string' ? uaHeader.slice(0, 512) : null;
       // كل تسجيل دخول = جلسة مستقلة، تبدأ بحضور (last_seen_at) من لحظة الإنشاء
       await pool.query(
-        `INSERT INTO user_sessions (user_id, jti, expires_at, last_seen_at, user_agent)
-         VALUES ($1, $2, to_timestamp($3), NOW(), $4)`,
-        [user.user_id, tokenPayload.jti, tokenPayload.exp, userAgent]
+        `INSERT INTO user_sessions (user_id, jti, expires_at, last_seen_at, user_agent, ip_address)
+         VALUES ($1, $2, to_timestamp($3), NOW(), $4, $5)`,
+        [user.user_id, tokenPayload.jti, tokenPayload.exp, userAgent, req.ip]
       );
     }
     await pool.query(`INSERT INTO audit_logs (user_id, clinic_id, action, resource_type, metadata) VALUES ($1, $2, 'LOGIN_SUCCESS', 'AUTH', $3)`, [user.user_id, user.clinic_id, JSON.stringify({ ip: req.ip })]);
@@ -92,7 +93,7 @@ export const heartbeat = async (req: AuthenticatedRequest, res: Response) => {
       [jti, userId]
     );
     if (!result.rowCount) {
-      return res.status(403).json({ message: 'انتهت صلاحية جلستك أو تم إنهاؤها من قبل مدير النظام', code: 'SESSION_REVOKED' });
+      return res.status(403).json({ message: 'انتهت صلاحية جلستك أو تم إنهاؤها من قبل مدير النظام', code: ApiErrorCode.SESSION_REVOKED });
     }
     return res.status(200).json({ ok: true });
   } catch (error) {

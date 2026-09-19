@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../config/database';
 import { ApiErrorCode } from '../utils/apiErrors';
+import { AppError } from './error.middleware';
 
 export interface AuthenticatedRequest extends Request {
   authToken?: {
@@ -149,7 +150,7 @@ export const authenticateJWT = async (
 export const requirePermission = (requiredPermission: string) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return res.status(401).json({ message: 'المستخدم غير موثق', code: ApiErrorCode.UNAUTHENTICATED });
+      return next(new AppError('المستخدم غير موثق', 401, ApiErrorCode.UNAUTHENTICATED));
     }
 
     // السماح لكل من SUPER_ADMIN و SYSTEM_ADMIN بتجاوز الفحص
@@ -161,10 +162,7 @@ export const requirePermission = (requiredPermission: string) => {
       return next();
     }
 
-    return res.status(403).json({
-      message: 'عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء',
-      code: ApiErrorCode.FORBIDDEN,
-    });
+    return next(new AppError('عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء', 403, ApiErrorCode.FORBIDDEN));
   };
 };
 

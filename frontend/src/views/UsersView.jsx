@@ -316,6 +316,7 @@ function SessionsModal({ user: target, onClose, onChanged }) {
                 <span>آخر نشاط: {fmtRelative(s.last_seen_at)}</span>
                 <span>بدأت: {fmtDateTime(s.created_at)}</span>
                 <span>تنتهي: {fmtDateTime(s.expires_at)}</span>
+                <span>IP: {s.ip_address || '—'}</span>
               </div>
               {confirmOne === s.session_id ? (
                 <div className="session-confirm">

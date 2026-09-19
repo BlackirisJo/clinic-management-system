@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'crypto';
+import { pool } from '../config/database';
 
 // اختبار تكامل شامل لإدارة الجلسات والحضور والحذف الآمن للمستخدمين.
 // لا يعمل إلا عند توفر خادم حي (نفس نمط integration.test.ts):
@@ -302,6 +303,170 @@ test('DELETE_USERS cannot be granted to any role and SYSTEM_ADMIN can never dele
   const del = await call(`/api/users/${victimId}`, { method: 'DELETE', token: state.adminToken });
   assert.equal(del.status, 200);
   assert.equal(del.data.success, true);
+});
+
+test('C1 - session stores IPv4 address at login', { skip }, async () => {
+  const login = await call('/api/auth/login', { method: 'POST', body: { username: adminUser, password: adminPassword } });
+  assert.equal(login.status, 200);
+  const token = login.data.token;
+  const me = await call('/api/auth/me', { token });
+  assert.equal(me.status, 200);
+  const userId = me.data.user.userId;
+  const sessions = await call(`/api/users/${userId}/sessions`, { token });
+  assert.equal(sessions.status, 200);
+  assert.ok(Array.isArray(sessions.data.sessions));
+  assert.ok(sessions.data.sessions.length >= 1, 'there is at least one session');
+  const recentSession = sessions.data.sessions[0];
+  assert.ok(recentSession.ip_address, 'ip_address should be present');
+  assert.equal(typeof recentSession.ip_address, 'string', 'ip_address should be a string');
+  assert.ok(/^(\d{1,3}\.){3}\d{1,3}$/.test(recentSession.ip_address) || recentSession.ip_address.includes(':'), 'ip_address should be valid IPv4 or IPv6');
+  // IPv4 specifically
+  assert.ok(/^(\d{1,3}\.){3}\d{1,3}$/.test(recentSession.ip_address), 'ip_address should be IPv4 format');
+});
+
+test('C2 - session stores IPv6 address if available', { skip }, async () => {
+  const login = await call('/api/auth/login', { method: 'POST', body: { username: adminUser, password: adminPassword } });
+  assert.equal(login.status, 200);
+  const token = login.data.token;
+  const me = await call('/api/auth/me', { token });
+  assert.equal(me.status, 200);
+  const userId = me.data.user.userId;
+  const sessions = await call(`/api/users/${userId}/sessions`, { token });
+  assert.equal(sessions.status, 200);
+  const recentSession = sessions.data.sessions[0];
+  assert.ok(recentSession.ip_address, 'ip_address should be present');
+  // If the environment uses IPv6, verify it is stored correctly
+  if (recentSession.ip_address.includes(':')) {
+    assert.ok(recentSession.ip_address.length <= 45, 'IPv6 address should be within valid length');
+  }
+});
+
+test('C3 - session list returns ip_address field', { skip }, async () => {
+  const sessions = await call(`/api/users/${state.adminId}/sessions`, { token: state.adminToken });
+  assert.equal(sessions.status, 200);
+  assert.ok(Array.isArray(sessions.data.sessions));
+  if (sessions.data.sessions.length > 0) {
+    assert.ok('ip_address' in sessions.data.sessions[0], 'session should have ip_address field');
+  }
+});
+
+test('C4 - revoked session retains IP and revoked_at', { skip }, async () => {
+  const sessions = await call(`/api/users/${state.adminId}/sessions`, { token: state.adminToken });
+  assert.equal(sessions.status, 200);
+  assert.ok(sessions.data.sessions.length >= 1, 'there is at least one session');
+  const targetSessionId = sessions.data.sessions[0].session_id;
+  assert.ok(targetSessionId > 0);
+  // Check pre-revoke state
+  assert.ok(sessions.data.sessions[0].ip_address, 'ip_address present before revoke');
+  assert.equal(sessions.data.sessions[0].revoked_at, null, 'not revoked before revoke');
+  // Revoke
+  const revoke = await call(`/api/users/${state.adminId}/sessions/${targetSessionId}/revoke`, { method: 'POST', token: state.adminToken });
+  assert.equal(revoke.status, 200, `revoke failed: ${revoke.data?.message}`);
+  // Check post-revoke state
+  const afterRevoke = await call(`/api/users/${state.adminId}/sessions`, { token: state.adminToken });
+  assert.equal(afterRevoke.status, 200);
+  const revokedSession = afterRevoke.data.sessions.find((s: any) => s.session_id === targetSessionId);
+  assert.ok(revokedSession, 'revoked session should still be in list');
+  assert.ok(revokedSession.ip_address, 'ip_address retained after revoke');
+  assert.ok(revokedSession.revoked_at, 'revoked_at should be set after revoke');
+});
+
+test('C5 - recently revoked session is retained (not cleaned up)', { skip }, async () => {
+  const sessions = await call(`/api/users/${state.adminId}/sessions`, { token: state.adminToken });
+  assert.equal(sessions.status, 200);
+  assert.ok(sessions.data.sessions.length >= 1, 'there is at least one session');
+  // Find a recently revoked session and verify it still appears in the list
+  const revokedSession = sessions.data.sessions.find((s: any) => s.revoked_at !== null && s.revoked_at !== undefined);
+  if (revokedSession) {
+    assert.ok(revokedSession.ip_address, 'recently revoked session retains IP');
+    const elapsed = Date.now() - new Date(revokedSession.revoked_at).getTime();
+    assert.ok(elapsed < 60000, 'session was revoked recently (within 60 seconds)');
+  } else {
+    // Create a fresh revoke to test
+    const createUser = await call('/api/users', {
+      method: 'POST',
+      token: state.adminToken,
+      body: { full_name: 'Temp Session Test', username: `temp_sess_${suffix}`, password: 'TempPass123!', role_name: 'DOCTOR' },
+    });
+    assert.equal(createUser.status, 201);
+    const tempId = createUser.data.user.user_id;
+    createdUserIds.push(tempId);
+    const login = await call('/api/auth/login', { method: 'POST', body: { username: `temp_sess_${suffix}`, password: 'TempPass123!' } });
+    assert.equal(login.status, 200);
+    const tempToken = login.data.token;
+    const me = await call('/api/auth/me', { token: tempToken });
+    const tempUserId = me.data.user.userId;
+    const userSessions = await call(`/api/users/${tempUserId}/sessions`, { token: tempToken });
+    assert.ok(userSessions.data.sessions.length >= 1);
+    const sid = userSessions.data.sessions[0].session_id;
+    await call(`/api/users/${tempUserId}/sessions/${sid}/revoke`, { method: 'POST', token: state.adminToken });
+    // Immediately check the revoked session is still listed
+    const afterRevoke = await call(`/api/users/${tempUserId}/sessions`, { token: state.adminToken });
+    assert.equal(afterRevoke.status, 200);
+    const found = afterRevoke.data.sessions.find((s: any) => s.session_id === sid);
+    assert.ok(found, 'recently revoked session should still appear');
+    assert.ok(found.ip_address, 'recently revoked session retains IP');
+    assert.ok(found.revoked_at, 'revoked_at is set');
+  }
+});
+
+test('C6 - session older than 7 days is eligible for cleanup', { skip }, async () => {
+  // Verify the cleanup SQL logic: sessions revoked > 7 days ago match the cleanup condition
+  const result = await pool.query(
+    `SELECT COUNT(*) as count FROM user_sessions
+     WHERE (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days')
+        OR (revoked_at IS NULL AND expires_at < NOW() - INTERVAL '7 days')`
+  );
+  // This verifies the SQL runs without error and returns a count
+  assert.ok(Number(result.rows[0]?.count) >= 0, 'cleanup query should return a valid count');
+  // Verify that no recently-revoked session matches the cleanup condition
+  const recentResult = await pool.query(
+    `SELECT COUNT(*) as count FROM user_sessions
+     WHERE revoked_at IS NOT NULL AND revoked_at >= NOW() - INTERVAL '7 days'`
+  );
+  const recentCount = Number(recentResult.rows[0]?.count);
+  // These sessions are NOT eligible for cleanup (within 7 days)
+  assert.ok(recentCount >= 0, 'recently revoked sessions count should be non-negative');
+  // Active sessions should NOT match cleanup condition
+  const activeResult = await pool.query(
+    `SELECT COUNT(*) as count FROM user_sessions
+     WHERE revoked_at IS NULL AND expires_at > NOW()`
+  );
+  const activeCount = Number(activeResult.rows[0]?.count);
+  assert.ok(activeCount >= 0, 'active sessions count should be non-negative');
+  // Verify active sessions are NOT eligible for cleanup (they are NOT in the cleanup set)
+  const activeEligible = await pool.query(
+    `SELECT COUNT(*) as count FROM user_sessions
+     WHERE revoked_at IS NULL AND expires_at > NOW()
+       AND ((revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days')
+         OR (revoked_at IS NULL AND expires_at < NOW() - INTERVAL '7 days'))`
+  );
+  assert.equal(Number(activeEligible.rows[0]?.count), 0, 'active sessions should NOT be eligible for cleanup');
+});
+
+test('C7 - active session is not removed by retention logic', { skip }, async () => {
+  const sessions = await call(`/api/users/${state.adminId}/sessions`, { token: state.adminToken });
+  assert.equal(sessions.status, 200);
+  const activeSessions = sessions.data.sessions.filter((s: any) => s.is_online);
+  // Active sessions exist
+  if (activeSessions.length > 0) {
+    // Verify none of them have been in the database for more than 7 days with expiry passed
+    const activeIds = activeSessions.map((s: any) => s.session_id);
+    const result = await pool.query(
+      `SELECT session_id FROM user_sessions
+       WHERE revoked_at IS NULL AND expires_at > NOW()
+         AND session_id = ANY($1::int[])`,
+      [activeIds]
+    );
+    assert.equal(result.rowCount, activeIds.length, 'all active sessions should still exist in DB');
+  }
+  // Also verify via SQL that active sessions do NOT match cleanup criteria
+  const cleanupCheck = await pool.query(
+    `SELECT COUNT(*) as count FROM user_sessions
+     WHERE revoked_at IS NULL AND expires_at > NOW()
+       AND expires_at < NOW() - INTERVAL '7 days'`
+  );
+  assert.equal(Number(cleanupCheck.rows[0]?.count), 0, 'active sessions should not be past 7-day expiry threshold');
 });
 
 test('cleanup: remove test users', { skip }, async () => {

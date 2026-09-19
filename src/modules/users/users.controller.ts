@@ -333,7 +333,7 @@ export const listUserSessions = async (req: AuthenticatedRequest, res: Response)
     const target = await resolveManageableTarget(req, targetId, res, false);
     if (!target) return;
     const sessions = await pool.query(
-      `SELECT session_id, created_at, last_seen_at, expires_at, revoked_at, user_agent,
+      `SELECT session_id, created_at, last_seen_at, expires_at, revoked_at, user_agent, ip_address,
               (revoked_at IS NULL AND expires_at > NOW() AND last_seen_at >= NOW() - INTERVAL '60 seconds') AS is_online
        FROM user_sessions
        WHERE user_id = $1
@@ -344,6 +344,7 @@ export const listUserSessions = async (req: AuthenticatedRequest, res: Response)
       sessions: sessions.rows.map((row) => ({
         session_id: Number(row.session_id),
         device: parseDeviceLabel(row.user_agent),
+        ip_address: row.ip_address,
         created_at: row.created_at,
         last_seen_at: row.last_seen_at,
         expires_at: row.expires_at,

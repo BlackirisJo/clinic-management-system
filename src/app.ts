@@ -18,8 +18,10 @@ import medicationImportRoutes from './modules/prescriptions/medication.import.ro
 import clinicalRoutes from './modules/clinical/clinical.routes';
 import permissionsRoutes from './modules/permissions/permissions.routes';
 import { ApiErrorCode } from './utils/apiErrors';
+import { AppError } from './middlewares/error.middleware';
 
 const app: Application = express();
+app.set('trust proxy', 1);
 
 // Middlewares للأمان ومعالجة الطلبات
 app.use(helmet());
@@ -68,6 +70,12 @@ app.use((req: Request, res: Response) => {
 
 // معالج الأخطاء العام (Global Error Handler)
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  // أخطاء تشغيلية معروفة — استجابة موحدة { message, code } (+ errors للـ validation)
+  if (err instanceof AppError) {
+    const body: Record<string, unknown> = { message: err.message, code: err.code };
+    if (err.errors !== undefined) body.errors = err.errors;
+    return res.status(err.statusCode).json(body);
+  }
   // أخطاء رفع الملفات (Multer أو فلتر types) هي أخطاء من العميل — 400 وليس 500
   if (err instanceof multer.MulterError || err?.code === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({ message: err.message || 'حجم الملف يتجاوز الحد المسموح', code: ApiErrorCode.FILE_TOO_LARGE });

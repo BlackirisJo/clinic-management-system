@@ -11,7 +11,7 @@ const server = app.listen(PORT, () => {
 const sessionCleanup = setInterval(async () => {
   try {
     const { pool } = await import('./config/database');
-    await pool.query('DELETE FROM user_sessions WHERE expires_at < NOW() OR revoked_at < NOW() - INTERVAL \'30 days\'');
+    await pool.query("DELETE FROM user_sessions WHERE (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days') OR (revoked_at IS NULL AND expires_at < NOW() - INTERVAL '7 days')");
   } catch (error) {
     console.error('Session cleanup failed:', error);
   }
