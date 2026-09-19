@@ -1,13 +1,15 @@
 import { NextFunction, Response, Router } from 'express';
 import { z } from 'zod';
 import { authenticateJWT, AuthenticatedRequest, requirePermission } from '../../middlewares/auth.middleware';
+import { AppError } from '../../middlewares/error.middleware';
+import { ApiErrorCode } from '../../utils/apiErrors';
 import { createUser, listUsers, updateUser, listDoctors, listUserSessions, revokeUserSession, revokeAllUserSessions, deleteUser } from './users.controller';
 import { createUserSchema, updateUserSchema } from './users.validation';
 
 const router = Router();
 const validate = (schema: z.ZodType) => (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const result = schema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ message: 'بيانات المستخدم غير صالحة', errors: result.error });
+  if (!result.success) return next(new AppError('بيانات المستخدم غير صالحة', 400, ApiErrorCode.VALIDATION_ERROR, true, result.error));
   req.body = result.data;
   return next();
 };
@@ -21,7 +23,7 @@ const allowDoctorsList = (req: AuthenticatedRequest, res: Response, next: NextFu
   const perms = req.user?.permissions ?? [];
   const allowed = ['VIEW_APPOINTMENTS', 'MANAGE_APPOINTMENTS', 'CREATE_INVOICE', 'VIEW_INVOICES', 'MANAGE_SERVICES', 'VIEW_FINANCIAL_REPORTS'];
   if (allowed.some((k) => perms.includes(k))) return next();
-  return res.status(403).json({ message: 'عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء' });
+  return next(new AppError('عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء', 403, ApiErrorCode.FORBIDDEN));
 };
 router.get('/doctors', allowDoctorsList, listDoctors);
 // بقية مسارات إدارة المستخدمين — تتطلب صلاحية إدارة المستخدمين (إدارة النظام فقط)
@@ -37,7 +39,7 @@ router.post('/:id/sessions/:sessionId/revoke', requirePermission('MANAGE_USERS')
 // لا يُعتمد على requirePermission لأنه يتجاوز الفحص للدورين الإداريين معاً.
 const requireDeleteUsers = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   if (req.user?.roleName === 'SUPER_ADMIN') return next();
-  return res.status(403).json({ message: 'عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء' });
+  return next(new AppError('عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء', 403, ApiErrorCode.FORBIDDEN));
 };
 router.delete('/:id', requireDeleteUsers, deleteUser);
 

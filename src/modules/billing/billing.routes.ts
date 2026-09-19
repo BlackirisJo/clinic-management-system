@@ -16,6 +16,8 @@ import {
   getMonthlyFinancialKPIs,
 } from './billing.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
+import { AppError } from '../../middlewares/error.middleware';
+import { ApiErrorCode } from '../../utils/apiErrors';
 import { validateBody } from '../../middlewares/validate.middleware';
 import { expenseSchema, expenseUpdateSchema, invoiceSchema, serviceSchema, serviceUpdateSchema } from '../../validations/business.validation';
 
@@ -30,7 +32,7 @@ const requireAny = (keys: string[]) => {
     if (req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN') return next();
     const perms: string[] = req.user?.permissions ?? [];
     if (keys.some((k) => perms.includes(k))) return next();
-    return res.status(403).json({ message: 'عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء' });
+    return next(new AppError('عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء', 403, ApiErrorCode.FORBIDDEN));
   };
 };
 

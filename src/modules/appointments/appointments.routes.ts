@@ -6,6 +6,8 @@ import {
   updateAppointmentStatus,
 } from './appointments.controller';
 import { authenticateJWT, requirePermission, AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import { AppError } from '../../middlewares/error.middleware';
+import { ApiErrorCode } from '../../utils/apiErrors';
 import { createAppointmentSchema, updateAppointmentStatusSchema } from './appointments.validation';
 
 const router = Router();
@@ -14,7 +16,7 @@ const validate = (schema: z.ZodType) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      return res.status(400).json({ message: 'بيانات الطلب غير صالحة', errors: result.error });
+      return next(new AppError('بيانات الطلب غير صالحة', 400, ApiErrorCode.VALIDATION_ERROR, true, result.error));
     }
     req.body = result.data;
     return next();
