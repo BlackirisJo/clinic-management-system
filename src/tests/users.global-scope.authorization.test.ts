@@ -45,6 +45,20 @@ const reqFor = (roleKey: string): AuthenticatedRequest => {
 type Target = { user_id: number; clinic_id: number | null; role_name: string };
 const targetIn = (clinicId: number | null, roleName = 'DOCTOR'): Target => ({ user_id: 99, clinic_id: clinicId, role_name: roleName });
 
+// Mirrors the P0.3 security helpers added in users.controller.ts (lines 7-23)
+const isElevatedAdminRole = (roleName?: string | null): boolean =>
+  roleName === 'SUPER_ADMIN' || roleName === 'SYSTEM_ADMIN';
+
+const isBlockedAdminTarget = (
+  targetRoleName: string | null | undefined,
+  req: AuthenticatedRequest,
+  managerIsGlobal: boolean
+): boolean => {
+  if (targetRoleName === 'SUPER_ADMIN') return req.user?.roleName !== 'SUPER_ADMIN';
+  if (targetRoleName === 'SYSTEM_ADMIN') return !managerIsGlobal;
+  return false;
+};
+
 // listUsers (lines 24-45): global admins may see every clinic; everyone else is
 // clamped to their assigned clinics, and an out-of-scope clinic_id filter is 403.
 function simulateListUsersScope(req: AuthenticatedRequest, requestedClinic: number | null) {
@@ -58,41 +72,42 @@ function simulateListUsersScope(req: AuthenticatedRequest, requestedClinic: numb
   return { httpStatus: 200, scopedTo: ids };
 }
 
-// createUser (lines 136-144)
+// createUser (lines 162-166)
 function simulateCreateUser(req: AuthenticatedRequest, body: { role_name: string; clinic_id?: number | null }) {
   const managerIsGlobal = canManageAllClinics(req); // P0.3
   const targetClinicId = body.clinic_id ?? req.user?.clinicId;
   if (!managerIsGlobal && targetClinicId !== req.user?.clinicId) return 403;
-  if (body.role_name === 'SUPER_ADMIN' && !managerIsGlobal) return 403;
+  if (isElevatedAdminRole(body.role_name) && !managerIsGlobal) return 403; // P0.3 security
   if (body.role_name !== 'SUPER_ADMIN' && !targetClinicId) return 400;
   return 201;
 }
 
-// updateUser (lines 189-220): clinic gate, then role/clinic change guards
+// updateUser (lines 214-238): clinic gate, admin-target guard, then role/clinic change guards
 function simulateUpdateUser(req: AuthenticatedRequest, target: Target, body: { role_name?: string; clinic_id?: number | null; phone?: string } = {}) {
   const managerIsGlobal = canManageAllClinics(req); // P0.3
   if (!managerIsGlobal && target.clinic_id !== req.user?.clinicId) return 403;
+  if (isBlockedAdminTarget(target.role_name, req, managerIsGlobal)) return 403; // P0.3 security
   const finalRoleName = body.role_name ?? target.role_name;
   const finalClinicId = body.clinic_id !== undefined ? body.clinic_id : target.clinic_id;
   if (finalRoleName !== 'SUPER_ADMIN' && !finalClinicId) return 400;
-  if (body.role_name === 'SUPER_ADMIN' && !managerIsGlobal) return 403;
+  if (isElevatedAdminRole(body.role_name) && !managerIsGlobal) return 403; // P0.3 security
   if (!managerIsGlobal && body.clinic_id !== undefined && body.clinic_id !== req.user?.clinicId) return 403;
   return 200;
 }
 
-// resolveManageableTarget (lines 279-288) - gates listUserSessions / revokeUserSession / revokeAllUserSessions
+// resolveManageableTarget (lines 314-319) - gates listUserSessions / revokeUserSession / revokeAllUserSessions
 function simulateManageTarget(req: AuthenticatedRequest, target: Target) {
   const managerIsGlobal = canManageAllClinics(req); // P0.3
   if (!managerIsGlobal && target.clinic_id !== req.user?.clinicId) return 403;
-  if (target.role_name === 'SUPER_ADMIN' && req.user?.roleName !== 'SUPER_ADMIN') return 403;
+  if (isBlockedAdminTarget(target.role_name, req, managerIsGlobal)) return 403; // P0.3 security
   return 200;
 }
 
-// deleteUser (lines 422-431) + role hierarchy guard (line 428)
+// deleteUser (lines 459-464) + role hierarchy guard
 function simulateDeleteUser(req: AuthenticatedRequest, target: Target) {
   const managerIsGlobal = canManageAllClinics(req); // P0.3
   if (!managerIsGlobal && target.clinic_id !== req.user?.clinicId) return 403;
-  if (target.role_name === 'SUPER_ADMIN' && req.user?.roleName !== 'SUPER_ADMIN') return 403;
+  if (isBlockedAdminTarget(target.role_name, req, managerIsGlobal)) return 403; // P0.3 security
   return 200;
 }
 
@@ -225,4 +240,54 @@ test('US14 - role hierarchy guard is preserved', () => {
 test('US15 - doctors directory keeps its financial scope by design', () => {
   assert.equal(isGlobalFinanceRole(reqFor('ACCOUNTANT')), true, 'financial roles keep the read-only doctors directory');
   assert.equal(isGlobalFinanceRole(reqFor('CLINIC_MANAGER')), false, 'operational roles never did');
+});
+
+// ============================================================================
+// 5) P0.3 security hardening: escalation to SYSTEM_ADMIN is admin-only
+// ============================================================================
+test('US16 - clinic manager cannot create SYSTEM_ADMIN or SUPER_ADMIN', () => {
+  const manager = reqFor('CLINIC_MANAGER'); // MANAGE_USERS, clinic 1
+  assert.equal(canManageAllClinics(manager), false, 'not a global admin role');
+  assert.equal(simulateCreateUser(manager, { role_name: 'SYSTEM_ADMIN', clinic_id: 1 }), 403, 'SYSTEM_ADMIN create denied');
+  assert.equal(simulateCreateUser(manager, { role_name: 'SUPER_ADMIN', clinic_id: 1 }), 403, 'SUPER_ADMIN create denied');
+  assert.equal(simulateCreateUser(manager, { role_name: 'DOCTOR', clinic_id: 1 }), 201, 'normal role in own clinic still allowed');
+});
+
+test('US17 - clinic manager cannot promote an existing user to SYSTEM_ADMIN', () => {
+  const manager = reqFor('CLINIC_MANAGER');
+  assert.equal(simulateUpdateUser(manager, targetIn(1), { role_name: 'SYSTEM_ADMIN' }), 403, 'promotion to SYSTEM_ADMIN denied');
+  assert.equal(simulateUpdateUser(manager, targetIn(1), { role_name: 'SUPER_ADMIN' }), 403, 'promotion to SUPER_ADMIN denied');
+  assert.equal(simulateUpdateUser(manager, targetIn(1), { role_name: 'NURSE' }), 200, 'normal role change still allowed');
+  // same hole through a role that combines MANAGE_USERS with financial permissions
+  assert.equal(simulateUpdateUser(reqFor('FINANCE_MANAGER'), targetIn(2), { role_name: 'SYSTEM_ADMIN' }), 403, 'financial+MANAGE_USERS denied');
+});
+
+test('US18 - clinic manager cannot manage an existing SYSTEM_ADMIN account', () => {
+  const manager = reqFor('CLINIC_MANAGER');
+  const sysadmin = targetIn(1, 'SYSTEM_ADMIN'); // same clinic on purpose: clinic scope alone used to allow it
+  assert.equal(simulateManageTarget(manager, sysadmin), 403, 'session management denied');
+  assert.equal(simulateUpdateUser(manager, sysadmin, { phone: '000' }), 403, 'profile update denied');
+  assert.equal(simulateDeleteUser(manager, sysadmin), 403, 'delete denied');
+});
+
+test('US19 - legitimate SYSTEM_ADMIN / SUPER_ADMIN behaviour still passes', () => {
+  const sysadmin = reqFor('SYSTEM_ADMIN');
+  const superadmin = reqFor('SUPER_ADMIN');
+  assert.equal(canManageAllClinics(sysadmin), true);
+  assert.equal(simulateCreateUser(sysadmin, { role_name: 'SYSTEM_ADMIN', clinic_id: 3 }), 201, 'admin creates SYSTEM_ADMIN');
+  assert.equal(simulateUpdateUser(sysadmin, targetIn(3), { role_name: 'SYSTEM_ADMIN' }), 200, 'admin promotes to SYSTEM_ADMIN');
+  const target = targetIn(3, 'SYSTEM_ADMIN');
+  assert.equal(simulateManageTarget(sysadmin, target), 200, 'admin manages SYSTEM_ADMIN sessions');
+  assert.equal(simulateUpdateUser(sysadmin, target, { phone: '000' }), 200, 'admin updates SYSTEM_ADMIN');
+  assert.equal(simulateDeleteUser(sysadmin, target), 200, 'admin deletes SYSTEM_ADMIN');
+  assert.equal(simulateCreateUser(superadmin, { role_name: 'SUPER_ADMIN', clinic_id: null }), 201, 'SUPER_ADMIN rule unchanged');
+});
+
+test('US20 - SYSTEM_ADMIN still cannot manage a SUPER_ADMIN account', () => {
+  const sysadmin = reqFor('SYSTEM_ADMIN');
+  const superTarget = targetIn(1, 'SUPER_ADMIN');
+  assert.equal(simulateManageTarget(sysadmin, superTarget), 403, 'sessions denied');
+  assert.equal(simulateDeleteUser(sysadmin, superTarget), 403, 'delete denied');
+  assert.equal(simulateUpdateUser(sysadmin, superTarget, { phone: '000' }), 403, 'update denied');
+  assert.equal(simulateManageTarget(reqFor('SUPER_ADMIN'), superTarget), 200, 'SUPER_ADMIN keeps full access');
 });

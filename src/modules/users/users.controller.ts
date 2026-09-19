@@ -4,6 +4,24 @@ import { AuthenticatedRequest, canManageAllClinics, isGlobalFinanceRole } from '
 import { hashPassword } from '../../utils/auth';
 import { parseDeviceLabel } from '../../utils/device';
 
+// ————— حراسة P0.3 الأمنية للأدوار الإدارية العليا —————
+// إنشاء/ترقية إلى دور إداري أعلى: لا يقوم بها إلا دور إداري شامل (canManageAllClinics)
+const isElevatedAdminRole = (roleName?: string | null): boolean =>
+  roleName === 'SUPER_ADMIN' || roleName === 'SYSTEM_ADMIN';
+
+// إدارة حساب إداري أعلى (تعديل/جلسات/حذف):
+// - SUPER_ADMIN: لا يديره إلا SUPER_ADMIN (كما كان).
+// - SYSTEM_ADMIN: لا يديره إلا دور إداري شامل — يمنع المدير المقيّد بالعيادة.
+const isBlockedAdminTarget = (
+  targetRoleName: string | null | undefined,
+  req: AuthenticatedRequest,
+  managerIsGlobal: boolean
+): boolean => {
+  if (targetRoleName === 'SUPER_ADMIN') return req.user?.roleName !== 'SUPER_ADMIN';
+  if (targetRoleName === 'SYSTEM_ADMIN') return !managerIsGlobal;
+  return false;
+};
+
 export const listUsers = async (req: AuthenticatedRequest, res: Response) => {
   // P0.3: نطاق إدارة المستخدمين العام (كل العيادات) للأدوار الإدارية المخوّلة فعلياً فقط
   // (SUPER_ADMIN / SYSTEM_ADMIN عبر canManageAllClinics) — لا يُمنح لمجرد امتلاك صلاحية مالية.
@@ -141,7 +159,8 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
   if (!managerIsGlobal && targetClinicId !== req.user?.clinicId) {
     return res.status(403).json({ message: 'لا يمكنك إنشاء مستخدم في عيادة أخرى' });
   }
-  if (role_name === 'SUPER_ADMIN' && !managerIsGlobal) {
+  // P0.3 security: الأدوار الإدارية العليا (SUPER_ADMIN / SYSTEM_ADMIN) لا ينشئها إلا دور إداري شامل
+  if (isElevatedAdminRole(role_name) && !managerIsGlobal) {
     return res.status(403).json({ message: 'لا يمكنك منح صلاحية مدير النظام' });
   }
   if (role_name !== 'SUPER_ADMIN' && !targetClinicId) {
@@ -193,6 +212,10 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
   );
   if (!current.rowCount || current.rows[0].deleted_at) return res.status(404).json({ message: 'المستخدم غير موجود' });
   if (!managerIsGlobal && current.rows[0].clinic_id !== req.user?.clinicId) return res.status(403).json({ message: 'لا يمكنك تعديل مستخدم من عيادة أخرى' });
+  // P0.3 security: حماية الحسابات الإدارية الأعلى (SYSTEM_ADMIN / SUPER_ADMIN) من مدير أقل صلاحية
+  if (isBlockedAdminTarget(current.rows[0].role_name, req, managerIsGlobal)) {
+    return res.status(403).json({ message: 'لا يمكنك تعديل حساب مدير أعلى منك' });
+  }
   if (targetId === req.user?.userId && (body.role_name || body.status === 'SUSPENDED' || body.clinic_id !== undefined)) {
     return res.status(400).json({ message: 'لا يمكنك تغيير دور أو عيادة أو حالة حسابك الحالي' });
   }
@@ -211,7 +234,8 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
     if (body.is_force_password_change !== undefined) updates.is_force_password_change = body.is_force_password_change;
     if (body.password) { updates.password_hash = await hashPassword(body.password); updates.is_force_password_change = true; }
     if (body.role_name) {
-      if (body.role_name === 'SUPER_ADMIN' && !managerIsGlobal) return res.status(403).json({ message: 'لا يمكنك منح صلاحية مدير النظام' });
+      // P0.3 security: الترقية إلى دور إداري أعلى (SUPER_ADMIN / SYSTEM_ADMIN) لدور إداري شامل فقط
+      if (isElevatedAdminRole(body.role_name) && !managerIsGlobal) return res.status(403).json({ message: 'لا يمكنك منح صلاحية مدير النظام' });
       const role = await pool.query('SELECT role_id FROM roles WHERE role_name = $1', [body.role_name]);
       if (!role.rowCount) return res.status(400).json({ message: 'الدور غير موجود' });
       updates.role_id = role.rows[0].role_id;
@@ -289,7 +313,8 @@ const resolveManageableTarget = async (
     return null;
   }
   // حماية الحسابات الإدارية: مدير أقل صلاحية لا يدير جلسات/حساب مدير أعلى منه
-  if (target.role_name === 'SUPER_ADMIN' && req.user?.roleName !== 'SUPER_ADMIN') {
+  // P0.3 security: تشمل الآن SYSTEM_ADMIN — لا يديره إلا دور إداري شامل (canManageAllClinics)
+  if (isBlockedAdminTarget(target.role_name, req, managerIsGlobal)) {
     res.status(403).json({ message: 'لا يمكنك إدارة حساب مدير أعلى منك' });
     return null;
   }
@@ -433,7 +458,8 @@ export const deleteUser = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ message: 'لا يمكنك حذف مستخدم من عيادة أخرى' });
     }
     // مدير أقل صلاحية لا يحذف مديراً أعلى منه
-    if (target.role_name === 'SUPER_ADMIN' && req.user?.roleName !== 'SUPER_ADMIN') {
+    // P0.3 security: تشمل الآن SYSTEM_ADMIN — لا يحذفه إلا دور إداري شامل (canManageAllClinics)
+    if (isBlockedAdminTarget(target.role_name, req, managerIsGlobal)) {
       await client.query('ROLLBACK');
       return res.status(403).json({ message: 'لا يمكنك حذف حساب مدير أعلى منك' });
     }
