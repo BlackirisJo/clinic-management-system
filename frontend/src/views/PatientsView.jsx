@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
+import { useT } from '../i18n'
 import { fmtDate, fmtDateTime, GENDER_LABELS, DOCUMENT_TYPE_LABELS, ALLERGEN_LABELS, ALLERGEN_KEYS, CHRONIC_CONDITION_LABELS, CHRONIC_CONDITION_KEYS, CONDITION_SEVERITY_LABELS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
 import VisitModal from '../components/VisitModal'
@@ -35,6 +36,7 @@ const clinicNameById = (clinics, clinicId) => {
 
 // مودال موحد لعرض محتوى أدوية الروشتة (يُستخدم في ملف المريض)
 export function PrescriptionItemsModal({ prescriptionId, onClose }) {
+  const t = useT()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   useEffect(() => {
@@ -42,39 +44,39 @@ export function PrescriptionItemsModal({ prescriptionId, onClose }) {
     setError('')
     api.prescriptions.get(prescriptionId)
       .then((result) => { if (!cancelled) setData(result) })
-      .catch((err) => { if (!cancelled) setError(err.message || 'تعذر تحميل محتوى الروشتة') })
+      .catch((err) => { if (!cancelled) setError(err.message || t('patients.prescriptionItems.error')) })
     return () => { cancelled = true }
   }, [prescriptionId])
   const rx = data?.prescription || {}
   const items = data?.items || []
   return (
-    <Modal title="محتوى الروشتة الطبية" subtitle={rx.clinic_name ? `إحالة مباشرة إلى: ${rx.clinic_name}` : `روشتة رقم ${rx.prescription_id || prescriptionId}`} onClose={onClose} wide>
+    <Modal title={t('patients.prescriptionItems.title')} subtitle={rx.clinic_name ? t('patients.prescriptionItems.subtitleDirect', { clinic: rx.clinic_name }) : t('patients.prescriptionItems.subtitleNumber', { number: rx.prescription_id || prescriptionId })} onClose={onClose} wide>
       <Notice kind="error">{error}</Notice>
-      {!data && !error ? <Loading text="جارِ تحميل الأدوية" /> : data ? (
+      {!data && !error ? <Loading text={t('patients.prescriptionItems.loading')} /> : data ? (
         <div className="prescription-paper" dir="rtl">
           <div className="paper-head">
-            <div><strong>روشتة طبية</strong><span>{rx.doctor_name || 'طبيب'}</span></div>
+            <div><strong>{t('patients.prescriptionItems.paperTitle')}</strong><span>{rx.doctor_name || t('patients.prescriptionItems.doctor')}</span></div>
             <div className="paper-date">{fmtDateTime(rx.created_at)}</div>
           </div>
           <div className="paper-patient">
-            <span><b>المريض:</b> {rx.patient_name || '—'}</span>
-            {rx.clinic_name ? <span><b>العيادة:</b> {rx.clinic_name}</span> : null}
+            <span><b>{t('patients.prescriptionItems.patientLabel')}</b> {rx.patient_name || '—'}</span>
+            {rx.clinic_name ? <span><b>{t('patients.prescriptionItems.clinicLabel')}</b> {rx.clinic_name}</span> : null}
           </div>
-          {rx.notes ? <div className="paper-notes"><b>ملاحظات:</b> {rx.notes}</div> : null}
-          {items.length === 0 ? <Empty text="لا توجد أدوية مسجلة في هذه الروشتة" /> : (
+          {rx.notes ? <div className="paper-notes"><b>{t('patients.prescriptionItems.notesLabel')}</b> {rx.notes}</div> : null}
+          {items.length === 0 ? <Empty text={t('patients.prescriptionItems.empty')} /> : (
             <div className="table-wrap table-cards">
               <table>
-                <thead><tr><th>#</th><th>الدواء</th><th>الجرعة</th><th>التردد</th><th>المدة</th><th>تعليمات التوقيت</th><th>التكرار</th></tr></thead>
+                <thead><tr><th>{t('patients.prescriptionItems.tableNumber')}</th><th>{t('patients.prescriptionItems.tableMedication')}</th><th>{t('patients.prescriptionItems.tableDosage')}</th><th>{t('patients.prescriptionItems.tableFrequency')}</th><th>{t('patients.prescriptionItems.tableDuration')}</th><th>{t('patients.prescriptionItems.tableTimingInstructions')}</th><th>{t('patients.prescriptionItems.tableRepeat')}</th></tr></thead>
                 <tbody>
                   {items.map((it, i) => (
                     <tr key={it.item_id ?? i}>
-                      <td className="hide-sm" data-label="#">{i + 1}</td>
+                      <td className="hide-sm" data-label={t('patients.prescriptionItems.tableNumber')}>{i + 1}</td>
                       <td className="cell-title">{it.trade_name}{it.scientific_name ? ` (${it.scientific_name})` : ''}</td>
-                      <td data-label="الجرعة">{it.dosage}</td>
-                      <td data-label="التردد">{it.frequency}</td>
-                      <td data-label="المدة">{it.duration}</td>
-                      <td data-label="تعليمات التوقيت">{it.timing_instructions || '—'}</td>
-                      <td data-label="التكرار">{it.repeats_count}</td>
+                      <td data-label={t('patients.prescriptionItems.tableDosage')}>{it.dosage}</td>
+                      <td data-label={t('patients.prescriptionItems.tableFrequency')}>{it.frequency}</td>
+                      <td data-label={t('patients.prescriptionItems.tableDuration')}>{it.duration}</td>
+                      <td data-label={t('patients.prescriptionItems.tableTimingInstructions')}>{it.timing_instructions || '—'}</td>
+                      <td data-label={t('patients.prescriptionItems.tableRepeat')}>{it.repeats_count}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -82,8 +84,8 @@ export function PrescriptionItemsModal({ prescriptionId, onClose }) {
             </div>
           )}
           <div className="paper-actions">
-            <button className="primary-button compact" onClick={() => window.print()}>طباعة</button>
-            <button className="secondary-button compact" onClick={onClose}>إغلاق</button>
+            <button className="primary-button compact" onClick={() => window.print()}>{t('patients.prescriptionItems.print')}</button>
+            <button className="secondary-button compact" onClick={onClose}>{t('common.close')}</button>
           </div>
         </div>
       ) : null}
@@ -92,6 +94,7 @@ export function PrescriptionItemsModal({ prescriptionId, onClose }) {
 }
 
 export default function PatientsView() {
+  const t = useT()
   const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [search, setSearch] = useState('')
@@ -108,7 +111,7 @@ export default function PatientsView() {
       const result = await api.patients.list({ search: search || undefined, page, limit: LIMIT })
       setRows(result.patients || [])
     } catch (err) {
-      setError(err.message || 'تعذر تحميل المرضى')
+      setError(err.message || t('patients.error.load'))
     } finally {
       setLoading(false)
     }
@@ -119,33 +122,33 @@ export default function PatientsView() {
   return (
     <section className="full-panel">
       <div className="panel-heading">
-        <div><h2>سجل المرضى</h2><p>البحث والإدارة والاطلاع على السجلات الطبية</p></div>
-        <button className="primary-button compact" onClick={() => setShowAdd(true)}>+ إضافة مريض جديد</button>
+        <div><h2>{t('patients.title')}</h2><p>{t('patients.subtitle')}</p></div>
+        <button className="primary-button compact" onClick={() => setShowAdd(true)}>{t('patients.create')}</button>
       </div>
 
       <div className="toolbar">
-        <input className="input" placeholder="ابحث بالاسم أو الهاتف أو رقم الوثيقة..." value={search}
+        <input className="input" placeholder={t('patients.searchPlaceholder')} value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
       </div>
 
       <Notice kind="error">{error}</Notice>
-      {loading ? <Loading text="جارِ تحميل المرضى" /> : rows.length === 0 ? <Empty text="لا توجد سجلات مرضى مطابقة" /> : (
+      {loading ? <Loading text={t('patients.loading')} /> : rows.length === 0 ? <Empty text={t('patients.empty')} /> : (
         <>
           <div className="table-wrap table-cards">
             <table>
               <thead>
-                <tr><th>المريض</th><th>الرقم الوطني</th><th>الهاتف</th><th>النوع</th><th>تاريخ الميلاد</th><th>تاريخ التسجيل</th><th>إجراءات</th></tr>
+                <tr><th>{t('patients.table.patient')}</th><th>{t('patients.table.nationalId')}</th><th>{t('patients.table.phone')}</th><th>{t('patients.table.genderType')}</th><th>{t('patients.table.birthDate')}</th><th>{t('patients.table.registeredAt')}</th><th>{t('patients.table.actions')}</th></tr>
               </thead>
               <tbody>
                 {rows.map((p) => (
                   <tr key={p.patient_id}>
-                    <td><span className="table-avatar">{p.full_name?.[0] || 'م'}</span>{p.full_name}{p.is_shared ? <span className="badge shared-chip">مشترك</span> : null}</td>
-                    <td dir="ltr" data-label="الرقم الوطني">{p.national_id || '—'}</td>
-                    <td dir="ltr" data-label="الهاتف">{p.phone}</td>
-                    <td data-label="النوع">{GENDER_LABELS[p.gender] || p.gender}</td>
-                    <td data-label="تاريخ الميلاد">{fmtDate(p.date_of_birth, true)}</td>
-                    <td data-label="تاريخ التسجيل">{fmtDate(p.created_at, true)}</td>
-                    <td className="cell-actions"><button className="text-button" onClick={() => setSelected(p)}>الملف الكامل ←</button></td>
+                    <td><span className="table-avatar">{p.full_name?.[0] || t('patients.avatarInitial')}</span>{p.full_name}{p.is_shared ? <span className="badge shared-chip">{t('patients.sharedBadge')}</span> : null}</td>
+                    <td dir="ltr" data-label={t('patients.table.nationalId')}>{p.national_id || '—'}</td>
+                    <td dir="ltr" data-label={t('patients.table.phone')}>{p.phone}</td>
+                    <td data-label={t('patients.table.genderType')}>{GENDER_LABELS[p.gender] || p.gender}</td>
+                    <td data-label={t('patients.table.birthDate')}>{fmtDate(p.date_of_birth, true)}</td>
+                    <td data-label={t('patients.table.registeredAt')}>{fmtDate(p.created_at, true)}</td>
+                    <td className="cell-actions"><button className="text-button" onClick={() => setSelected(p)}>{t('patients.viewFile')}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -162,6 +165,7 @@ export default function PatientsView() {
 }
 
 function AddPatientModal({ user, onClose, onSaved }) {
+  const t = useT()
   const isGlobal = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
   const { clinics, loading: clinicsLoading } = useClinicDirectory(true)
   const defaultClinic = useMemo(() => {
@@ -197,68 +201,69 @@ function AddPatientModal({ user, onClose, onSaved }) {
       await api.patients.create({ ...form, national_id: form.national_id || undefined, clinic_id: form.clinic_id ? Number(form.clinic_id) : undefined })
       onSaved()
     } catch (err) {
-      setError(err.message || 'تعذر حفظ بيانات المريض')
+      setError(err.message || t('patients.create.error'))
     } finally { setSaving(false) }
   }
 
   return (
-    <Modal title="إضافة مريض جديد" subtitle="سجل المرضى" onClose={onClose}>
+    <Modal title={t('patients.create.title')} subtitle={t('patients.modal.subtitle')} onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label="الاسم الكامل" required>
+        <Field label={t('patients.fullName')} required>
           <input required minLength={3} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
         </Field>
-        <Field label="العيادة المختصة" required
-          hint={clinicsLoading ? 'جارِ تحميل قائمة العيادات...' : (isGlobal ? 'اختر العيادة بالاسم — يُحال إليها المريض مباشرة' : 'ستُحال إلى العيادات المسندة إليك بالاسم')}>
+        <Field label={t('patients.clinicLabel')} required
+          hint={clinicsLoading ? t('patients.loadingClinics') : (isGlobal ? t('patients.clinicHintGlobal') : t('patients.clinicHintAssigned'))}>
           {clinicsLoading ? (
-            <select disabled><option>جارِ تحميل العيادات...</option></select>
+            <select disabled><option>{t('patients.loadingClinics')}</option></select>
           ) : isGlobal ? (
             <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
-              <option value="">اختر العيادة بالاسم...</option>
+              <option value="">{t('patients.clinicSelect.global')}</option>
               {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
             </select>
           ) : (
             <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}>
-              <option value="">عياداتي المسندة...</option>
+              <option value="">{t('patients.clinicSelect.local')}</option>
               {clinics
                 .filter((c) => (user?.clinicIds || (user?.clinicId ? [user.clinicId] : [])).map(Number).includes(Number(c.clinic_id)))
                 .map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
             </select>
           )}
         </Field>
-        <div className="form-row"><Field label="نوع الوثيقة" required>
+        <div className="form-row"><Field label={t('patients.documentType')} required>
           <select value={form.document_type} onChange={(e) => setForm({ ...form, document_type: e.target.value })}>
-            <option value="NATIONAL_ID">بطاقة شخصية</option>
-            <option value="PASSPORT">جواز سفر</option>
-            <option value="OTHER">أخرى</option>
+            <option value="NATIONAL_ID">{t('documentType.NATIONAL_ID')}</option>
+            <option value="PASSPORT">{t('documentType.PASSPORT')}</option>
+            <option value="OTHER">{t('documentType.OTHER')}</option>
           </select>
         </Field>
-        <Field label="رقم الوثيقة" required><input required maxLength={100} value={form.document_number} onChange={(e) => setForm({ ...form, document_number: e.target.value })} /></Field>
+        <Field label={t('patients.documentNumber')} required><input required maxLength={100} value={form.document_number} onChange={(e) => setForm({ ...form, document_number: e.target.value })} /></Field>
         </div>
         <div className="form-row">
-          <Field label="الرقم الوطني"><input value={form.national_id} onChange={(e) => setForm({ ...form, national_id: e.target.value })} /></Field>
-          <Field label="رقم الهاتف" required><input required minLength={7} dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+          <Field label={t('patients.nationalId')}><input value={form.national_id} onChange={(e) => setForm({ ...form, national_id: e.target.value })} /></Field>
+          <Field label={t('patients.phone')} required><input required minLength={7} dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
         </div>
         <div className="form-row">
-          <Field label="الجنس" required>
+          <Field label={t('patients.gender')} required>
             <select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
-              <option value="MALE">ذكر</option><option value="FEMALE">أنثى</option>
+              <option value="MALE">{t('patients.genderMale')}</option><option value="FEMALE">{t('patients.genderFemale')}</option>
             </select>
           </Field>
-          <Field label="تاريخ الميلاد" required><input required type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} /></Field>
+          <Field label={t('patients.birthDate')} required><input required type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} /></Field>
         </div>
         <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>إغلاق</button>
-          <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'حفظ المريض'}</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>
+          <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('patients.create.submit')}</button>
         </div>
       </form>
     </Modal>
   )
 }
 function PatientDetailModal({ patient, user, onClose }) {
+  const t = useT()
   const [tab, setTab] = useState('visits')
   return (
-    <Modal title={patient.full_name} subtitle={`رقم الملف #${patient.patient_id}`} onClose={onClose} wide>
+    <Modal title={patient.full_name} subtitle={t('patients.detail.subtitle', { id: patient.patient_id })} onClose={onClose} wide>
       <div className="detail-summary">
         <span>{GENDER_LABELS[patient.gender] || patient.gender}</span>
         <span dir="ltr">{patient.phone}</span>
@@ -267,10 +272,10 @@ function PatientDetailModal({ patient, user, onClose }) {
         <span>{fmtDate(patient.date_of_birth, true)}</span>
       </div>
       <div className="tabs">
-        <button className={tab === 'visits' ? 'tab active' : 'tab'} onClick={() => setTab('visits')}>الزيارات</button>
-        <button className={tab === 'medical' ? 'tab active' : 'tab'} onClick={() => setTab('medical')}>البيانات الطبية</button>
-        <button className={tab === 'record' ? 'tab active' : 'tab'} onClick={() => setTab('record')}>السجل الطبي الموحد</button>
-        <button className={tab === 'shares' ? 'tab active' : 'tab'} onClick={() => setTab('shares')}>المشاركات</button>
+        <button className={tab === 'visits' ? 'tab active' : 'tab'} onClick={() => setTab('visits')}>{t('patients.tabs.visits')}</button>
+        <button className={tab === 'medical' ? 'tab active' : 'tab'} onClick={() => setTab('medical')}>{t('patients.tabs.medical')}</button>
+        <button className={tab === 'record' ? 'tab active' : 'tab'} onClick={() => setTab('record')}>{t('patients.tabs.record')}</button>
+        <button className={tab === 'shares' ? 'tab active' : 'tab'} onClick={() => setTab('shares')}>{t('patients.tabs.shares')}</button>
       </div>
       <div className="tab-content">
         {tab === 'visits' && <VisitsTab patient={patient} user={user} />}
@@ -284,6 +289,7 @@ function PatientDetailModal({ patient, user, onClose }) {
 
 // تبويب البيانات الطبية التكميلية — الطبيب يكمل ويحدّث، والبقية عرض فقط
 function MedicalProfileTab({ patient, user }) {
+  const t = useT()
   const canEdit = ['DOCTOR', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user?.roleName) || (user?.permissions || []).includes('EDIT_PATIENT_MEDICAL')
   const [profile, setProfile] = useState(null)
   const [allergySel, setAllergySel] = useState({})
@@ -319,7 +325,7 @@ function MedicalProfileTab({ patient, user }) {
       const result = await api.patients.medicalProfile(patient.patient_id)
       applyResult(result)
     } catch (err) {
-      setError(err.message || 'تعذر تحميل البيانات الطبية')
+      setError(err.message || t('patients.error.loadMedical'))
     } finally { setLoading(false) }
   }, [patient.patient_id, applyResult])
 
@@ -341,29 +347,29 @@ function MedicalProfileTab({ patient, user }) {
       applyResult(result)
       setDone(true)
     } catch (err) {
-      setError(err.message || 'تعذر حفظ البيانات الطبية')
+      setError(err.message || t('patients.error.saveMedical'))
     } finally { setSaving(false) }
   }
 
-  if (loading) return <Loading text="جارِ تحميل البيانات الطبية" />
+  if (loading) return <Loading text={t('patients.loadingMedical')} />
 
   return (
     <div className="tab-inner">
       <form className="patient-form" onSubmit={submit}>
         <div className="form-row">
-          <Field label="فصيلة الدم">
+          <Field label={t('patients.bloodType')}>
             <select value={extras.blood_type} disabled={!canEdit} onChange={(e) => setExtras({ ...extras, blood_type: e.target.value })}>
-              <option value="">غير محددة</option>
+              <option value="">{t('patients.bloodType.notSpecified')}</option>
               {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
             </select>
           </Field>
-          <Field label="الأدوية الحالية" hint="الأدوية التي يتناولها المريض حالياً">
+          <Field label={t('patients.currentMeds')} hint={t('patients.currentMedsHint')}>
             <textarea rows="2" disabled={!canEdit} value={extras.current_medications} onChange={(e) => setExtras({ ...extras, current_medications: e.target.value })} />
           </Field>
         </div>
 
         <div className="med-section">
-          <h4>الحساسيات</h4>
+          <h4>{t('patients.allergy')}</h4>
           <div className="med-grid">
             {ALLERGEN_KEYS.map((key) => (
               <div className="med-item" key={key}>
@@ -371,14 +377,14 @@ function MedicalProfileTab({ patient, user }) {
                   <input type="checkbox" disabled={!canEdit} checked={Boolean(allergySel[key]?.checked)} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], checked: e.target.checked } })} />
                   <span>{ALLERGEN_LABELS[key]}</span>
                 </label>
-                <input className="med-note" placeholder="نوع/تفاصيل (اختياري)" disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
+                <input className="med-note" placeholder={t('patients.allergy.note')} disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
               </div>
             ))}
           </div>
         </div>
 
         <div className="med-section">
-          <h4>الأمراض المزمنة</h4>
+          <h4>{t('patients.chronicConditions')}</h4>
           <div className="med-grid">
             {CHRONIC_CONDITION_KEYS.map((key) => (
               <div className="med-item" key={key}>
@@ -386,34 +392,35 @@ function MedicalProfileTab({ patient, user }) {
                   <input type="checkbox" disabled={!canEdit} checked={Boolean(condSel[key]?.checked)} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], checked: e.target.checked } })} />
                   <span>{CHRONIC_CONDITION_LABELS[key]}</span>
                 </label>
-                <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label="شدة المرض">
+                <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label={t('patients.severity')}>
                   {Object.entries(CONDITION_SEVERITY_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
                 </select>
-                <input className="med-note" placeholder="تفاصيل (اختياري)" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
+                <input className="med-note" placeholder={t('patients.severity.placeholder')} disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
               </div>
             ))}
           </div>
         </div>
 
-        <Field label="ملاحظات طبية عامة">
+        <Field label={t('patients.generalNotes')}>
           <textarea rows="3" disabled={!canEdit} value={extras.medical_notes} onChange={(e) => setExtras({ ...extras, medical_notes: e.target.value })} />
         </Field>
         <Notice kind="error">{error}</Notice>
-        {done && <Notice kind="success">تم حفظ البيانات الطبية بنجاح</Notice>}
+        {done && <Notice kind="success">{t('patients.success.medicalSave')}</Notice>}
         {canEdit ? (
           <div className="modal-actions">
-            <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'حفظ البيانات الطبية'}</button>
+            <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('patients.saveMedical')}</button>
           </div>
         ) : (
-          <p className="profile-meta">عرض فقط — تعديل البيانات الطبية متاح للطبيب المعالج</p>
+          <p className="profile-meta">{t('patients.viewOnly')}</p>
         )}
-        {profile?.updated_at ? <p className="profile-meta">آخر تحديث: {fmtDateTime(profile.updated_at)}{profile.updated_by_name ? ` — بواسطة ${profile.updated_by_name}` : ''}</p> : null}
+        {profile?.updated_at ? <p className="profile-meta">{t('patients.lastUpdated')}: {fmtDateTime(profile.updated_at)}{profile.updated_by_name ? ` — بواسطة ${profile.updated_by_name}` : ''}</p> : null}
       </form>
     </div>
   )
 }
 
 function VisitsTab({ patient, user }) {
+  const t = useT()
   const [visits, setVisits] = useState(null)
   const [prescriptions, setPrescriptions] = useState([]) // فارغة افتراضياً
   const [doctors, setDoctors] = useState(null) // null = غير متاح
@@ -445,23 +452,24 @@ function VisitsTab({ patient, user }) {
   return (
     <div className="tab-inner">
       <div className="toolbar">
-        <button className="primary-button compact" onClick={() => setShowAdd(true)}>+ تسجيل زيارة جديدة</button>
+        <button className="primary-button compact" onClick={() => setShowAdd(true)}>{t('patients.addVisit')}</button>
       </div>
       <Notice kind="error">{error}</Notice>
-      {visits === null ? <Loading /> : visits.length === 0 ? <Empty text="لا توجد زيارات مسجلة" /> : (
+      {visits === null ? <Loading /> : visits.length === 0 ? <Empty text={t('patients.visits.empty')} /> : (
         <div className="table-wrap table-cards">
           <table>
-            <thead><tr><th>التاريخ</th><th>العيادة</th><th>التخصص</th><th>الطبيب</th><th>الحالة</th><th>الملاحظات</th><th></th></tr></thead>
+            <thead><tr><th>{t('patients.table.date')}</th><th>{t('patients.table.clinic')}</th><th>{t('patients.table.specialty')}</th><th>{t('patients.table.doctor')}</th><th>{t('patients.table.status')}</th><th>{t('patients.table.notes')}</th><th></th></tr></thead>
             <tbody>
               {visits.map((v) => (
                 <tr key={v.visit_id}>
                   <td>{fmtDateTime(v.visit_date)}</td>
-                  <td data-label="العيادة">{v.clinic_name || '—'}</td>
-                  <td data-label="التخصص">{v.specialty_name || '—'}</td>
-                  <td data-label="الطبيب">{v.doctor_name || '—'}</td>
-                  <td data-label="الحالة">{v.visit_status === 'OPEN' ? <span className="badge">مفتوحة</span> : v.visit_status === 'COMPLETED' ? <span className="muted-small">مكتملة</span> : <span className="muted-small">ملغاة</span>}</td>
-                  <td data-label="الملاحظات">{v.notes || '—'}</td>
-                  <td className="cell-actions"><button className="text-button" onClick={() => setOpenVisitId(v.visit_id)}>سجل الزيارة ←</button></td>
+                  <td>{fmtDateTime(v.visit_date)}</td>
+                  <td data-label={t('patients.table.clinic')}>{v.clinic_name || '—'}</td>
+                  <td data-label={t('patients.table.specialty')}>{v.specialty_name || '—'}</td>
+                  <td data-label={t('patients.table.doctor')}>{v.doctor_name || '—'}</td>
+                  <td data-label={t('patients.table.status')}>{v.visit_status === 'OPEN' ? <span className="badge">{t('visit.statusOpen')}</span> : v.visit_status === 'COMPLETED' ? <span className="muted-small">{t('visit.statusCompleted')}</span> : <span className="muted-small">{t('visit.statusCancelled')}</span>}</td>
+                  <td data-label={t('patients.table.notes')}>{v.notes || '—'}</td>
+                  <td className="cell-actions"><button className="text-button" onClick={() => setOpenVisitId(v.visit_id)}>{t('patients.visit.record')}</button></td>
                 </tr>
               ))}
             </tbody>
@@ -470,18 +478,18 @@ function VisitsTab({ patient, user }) {
       )}
 
       <div className="record-block" style={{ marginTop: 16 }}>
-        <h4>الروشتات الطبية</h4>
-        {prescriptions.length === 0 ? <Empty text="لا توجد روشتات لهذا المريض" /> : (
+        <h4>{t('patients.record.prescriptionsTitle')}</h4>
+        {prescriptions.length === 0 ? <Empty text={t('patients.record.prescriptionsEmpty')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>الطبيب</th><th>الملاحظات</th><th>التاريخ</th><th></th></tr></thead>
+              <thead><tr><th>{t('patients.table.doctor')}</th><th>{t('patients.table.notes')}</th><th>{t('patients.table.date')}</th><th></th></tr></thead>
               <tbody>
                 {prescriptions.map((rx) => (
                   <tr key={rx.prescription_id}>
                     <td>{rx.doctor_name || '—'}</td>
-                    <td data-label="الملاحظات">{rx.notes || '—'}</td>
-                    <td data-label="التاريخ">{fmtDateTime(rx.created_at)}</td>
-                    <td className="cell-actions"><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td>
+                    <td data-label={t('patients.table.notes')}>{rx.notes || '—'}</td>
+                    <td data-label={t('patients.table.date')}>{fmtDateTime(rx.created_at)}</td>
+                    <td className="cell-actions"><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>{t('patients.record.viewPrescription')}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -498,9 +506,10 @@ function VisitsTab({ patient, user }) {
 }
 
 function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSaved }) {
+  const t = useT()
   const isGlobal = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
   const { clinics, loading: clinicsLoading } = useClinicDirectory(true)
-  const userClinicLabel = clinicNameById(clinics, user?.clinicId) || (user?.clinicId ? `العيادة #${user.clinicId}` : '')
+  const userClinicLabel = clinicNameById(clinics, user?.clinicId) || (user?.clinicId ? t('layout.clinicById', { id: user.clinicId }) : '')
   // العيادات المسندة للمستخدم فقط (الأساسية + الإسنادات الإضافية clinic_staff)
   const myClinicIds = (user?.clinicIds?.length ? user.clinicIds : (user?.clinicId ? [user.clinicId] : [])).map(Number)
   const myClinics = clinics.filter((c) => myClinicIds.includes(Number(c.clinic_id)))
@@ -551,18 +560,18 @@ function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSave
       })
       onSaved(result?.visit?.visit_id || null)
     } catch (err) {
-      setError(err.message || 'تعذر تسجيل الزيارة')
+      setError(err.message || t('patients.addVisit.error'))
     } finally { setSaving(false) }
   }
 
   return (
-    <Modal title={`تسجيل زيارة لـ ${patient.full_name}`} subtitle="الزيارات الطبية" onClose={onClose}>
+    <Modal title={t('patients.addVisit.title', { name: patient.full_name })} subtitle={t('patients.addVisit.subtitle')} onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label="العيادة المختصة" required hint={isGlobal ? 'اختر العيادة بالاسم — يُحال إليها المريض مباشرة' : myClinics.length > 1 ? 'عياداتك المسندة — اختر عيادة الزيارة' : `عيادتك الحالية: ${userClinicLabel || '—'}`}>
+        <Field label={t('patients.addVisit.clinicLabel')} required hint={isGlobal ? t('patients.addVisit.globalHint') : myClinics.length > 1 ? t('patients.addVisit.assignedHint') : t('patients.addVisit.currentClinic', { clinic: userClinicLabel || '—' })}>
           {isGlobal ? (
             <select required value={form.clinic_id} onChange={(e) => setForm({ ...form, clinic_id: e.target.value, doctor_id: '' })}>
-              <option value="">اختر العيادة بالاسم...</option>
-              {clinicsLoading ? <option disabled>جارِ تحميل العيادات...</option> : null}
+              <option value="">{t('patients.addVisit.clinicOption')}</option>
+              {clinicsLoading ? <option disabled>{t('patients.loadingClinics')}</option> : null}
               {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
             </select>
           ) : myClinics.length > 1 ? (
@@ -573,29 +582,30 @@ function AddVisitModal({ patient, user, doctors: initialDoctors, onClose, onSave
             <input required value={userClinicLabel} readOnly />
           )}
         </Field>
-        <Field label="الطبيب" required hint={loadingDoctors ? 'جارِ تحميل الأطباء...' : (doctors.length === 0 ? 'لا يوجد أطباء مسندون لهذه العيادة — أدخل رقم الطبيب يدوياً أو أضف طبيباً من شاشة إدارة العيادات' : undefined)}>
+        <Field label={t('patients.addVisit.doctorField')} required hint={loadingDoctors ? t('patients.loadingDoctors') : (doctors.length === 0 ? t('patients.addVisit.noDoctors') : undefined)}>
           {loadingDoctors ? (
-            <select disabled><option>جارِ تحميل الأطباء...</option></select>
+            <select disabled><option>{t('patients.loadingDoctors')}</option></select>
           ) : doctors.length > 0 ? (
             <select required value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}>
-              <option value="">اختر الطبيب...</option>
+              <option value="">{t('patients.addVisit.doctorOption')}</option>
               {doctors.map((d) => <option key={d.user_id} value={d.user_id}>{d.full_name}{d.sub_specialty ? ` — ${d.sub_specialty}` : ''}</option>)}
             </select>
           ) : (
-            <input type="number" required placeholder="رقم الطبيب" value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })} />
+            <input type="number" required placeholder={t('patients.addVisit.doctorIdPlaceholder')} value={form.doctor_id} onChange={(e) => setForm({ ...form, doctor_id: e.target.value })} />
           )}
         </Field>
-        <Field label="الملاحظات"><textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
+        <Field label={t('patients.addVisit.notesField')}><textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
         <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>إغلاق</button>
-          <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'حفظ الزيارة'}</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>
+          <button className="primary-button" disabled={saving}>{saving ? t('patients.addVisit.saving') : t('patients.addVisit.save')}</button>
         </div>
       </form>
     </Modal>
   )
 }
 function MedicalRecordTab({ patient }) {
+  const t = useT()
   const [record, setRecord] = useState(null)
   const [error, setError] = useState('')
   const [openPrescriptionId, setOpenPrescriptionId] = useState(null)
@@ -604,28 +614,28 @@ function MedicalRecordTab({ patient }) {
     let cancelled = false
     api.patients.record(patient.patient_id)
       .then((data) => { if (!cancelled) setRecord(data) })
-      .catch((err) => setError(err.message || 'لا تملك صلاحية الوصول لهذا السجل'))
+      .catch((err) => setError(err.message || t('patients.record.noPermission')))
     return () => { cancelled = true }
   }, [patient.patient_id])
 
   if (error) return <Notice kind="error">{error}</Notice>
-  if (!record) return <Loading text="جارِ تحميل السجل الطبي الموحد..." />
+  if (!record) return <Loading text={t('patients.record.loading')} />
 
   return (
     <div className="tab-inner record-grid">
       <div className="record-block">
-        <h4>الزيارات</h4>
-        {record.visits?.length === 0 ? <Empty text="لا توجد زيارات" /> : (
+        <h4>{t('patients.record.visitsTitle')}</h4>
+        {record.visits?.length === 0 ? <Empty text={t('patients.record.noVisits')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>العيادة</th><th>الطبيب</th><th>التاريخ</th><th>الملاحظات</th></tr></thead>
+              <thead><tr><th>{t('patients.table.clinic')}</th><th>{t('patients.table.doctor')}</th><th>{t('patients.table.date')}</th><th>{t('patients.table.notes')}</th></tr></thead>
               <tbody>
                 {record.visits.map((v) => (
                   <tr key={v.visit_id}>
                     <td>{v.clinic_name || '—'}</td>
-                    <td data-label="الطبيب">{v.doctor_name || '—'}</td>
-                    <td data-label="التاريخ">{fmtDateTime(v.visit_date)}</td>
-                    <td data-label="الملاحظات">{v.notes || '—'}</td>
+                    <td data-label={t('patients.table.doctor')}>{v.doctor_name || '—'}</td>
+                    <td data-label={t('patients.table.date')}>{fmtDateTime(v.visit_date)}</td>
+                    <td data-label={t('patients.table.notes')}>{v.notes || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -634,18 +644,18 @@ function MedicalRecordTab({ patient }) {
         )}
       </div>
       <div className="record-block">
-        <h4>الروشتات الطبية</h4>
-        {record.prescriptions?.length === 0 ? <Empty text="لا توجد روشتات" /> : (
+        <h4>{t('patients.record.prescriptionsTitle')}</h4>
+        {record.prescriptions?.length === 0 ? <Empty text={t('patients.record.prescriptionsEmpty')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>الطبيب</th><th>الملاحظات</th><th>التاريخ</th><th></th></tr></thead>
+              <thead><tr><th>{t('patients.table.doctor')}</th><th>{t('patients.table.notes')}</th><th>{t('patients.table.date')}</th><th></th></tr></thead>
               <tbody>
                 {record.prescriptions.map((rx) => (
                   <tr key={rx.prescription_id}>
                     <td>{rx.doctor_name || '—'}</td>
-                    <td data-label="الملاحظات">{rx.notes || '—'}</td>
-                    <td data-label="التاريخ">{fmtDateTime(rx.created_at)}</td>
-                    <td className="cell-actions"><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>عرض الأدوية ←</button></td>
+                    <td data-label={t('patients.table.notes')}>{rx.notes || '—'}</td>
+                    <td data-label={t('patients.table.date')}>{fmtDateTime(rx.created_at)}</td>
+                    <td className="cell-actions"><button className="text-button" onClick={() => setOpenPrescriptionId(rx.prescription_id)}>{t('patients.record.viewPrescription')}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -659,6 +669,7 @@ function MedicalRecordTab({ patient }) {
 }
 
 function SharesTab({ patient }) {
+  const t = useT()
   const [shares, setShares] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
   const [error, setError] = useState('')
@@ -674,7 +685,7 @@ function SharesTab({ patient }) {
   useEffect(() => { load() }, [load])
 
   async function revoke(shareId) {
-    if (!window.confirm('هل تريد إلغاء مشاركة هذا السجل؟')) return
+    if (!window.confirm(t('patients.share.confirmRevoke'))) return
     setDoing(true)
     try {
       await api.patients.revokeShare(patient.patient_id, shareId)
@@ -685,23 +696,23 @@ function SharesTab({ patient }) {
   return (
     <div className="tab-inner">
       <div className="toolbar">
-        <button className="primary-button compact" onClick={() => setShowAdd(true)}>+ مشاركة جديدة</button>
+        <button className="primary-button compact" onClick={() => setShowAdd(true)}>{t('patients.shareAddButton')}</button>
       </div>
       <Notice kind="error">{error}</Notice>
-      {shares === null ? <Loading /> : shares.length === 0 ? <Empty text="لا توجد مشاركات" /> : (
+      {shares === null ? <Loading /> : shares.length === 0 ? <Empty text={t('patients.share.empty')} /> : (
         <div className="table-wrap table-cards">
           <table>
-            <thead><tr><th>العيادة المستهدفة</th><th>المستوى</th><th>الحالة</th><th>انتهاء</th><th>إجراءات</th></tr></thead>
+            <thead><tr><th>{t('patients.share.tableTargetClinic')}</th><th>{t('patients.share.tableAccessLevel')}</th><th>{t('patients.share.tableStatus')}</th><th>{t('patients.share.tableExpiry')}</th><th>{t('patients.share.tableActions')}</th></tr></thead>
             <tbody>
               {shares.map((s) => (
                 <tr key={s.share_id}>
-                  <td data-label="العيادة المستهدفة">{s.clinic_name || '—'}</td>
-                  <td data-label="المستوى">{s.access_level === 'WRITE' ? 'قراءة وكتابة' : 'قراءة فقط'}</td>
-                  <td data-label="الحالة">{s.status === 'ACTIVE' ? 'نشطة' : 'ملغاة'}</td>
-                  <td data-label="انتهاء">{fmtDate(s.expires_at)}</td>
+                  <td data-label={t('patients.share.tableTargetClinic')}>{s.clinic_name || '—'}</td>
+                  <td data-label={t('patients.share.tableAccessLevel')}>{s.access_level === 'WRITE' ? t('patients.share.accessWrite') : t('patients.share.accessRead')}</td>
+                  <td data-label={t('patients.share.tableStatus')}>{s.status === 'ACTIVE' ? t('patients.share.statusActive') : t('patients.share.statusRevoked')}</td>
+                  <td data-label={t('patients.share.tableExpiry')}>{fmtDate(s.expires_at)}</td>
                   <td className="cell-actions">
                     {s.status === 'ACTIVE' ? (
-                      <button className="text-button" onClick={() => revoke(s.share_id)} disabled={doing}>إلغاء المشاركة</button>
+                      <button className="text-button" onClick={() => revoke(s.share_id)} disabled={doing}>{t('patients.share.revokeButton')}</button>
                     ) : '—'}
                   </td>
                 </tr>
@@ -716,6 +727,7 @@ function SharesTab({ patient }) {
 }
 
 function AddShareModal({ patient, onClose, onSaved }) {
+  const t = useT()
   const { clinics } = useClinicDirectory(true)
   const [form, setForm] = useState({ target_clinic_id: '', access_level: 'READ', expires_at: '' })
   const [error, setError] = useState('')
@@ -736,24 +748,24 @@ function AddShareModal({ patient, onClose, onSaved }) {
   }
 
   return (
-    <Modal title="مشاركة سجل طبي" subtitle="المشاركات" onClose={onClose}>
+    <Modal title={t('patients.shareAdd.title')} subtitle={t('patients.shareAdd.subtitle')} onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label="العيادة المستهدفة" required hint="اختر العيادة بالاسم — تُحال إليها مباشرة">
+        <Field label={t('patients.shareAdd.targetClinic')} required hint={t('patients.shareAdd.targetClinicHint')}>
           <select required value={form.target_clinic_id} onChange={(e) => setForm({ ...form, target_clinic_id: e.target.value })}>
-            <option value="">اختر العيادة بالاسم...</option>
+            <option value="">{t('patients.shareAdd.selectClinic')}</option>
             {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}{c.specialty_name ? ` — ${c.specialty_name}` : ''}</option>)}
           </select>
         </Field>
-        <Field label="مستوى الوصول" required>
+        <Field label={t('patients.shareAdd.accessLevel')} required>
           <select value={form.access_level} onChange={(e) => setForm({ ...form, access_level: e.target.value })}>
-            <option value="READ">قراءة فقط</option><option value="WRITE">قراءة وكتابة</option>
+            <option value="READ">{t('patients.share.accessRead')}</option><option value="WRITE">{t('patients.share.accessWrite')}</option>
           </select>
         </Field>
-        <Field label="تاريخ الانتهاء" required><input type="date" required value={form.expires_at} onChange={(e) => setForm({ ...form, expires_at: e.target.value })} /></Field>
+        <Field label={t('patients.shareAdd.expiryDate')} required><input type="date" required value={form.expires_at} onChange={(e) => setForm({ ...form, expires_at: e.target.value })} /></Field>
         <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>إغلاق</button>
-          <button className="primary-button" disabled={saving}>{saving ? 'جارِ الحفظ...' : 'حفظ المشاركة'}</button>
+          <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>
+          <button className="primary-button" disabled={saving}>{saving ? t('patients.shareAdd.saving') : t('patients.shareAdd.save')}</button>
         </div>
       </form>
     </Modal>
