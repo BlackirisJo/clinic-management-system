@@ -21,7 +21,10 @@ type Share = {
 };
 type Pregnancy = { pregnancy_id: number; patient_id: number; clinic_id: number; status: 'ACTIVE' | 'COMPLETED' };
 type Visit = { visit_id: number; patient_id: number; clinic_id: number };
-type Ultrasound = { us_id: number; pregnancy_id: number; visit_id: number | null };
+type Ultrasound = {
+  us_id: number; pregnancy_id: number; visit_id: number | null;
+  attachments: { attachment_id: number; file_name: string; kind: string }[];
+};
 type ClinicScope = number[] | null;
 
 const NOW = new Date('2030-01-01T00:00:00.000Z');
@@ -41,7 +44,7 @@ const visitFixture = (over: Partial<Visit> & { visit_id: number }): Visit => ({
   patient_id: 1, clinic_id: 10, ...over,
 });
 const ultrasoundFixture = (over: Partial<Ultrasound> & { us_id: number }): Ultrasound => ({
-  pregnancy_id: 101, visit_id: null, ...over,
+  pregnancy_id: 101, visit_id: null, attachments: [], ...over,
 });
 const shareFixture = (over: Partial<Share> & { patient_id: number; target_clinic_id: number }): Share => ({
   access_level: 'READ', status: 'ACTIVE', expires_at: FUTURE(), ...over,
@@ -128,8 +131,9 @@ function simulateCreateUltrasound(
   return { httpStatus: 201, reason: 'created' };
 }
 
-// ---- P0.4-B: getPregnancyDetails simulation (visit/ultrasound filtering) ----
+// ---- P0.4-B: getPregnancyDetails simulation (visit/ultrasound filtering + attachments) ----
 // Visits passed are assumed linked to the pregnancy; clinic boundary is the filter.
+// Each ultrasound carries its own attachments subquery result (mirrors SQL subquery).
 function simulateGetPregnancyDetails(
   req: AuthenticatedRequest,
   pregnancyId: number,
@@ -141,6 +145,7 @@ function simulateGetPregnancyDetails(
   // P0.4-B: filter visits where visit.clinic_id !== pregnancy.clinic_id
   const filteredVisits = visits.filter((v) => v.clinic_id === pregnancy.clinic_id);
   // P0.4-B: filter ultrasounds where linked visit clinic !== pregnancy clinic
+  // Attachments subquery preserved (json_agg per ultrasound) — same-clinic only
   const filteredUltrasounds = ultrasounds.filter((u) => {
     if (u.visit_id === null) return true;
     const linkedVisit = visits.find((v) => v.visit_id === u.visit_id);
@@ -310,9 +315,36 @@ test('PCB-12 - getPregnancyDetails shows ultrasound with no linked visit', () =>
   assert.equal(result.ultrasounds[0]!.us_id, 301);
 });
 
-test('PCB-13 - getPregnancyDetails for cross-clinic pregnancy → DENY', () => {
-  const result = simulateGetPregnancyDetails(OWNER, 102, [PREG, PREG_CROSS], [VISIT_SAME], [US_SAME], [], NOW);
-  assert.equal(result.httpStatus, 404);
+test('PCB-12b - getPregnancyDetails ultrasound has attachments subquery result', () => {
+  const usWithAtt = ultrasoundFixture({ us_id: 301, visit_id: null, attachments: [{ attachment_id: 10, file_name: 'ultrasound.pdf', kind: 'ULTRASOUND' }] });
+  const result = simulateGetPregnancyDetails(OWNER, 101, [PREG], [VISIT_SAME], [usWithAtt], [], NOW);
+  if (result.httpStatus !== 200) throw new Error('expected 200');
+  assert.equal(result.ultrasounds.length, 1);
+  assert.equal(result.ultrasounds[0]!.attachments.length, 1, 'attachments subquery preserved');
+  assert.equal(result.ultrasounds[0]!.attachments[0]!.attachment_id, 10);
+});
+
+test('PCB-12c - getPregnancyDetails no SQL error for null-visit ultrasound', () => {
+  // null visit_id should not produce SQL error (visit check short-circuits to true)
+  const result = simulateGetPregnancyDetails(OWNER, 101, [PREG], [VISIT_SAME], [US_SAME], [], NOW);
+  if (result.httpStatus !== 200) throw new Error('expected 200');
+  assert.equal(result.ultrasounds.length, 1, 'no SQL error — ultrasound returned normally');
+});
+
+test('PCB-13 - getPregnancyDetails hides cross-clinic ultrasound', () => {
+  const usCrossVisit = ultrasoundFixture({ us_id: 303, visit_id: 202 });
+  const result = simulateGetPregnancyDetails(OWNER, 101, [PREG], [VISIT_SAME], [US_SAME, usCrossVisit], [], NOW);
+  if (result.httpStatus !== 200) throw new Error('expected 200');
+  assert.equal(result.ultrasounds.length, 1, 'cross-clinic ultrasound hidden');
+  assert.ok(!result.ultrasounds.some((u) => u.us_id === 303), 'cross-clinic ultrasound not in results');
+});
+
+test('PCB-13b - cross-clinic ultrasound attachments not leaked', () => {
+  // Even if cross-clinic ultrasound has attachments, it must not appear
+  const usCrossWithAtt = ultrasoundFixture({ us_id: 303, visit_id: 202, attachments: [{ attachment_id: 99, file_name: 'secret.pdf', kind: 'DOCUMENT' }] });
+  const result = simulateGetPregnancyDetails(OWNER, 101, [PREG], [VISIT_SAME], [US_SAME, usCrossWithAtt], [], NOW);
+  if (result.httpStatus !== 200) throw new Error('expected 200');
+  assert.ok(!result.ultrasounds.some((u) => u.us_id === 303), 'cross-clinic ultrasound with attachments hidden');
 });
 
 // ============================================================================

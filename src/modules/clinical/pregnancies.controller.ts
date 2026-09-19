@@ -156,8 +156,8 @@ export const getPregnancyDetails = async (req: AuthenticatedRequest, res: Respon
       ),
       pool.query(
         `SELECT us.*, u.full_name AS performed_by_name,
-                (SELECT json_build_object('pv_id', pv.pv_id, 'visit_date', pv.visit_date, 'ga_weeks', pv.ga_weeks, 'ga_days', pv.ga_days, 'next_visit_date', pv.next_visit_date)
-                 FROM pregnancy_visits pv WHERE pv.pregnancy_id = pr.pregnancy_id ORDER BY pv.visit_date DESC LIMIT 1) AS last_pregnancy_visit
+                (SELECT json_agg(json_build_object('attachment_id', a.attachment_id, 'file_name', a.file_name, 'kind', a.kind, 'created_at', a.created_at))
+                 FROM attachments a WHERE a.ultrasound_id = us.us_id) AS attachments
          FROM ultrasound_exams us
          LEFT JOIN visits v ON v.visit_id = us.visit_id
          LEFT JOIN users u ON u.user_id = us.performed_by
