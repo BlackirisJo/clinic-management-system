@@ -18,6 +18,7 @@ import {
 const AUTO_SHOW_DELAY = 12000
 
 export default function InstallPrompt() {
+  const t = useT()
   const [visible, setVisible] = useState(false)
   const [help, setHelp] = useState(null)     // 'ios' | 'generic' | null
   const [busy, setBusy] = useState(false)

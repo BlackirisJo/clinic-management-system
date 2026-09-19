@@ -4,6 +4,7 @@ import { Modal, Notice } from './ui'
 import { useT } from '../i18n'
 
 export default function ImportMedicationsModal({ onClose, onImported }) {
+  const t = useT()
   const [step, setStep] = useState('ask')
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
