@@ -13,25 +13,35 @@ const audit = async (userId: number | undefined, clinicId: number | undefined, a
   } catch { /* تدقيق غير حرج */ }
 };
 
-// التحقق من وصول المستخدم لسجل الحمل عبر عياداته المسندة
+// التحقق من وصول المستخدم لسجل الحمل — سياسة P0.4-A الموحدة مع P0.1/P0.2:
+// عيادة السجل ضمن accessibleClinicIds، أو مشاركة سجل نشطة (READ أو WRITE) إلى إحدى عيادات
+// المستخدم (نفس قاعدة getPatientVisits). المدراء الشاملون بلا قيد (سلوكهم لم يتغير).
 export const requirePregnancyAccess = async (req: AuthenticatedRequest, res: Response, pregnancyId: string | string[] | number | undefined) => {
   const id = Array.isArray(pregnancyId) ? pregnancyId[0] : pregnancyId;
+  const clinicIds = accessibleClinicIds(req); // null = مدير شامل (كل العيادات)
   const result = await pool.query(
     `SELECT pr.*, p.full_name AS patient_name, p.date_of_birth, p.gender, c.clinic_name, c.specialty_id,
-            s.specialty_key, s.name_ar AS specialty_name
+            s.specialty_key, s.name_ar AS specialty_name,
+            EXISTS (SELECT 1 FROM patient_clinic_shares sh
+                    WHERE sh.patient_id = pr.patient_id AND sh.target_clinic_id = ANY($2::int[])
+                      AND sh.status = 'ACTIVE' AND sh.expires_at > NOW()) AS shared_read,
+            EXISTS (SELECT 1 FROM patient_clinic_shares sh
+                    WHERE sh.patient_id = pr.patient_id AND sh.target_clinic_id = ANY($2::int[])
+                      AND sh.access_level = 'WRITE' AND sh.status = 'ACTIVE' AND sh.expires_at > NOW()) AS shared_write
      FROM pregnancies pr
      JOIN patients p ON p.patient_id = pr.patient_id
      JOIN clinics c ON c.clinic_id = pr.clinic_id
      LEFT JOIN specialties s ON s.specialty_id = c.specialty_id
      WHERE pr.pregnancy_id = $1`,
-    [id]
+    [id, clinicIds]
   );
   if (!result.rowCount) {
     res.status(404).json({ message: 'سجل الحمل غير موجود' });
     return null;
   }
   const pregnancy = result.rows[0];
-  const allowed = canManageAllClinics(req) || (accessibleClinicIds(req) ?? []).includes(Number(pregnancy.clinic_id));
+  const inScope = (clinicIds ?? []).includes(Number(pregnancy.clinic_id));
+  const allowed = canManageAllClinics(req) || inScope || Boolean(pregnancy.shared_read);
   if (!allowed) {
     res.status(404).json({ message: 'سجل الحمل غير موجود أو لا تملك صلاحية الوصول إليه' });
     return null;
@@ -40,12 +50,19 @@ export const requirePregnancyAccess = async (req: AuthenticatedRequest, res: Res
 };
 
 // التحقق من صلاحية الكتابة (طبيب/ممرضة مسندون لعيادة الحمل مع صلاحية MANAGE_PREGNANCY)
+// P0.4-A: الكتابة تحتاج عيادة السجل ضمن النطاق أو مشاركة WRITE نشطة — مشاركة READ للقراءة فقط.
 const requirePregnancyWrite = async (req: AuthenticatedRequest, res: Response, pregnancyId: string | string[] | number | undefined) => {
   const pregnancy = await requirePregnancyAccess(req, res, pregnancyId);
   if (!pregnancy) return null;
-  const hasPermission = canManageAllClinics(req) || (req.user?.permissions ?? []).includes('MANAGE_PREGNANCY');
+  const isGlobal = canManageAllClinics(req);
+  const hasPermission = isGlobal || (req.user?.permissions ?? []).includes('MANAGE_PREGNANCY');
   if (!hasPermission) {
     res.status(403).json({ message: 'لا تملك صلاحية إدارة سجلات الحمل' });
+    return null;
+  }
+  const inScope = (accessibleClinicIds(req) ?? []).includes(Number(pregnancy.clinic_id));
+  if (!isGlobal && !inScope && !pregnancy.shared_write) {
+    res.status(403).json({ message: 'لا تملك صلاحية التعديل على سجل حمل هذه العيادة — مشاركة القراءة لا تسمح بالكتابة' });
     return null;
   }
   return pregnancy;
@@ -77,11 +94,18 @@ export const listPregnancies = async (req: AuthenticatedRequest, res: Response) 
         const ids = accessibleClinicIds(req) ?? [];
         if (!ids.length) return res.status(200).json({ pregnancies: [] });
         params.push(ids);
-        // المريضة يجب أن تنتمي لإحدى عيادات المستخدم أو تكون مشارَكةً إليها بنشاط
-        where += ` AND (p.clinic_id = ANY($${params.length}::int[]) OR EXISTS (
+        const scopeIdx = params.length;
+        // P0.4-A: بوابتان — (1) المريضة ضمن عيادات المستخدم أو مشارَكة إليها بنشاط،
+        // (2) سجل الحمل نفسه: عيادته (pr.clinic_id) ضمن النطاق أو مشاركة نشطة للمريضة.
+        // لا يكفي الوصول إلى المريضة وحده لعرض سجل حمل أنشأته عيادة أخرى.
+        where += ` AND (p.clinic_id = ANY($${scopeIdx}::int[]) OR EXISTS (
           SELECT 1 FROM patient_clinic_shares s
-          WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($${params.length}::int[])
+          WHERE s.patient_id = p.patient_id AND s.target_clinic_id = ANY($${scopeIdx}::int[])
             AND s.status = 'ACTIVE' AND s.expires_at > NOW()
+        )) AND (pr.clinic_id = ANY($${scopeIdx}::int[]) OR EXISTS (
+          SELECT 1 FROM patient_clinic_shares s2
+          WHERE s2.patient_id = pr.patient_id AND s2.target_clinic_id = ANY($${scopeIdx}::int[])
+            AND s2.status = 'ACTIVE' AND s2.expires_at > NOW()
         ))`;
       }
     } else if (!canManageAllClinics(req)) {
@@ -125,20 +149,21 @@ export const getPregnancyDetails = async (req: AuthenticatedRequest, res: Respon
                 v.visit_id AS linked_visit_id, v.chief_complaint AS linked_visit_complaint
          FROM pregnancy_visits pv
          LEFT JOIN users u ON u.user_id = pv.recorded_by
-         LEFT JOIN visits v ON v.visit_id = pv.visit_id
+         LEFT JOIN visits v ON v.visit_id = pv.visit_id AND v.clinic_id = $2
          WHERE pv.pregnancy_id = $1
          ORDER BY pv.visit_date ASC`,
-        [pregnancy.pregnancy_id]
+        [pregnancy.pregnancy_id, pregnancy.clinic_id]
       ),
       pool.query(
         `SELECT us.*, u.full_name AS performed_by_name,
-                (SELECT json_agg(json_build_object('attachment_id', a.attachment_id, 'file_name', a.file_name, 'kind', a.kind, 'created_at', a.created_at))
-                 FROM attachments a WHERE a.ultrasound_id = us.us_id) AS attachments
+                (SELECT json_build_object('pv_id', pv.pv_id, 'visit_date', pv.visit_date, 'ga_weeks', pv.ga_weeks, 'ga_days', pv.ga_days, 'next_visit_date', pv.next_visit_date)
+                 FROM pregnancy_visits pv WHERE pv.pregnancy_id = pr.pregnancy_id ORDER BY pv.visit_date DESC LIMIT 1) AS last_pregnancy_visit
          FROM ultrasound_exams us
+         LEFT JOIN visits v ON v.visit_id = us.visit_id
          LEFT JOIN users u ON u.user_id = us.performed_by
-         WHERE us.pregnancy_id = $1
+         WHERE us.pregnancy_id = $1 AND (us.visit_id IS NULL OR v.clinic_id = $2)
          ORDER BY us.exam_date ASC`,
-        [pregnancy.pregnancy_id]
+        [pregnancy.pregnancy_id, pregnancy.clinic_id]
       ),
       pool.query(
         `SELECT a.attachment_id, a.visit_id, a.ultrasound_id, a.kind, a.file_name, a.mime_type, a.size_bytes, a.created_at,
@@ -149,6 +174,9 @@ export const getPregnancyDetails = async (req: AuthenticatedRequest, res: Respon
         [pregnancy.pregnancy_id]
       ),
     ]);
+    // حقول تحقق داخلية (P0.4-A) — لا تُعاد للواجهة
+    delete pregnancy.shared_read;
+    delete pregnancy.shared_write;
     const pregnancyWithGA = {
       ...pregnancy,
       current_gestational_age: pregnancy.status === 'ACTIVE' ? computeGestationalAge(pregnancy.lmp_date) : null,
@@ -168,21 +196,37 @@ export const getPregnancyDetails = async (req: AuthenticatedRequest, res: Respon
 // ===== 3) إنشاء سجل حمل جديد =====
 export const createPregnancy = async (req: AuthenticatedRequest, res: Response) => {
   const { patient_id, clinic_id, lmp_date, edd_date, gravida, para, abortions, living_children, previous_pregnancies, blood_group, rh_factor, risk_level, risk_factors, notes } = req.body;
-  const targetClinicId = canManageAllClinics(req) && clinic_id ? Number(clinic_id) : req.user?.clinicId;
+  const isGlobal = canManageAllClinics(req);
+  // P0.4-A: العيادة الهدف من الطلب إن حُددت، وإلا العيادة الأساسية — وتُفحص دائماً
+  // مقابل النطاق الفعلي (accessibleClinicIds = الأساسية + الإسنادات الإضافية) وليس العيادة الأساسية وحدها.
+  const targetClinicId = Number(clinic_id ?? req.user?.clinicId);
   if (!patient_id || !targetClinicId) {
     return res.status(400).json({ message: 'المريضة والعيادة مطلوبان' });
   }
   try {
-    const patient = await pool.query('SELECT patient_id, gender, clinic_id FROM patients WHERE patient_id = $1', [patient_id]);
+    // وجود المريضة + الجنس، مع تحديد هل العيادة الهدف تملك المريضة أو لديها مشاركة WRITE نشطة إليها
+    const patient = await pool.query(
+      `SELECT p.patient_id, p.gender, p.clinic_id,
+              EXISTS (SELECT 1 FROM patient_clinic_shares s
+                      WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
+                        AND s.access_level = 'WRITE' AND s.status = 'ACTIVE' AND s.expires_at > NOW()) AS can_write
+       FROM patients p
+       WHERE p.patient_id = $1`,
+      [patient_id, targetClinicId]
+    );
     if (!patient.rowCount) return res.status(404).json({ message: 'المريضة غير موجودة' });
     if (patient.rows[0].gender !== 'FEMALE') {
       return res.status(400).json({ message: 'سجل الحمل متاح للمرضى من الإناث فقط' });
     }
     const allowedClinics = accessibleClinicIds(req) ?? [];
-    if (!canManageAllClinics(req) && !allowedClinics.includes(Number(targetClinicId))) {
+    if (!isGlobal && !allowedClinics.includes(Number(targetClinicId))) {
       return res.status(403).json({ message: 'لا يمكنك إنشاء سجل حمل في عيادة غير مسندة لك' });
     }
-    // يمكن إنشاء الحمل لعيادة المريض أو لعيادة مسندة للمستخدم (عبر مشاركة السجل)
+    // P0.4-A: لا يكفي معرف المريضة — يجب أن تكون مملوكة للعيادة الهدف أو مشارَكة إليها بمشاركة WRITE نشطة
+    const ownsPatient = Number(patient.rows[0].clinic_id) === Number(targetClinicId);
+    if (!isGlobal && !ownsPatient && !patient.rows[0].can_write) {
+      return res.status(403).json({ message: 'المريضة غير مسجلة في هذه العيادة أو غير مشارَك إليها بمشاركة كتابة نشطة' });
+    }
     const active = await pool.query(
       `SELECT pregnancy_id FROM pregnancies WHERE patient_id = $1 AND status = 'ACTIVE'`,
       [patient_id]
@@ -275,6 +319,9 @@ export const createPregnancyVisit = async (req: AuthenticatedRequest, res: Respo
       if (Number(visit.rows[0].patient_id) !== Number(pregnancy.patient_id)) {
         return res.status(400).json({ message: 'الزيارة لا تنتمي لنفس المريضة' });
       }
+      if (Number(visit.rows[0].clinic_id) !== Number(pregnancy.clinic_id)) {
+        return res.status(400).json({ message: 'الزيارة لا تنتمي لعيادة الحمل' });
+      }
     }
     // تحقق منطقي قبل قاعدة البيانات: ضغط منعكس = خطأ عميل (400) وليس خطأ خادم
     if (b.systolic !== undefined && b.systolic !== null && b.diastolic !== undefined && b.diastolic !== null && Number(b.systolic) < Number(b.diastolic)) {
@@ -366,9 +413,12 @@ export const createUltrasound = async (req: AuthenticatedRequest, res: Response)
   const b = req.body;
   try {
     if (b.visit_id) {
-      const visit = await pool.query('SELECT patient_id FROM visits WHERE visit_id = $1', [b.visit_id]);
+      const visit = await pool.query('SELECT visit_id, patient_id, clinic_id FROM visits WHERE visit_id = $1', [b.visit_id]);
       if (!visit.rowCount || Number(visit.rows[0].patient_id) !== Number(pregnancy.patient_id)) {
         return res.status(400).json({ message: 'الزيارة المرتبطة غير موجودة أو لا تنتمي لنفس المريضة' });
+      }
+      if (Number(visit.rows[0].clinic_id) !== Number(pregnancy.clinic_id)) {
+        return res.status(400).json({ message: 'الزيارة لا تنتمي لعيادة الحمل' });
       }
     }
     const result = await pool.query(
