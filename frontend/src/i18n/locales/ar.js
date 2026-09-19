@@ -346,6 +346,7 @@ export default {
   'import.doneTitle': 'تم الاستيراد بنجاح',
   'import.validateFailed': 'فشل فحص الملف',
   'import.importFailed': 'فشل الاستيراد',
+   'import.loadError': 'تعذر تحميل النموذج',
 
   // ===== تغيير كلمة المرور (نافذة إجبارية عند أول دخول) =====
   'changePassword.title': 'تغيير كلمة المرور',
@@ -760,6 +761,9 @@ export default {
   'users.edit.noClinic': 'بدون عيادة',
   'users.edit.role': 'الدور',
   'users.edit.status': 'الحالة',
+   'users.edit.statusActive': 'نشط',
+   'users.edit.statusSuspended': 'موقوف',
+   'users.edit.statusReset': 'يتطلب تغيير كلمة المرور',
   'users.edit.newPassword': 'كلمة مرور جديدة',
   'users.edit.newPasswordHint': 'إعادة تعيين كلمة المرور (12 حرفاً على الأقل)',
   'users.edit.saving': 'جارِ الحفظ...',

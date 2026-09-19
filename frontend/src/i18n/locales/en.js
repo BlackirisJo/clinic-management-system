@@ -342,6 +342,7 @@ export default {
   'import.doneTitle': 'Import completed successfully',
   'import.validateFailed': 'File validation failed',
   'import.importFailed': 'Import failed',
+   'import.loadError': 'Failed to load the template',
 
   // ===== change password (forced on first sign-in) =====
   'changePassword.title': 'Change password',
@@ -756,6 +757,9 @@ export default {
   'users.edit.noClinic': 'No clinic',
   'users.edit.role': 'Role',
   'users.edit.status': 'Status',
+   'users.edit.statusActive': 'Active',
+   'users.edit.statusSuspended': 'Suspended',
+   'users.edit.statusReset': 'Requires password reset',
   'users.edit.newPassword': 'New password',
   'users.edit.newPasswordHint': 'Reset password (at least 12 characters)',
   'users.edit.saving': 'Saving...',

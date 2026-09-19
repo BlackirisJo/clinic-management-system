@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { api } from '../lib/api'
 import { Modal, Notice } from './ui'
+import { useT } from '../i18n'
 
 export default function ImportMedicationsModal({ onClose, onImported }) {
   const [step, setStep] = useState('ask')
@@ -12,20 +13,20 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
   const inputRef = useRef(null)
 
   function downloadTemplate() {
-    api.prescriptions.importTemplate().catch((err) => setError(err.message || 'تعذر تحميل النموذج'))
+    api.prescriptions.importTemplate().catch((err) => setError(err.message || t('import.loadError')))
   }
 
   function onFileChange(e) {
     const f = e.target.files?.[0]
     setError(''); setPreview(null)
     if (!f) { setFile(null); return }
-    if (!f.name.toLowerCase().endsWith('.csv')) { setError('الملف يجب أن يكون بصيغة .csv'); setFile(null); return }
-    if (f.size > 5 * 1024 * 1024) { setError('حجم الملف يتجاوز 5MB'); setFile(null); return }
+    if (!f.name.toLowerCase().endsWith('.csv')) { setError(t('import.fileInvalid')); setFile(null); return }
+    if (f.size > 5 * 1024 * 1024) { setError(t('import.fileTooLarge')); setFile(null); return }
     setFile(f)
   }
 
   async function handleValidate() {
-    if (!file) { setError('اختر ملفاً أولاً'); return }
+    if (!file) { setError(t('import.chooseFirst')); return }
     setBusy(true); setError('')
     try {
       const fd = new FormData()
@@ -34,7 +35,7 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
       setPreview(res.preview)
       setStep('preview')
     } catch (err) {
-      setError(err.message || 'فشل فحص الملف')
+      setError(err.message || t('import.validateFailed'))
     } finally { setBusy(false) }
   }
 
@@ -49,7 +50,7 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
       setStep('done')
       onImported?.()
     } catch (err) {
-      setError(err.message || 'فشل الاستيراد')
+      setError(err.message || t('import.importFailed'))
       setStep('upload')
     } finally { setBusy(false) }
   }
@@ -58,20 +59,20 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
   const r = result || {}
   const canImport = (p.validNew ?? 0) > 0
   return (
-    <Modal wide title="استيراد دليل الأدوية" subtitle="استيراد قائمة الأدوية من ملف CSV" onClose={onClose}>
+    <Modal wide title={t('import.title')} subtitle={t('import.subtitle')} onClose={onClose}>
       <div className="import-flow">
         <Notice kind="error">{error}</Notice>
 
         {step === 'ask' && (
           <div className="import-step">
-            <h3>هل لديك ملف CSV جاهز؟</h3>
-            <p className="muted">يمكنك تحميل نموذج فارغ أولاً لمعرفة الترتيب الصحيح للأعمدة، أو رفع ملفك مباشرة.</p>
+            <h3>{t('import.askTitle')}</h3>
+            <p className="muted">{t('import.askText')}</p>
             <div className="import-choices">
               <button className="secondary-button" onClick={() => { downloadTemplate(); setStep('upload') }}>
-                📄 تحميل نموذج فارغ
+                {t('import.downloadTemplate')}
               </button>
               <button className="primary-button" onClick={() => setStep('upload')}>
-                ✅ لدي ملف جاهز
+                {t('import.haveFile')}
               </button>
             </div>
           </div>
@@ -79,11 +80,11 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
 
         {(step === 'upload' || step === 'preview' || step === 'importing' || step === 'done') && (
           <div className="import-step">
-            <h3>اختيار ملف CSV</h3>
+            <h3>{t('import.selectFileTitle')}</h3>
             <div className="file-zone">
               <input ref={inputRef} type="file" accept=".csv" onChange={onFileChange} style={{ display: 'none' }} />
               <button type="button" className="secondary-button" onClick={() => inputRef.current?.click()}>
-                {file ? '📎 تغيير الملف' : '📎 اختر ملف CSV'}
+                {file ? t('import.changeFile') : t('import.chooseFile')}
               </button>
               {file && (
                 <div className="file-info">
@@ -95,7 +96,7 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
             {step === 'upload' && (
               <div className="modal-actions">
                 <button className="primary-button" disabled={!file || busy} onClick={handleValidate}>
-                  {busy ? 'جارِ الفحص...' : '🔍 فحص الملف'}
+                  {busy ? t('import.validating') : t('import.validateBtn')}
                 </button>
               </div>
             )}
@@ -104,20 +105,20 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
 
         {step === 'preview' && preview && (
           <div className="import-step">
-            <h3>نتيجة الفحص</h3>
+            <h3>{t('import.previewTitle')}</h3>
             <div className="import-stats">
-              <div className="stat"><span>إجمالي السجلات</span><strong>{p.totalRows}</strong></div>
-              <div className="stat ok"><span>أدوية جديدة</span><strong>{p.validNew}</strong></div>
-              <div className="stat warn"><span>موجودة مسبقاً</span><strong>{p.existing}</strong></div>
-              <div className="stat warn"><span>مكررة داخل الملف</span><strong>{p.duplicateInFile}</strong></div>
-              <div className="stat err"><span>أخطاء</span><strong>{p.invalid}</strong></div>
+              <div className="stat"><span>{t('import.totalRows')}</span><strong>{p.totalRows}</strong></div>
+              <div className="stat ok"><span>{t('import.newDrugs')}</span><strong>{p.validNew}</strong></div>
+              <div className="stat warn"><span>{t('import.existing')}</span><strong>{p.existing}</strong></div>
+              <div className="stat warn"><span>{t('import.duplicateInFile')}</span><strong>{p.duplicateInFile}</strong></div>
+              <div className="stat err"><span>{t('import.errors')}</span><strong>{p.invalid}</strong></div>
             </div>
             {p.invalidRows?.length > 0 && (
               <div className="import-errors">
-                <h4>السجلات المرفوضة ({p.invalidRows.length})</h4>
+                <h4>{t('import.invalidRows')} ({p.invalidRows.length})</h4>
                 <div className="table-wrap" style={{ maxHeight: 160 }}>
                   <table>
-                    <thead><tr><th>الصف</th><th>البيانات</th><th>السبب</th></tr></thead>
+                    <thead><tr><th>{t('import.row')}</th><th>{t('import.data')}</th><th>{t('import.reason')}</th></tr></thead>
                     <tbody>
                       {p.invalidRows.slice(0, 50).map((row, i) => (
                         <tr key={i}>
@@ -133,25 +134,25 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
             )}
             <div className="modal-actions">
               <button className="primary-button" disabled={!canImport || busy} onClick={handleImport}>
-                {busy ? 'جارِ الاستيراد...' : `💊 استيراد الأدوية (${p.validNew})`}
+                {busy ? t('import.importing') : t('import.importBtn', { count: p.validNew })}
               </button>
-              <button className="secondary-button" disabled={busy} onClick={() => setStep('upload')}>رفع ملف آخر</button>
+              <button className="secondary-button" disabled={busy} onClick={() => setStep('upload')}>{t('import.uploadOther')}</button>
             </div>
           </div>
         )}
 
         {step === 'done' && result && (
           <div className="import-step">
-            <h3>✅ تم الاستيراد بنجاح</h3>
+            <h3>{t('import.doneTitle')}</h3>
             <div className="import-stats">
-              <div className="stat"><span>إجمالي السجلات</span><strong>{r.totalRows}</strong></div>
-              <div className="stat ok"><span>تمت الإضافة</span><strong>{r.added}</strong></div>
-              <div className="stat warn"><span>موجودة مسبقاً</span><strong>{r.skippedExisting}</strong></div>
-              <div className="stat warn"><span>مكررة</span><strong>{r.skippedDuplicate}</strong></div>
-              <div className="stat err"><span>فشل</span><strong>{r.failed}</strong></div>
+              <div className="stat"><span>{t('import.totalRows')}</span><strong>{r.totalRows}</strong></div>
+              <div className="stat ok"><span>{t('import.added')}</span><strong>{r.added}</strong></div>
+              <div className="stat warn"><span>{t('import.existing')}</span><strong>{r.skippedExisting}</strong></div>
+              <div className="stat warn"><span>{t('import.duplicate')}</span><strong>{r.skippedDuplicate}</strong></div>
+              <div className="stat err"><span>{t('import.failed')}</span><strong>{r.failed}</strong></div>
             </div>
             <div className="modal-actions">
-              <button className="primary-button" onClick={onClose}>إغلاق</button>
+              <button className="primary-button" onClick={onClose}>{t('common.close')}</button>
             </div>
           </div>
         )}

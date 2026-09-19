@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './ui'
+import { useT } from '../i18n'
 import {
   INSTALL_UI_EVENT,
   canPromptInstall,
@@ -72,41 +73,41 @@ export default function InstallPrompt() {
   return (
     <>
       {visible && (
-        <div className="install-bar" role="dialog" aria-label="تثبيت التطبيق">
+        <div className="install-bar" role="dialog" aria-label={t("install.promptTitle")}>
           <div className="install-bar-icon" aria-hidden="true">ن</div>
           <div className="install-bar-text">
-            <strong>ثبّت تطبيق نبض</strong>
-            <span>افتح النظام من الشاشة الرئيسية كتطبيق مستقل.</span>
+            <strong>{t('install.promptTitle')}</strong>
+            <span>{t('install.promptText')}</span>
           </div>
           <div className="install-bar-actions">
             <button type="button" className="primary-button compact" disabled={busy} onClick={install}>
-              {busy ? 'جارِ التثبيت...' : 'تثبيت'}
+              {busy ? t('install.installing') : t('install.installBtn')}
             </button>
-            <button type="button" className="secondary-button compact" onClick={later}>لاحقاً</button>
+            <button type="button" className="secondary-button compact" onClick={later}>{t('install.later')}</button>
           </div>
         </div>
       )}
 
       {help && (
-        <Modal title="تثبيت تطبيق نبض" subtitle="على هذا الجهاز" onClose={() => setHelp(null)}>
+        <Modal title={t('install.promptTitle')} subtitle={t('install.deviceSubtitle')} onClose={() => setHelp(null)}>
           {help === 'ios' ? (
             <ol className="install-steps">
-              <li><span className="install-step-icon" aria-hidden="true">1</span><div>افتح النظام في متصفح <b>Safari</b> على الآيفون أو الآيباد.</div></li>
-              <li><span className="install-step-icon" aria-hidden="true">2</span><div>اضغط زر <b>المشاركة</b> في شريط Safari (المربع مع السهم للأعلى).</div></li>
-              <li><span className="install-step-icon" aria-hidden="true">3</span><div>اختر <b>إضافة إلى الشاشة الرئيسية</b>.</div></li>
-              <li><span className="install-step-icon" aria-hidden="true">4</span><div>اضغط <b>إضافة</b> — سيظهر تطبيق نبض مع بقية تطبيقات الجهاز.</div></li>
+              <li><span className="install-step-icon" aria-hidden="true">1</span><div>{t('install.iosStep1')}</div></li>
+              <li><span className="install-step-icon" aria-hidden="true">2</span><div>{t('install.iosStep2')}</div></li>
+              <li><span className="install-step-icon" aria-hidden="true">3</span><div>{t('install.iosStep3')}</div></li>
+              <li><span className="install-step-icon" aria-hidden="true">4</span><div>{t('install.iosStep4')}</div></li>
             </ol>
           ) : (
             <ol className="install-steps">
-              <li><span className="install-step-icon" aria-hidden="true">1</span><div>افتح قائمة المتصفح (النقاط الثلاث أو أيقونة التثبيت في شريط العنوان).</div></li>
-              <li><span className="install-step-icon" aria-hidden="true">2</span><div>اختر <b>تثبيت التطبيق</b> أو <b>إضافة إلى الشاشة الرئيسية</b>.</div></li>
-              <li><span className="install-step-icon" aria-hidden="true">3</span><div>أكّد التثبيت — سيعمل النظام بعدها في وضع مستقل بدون شريط المتصفح.</div></li>
+              <li><span className="install-step-icon" aria-hidden="true">1</span><div>{t('install.genericStep1')}</div></li>
+              <li><span className="install-step-icon" aria-hidden="true">2</span><div>{t('install.genericStep2')}</div></li>
+              <li><span className="install-step-icon" aria-hidden="true">3</span><div>{t('install.genericStep3')}</div></li>
             </ol>
           )}
           {help === 'ios' && !safari && (
-            <p className="muted-small">ملاحظة: متصفحات iOS غير Safari لا تعرض خيار التثبيت — استخدم Safari للحصول على التجربة الكاملة.</p>
+            <p className="muted-small">{t('install.iosNote')}</p>
           )}
-          <p className="muted-small">بيانات المرضى لا تُخزَّن على الجهاز — التثبيت يغيّر طريقة العرض فقط.</p>
+          <p className="muted-small">{t('install.privacyNote')}</p>
         </Modal>
       )}
     </>
