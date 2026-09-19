@@ -263,6 +263,7 @@ export default {
   // ===== PWA app update notice =====
   'update.available': 'A new update for the Nabd app is available.',
   'update.reload': 'Reload',
+  'update.later': 'Later',
 
   // ===== medication import (shared modal) =====
   'import.title': 'Import medication directory',

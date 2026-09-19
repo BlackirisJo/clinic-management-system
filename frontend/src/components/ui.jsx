@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useT } from '../i18n'
 
 // قفل تمرير الصفحة أثناء فتح أي نافذة (مهم على الهاتف حتى لا تتحرك الخلفية)
 let scrollLocks = 0
@@ -13,6 +14,7 @@ function lockBodyScroll() {
 
 // نافذة منبثقة عامة — على الهاتف تظهر كـ Bottom-Sheet، وعلى الشاشات الأكبر نافذة مركزية
 export function Modal({ title, subtitle, onClose, children, wide }) {
+  const t = useT()
   const ref = useRef(null)
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
@@ -27,8 +29,8 @@ export function Modal({ title, subtitle, onClose, children, wide }) {
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
       <section ref={ref} className={`modal-card${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
         <div className="modal-header">
-          <div><span className="eyebrow">{subtitle || 'نظام إدارة العيادات'}</span><h2>{title}</h2></div>
-          <button className="modal-close" onClick={onClose} aria-label="إغلاق">×</button>
+          <div><span className="eyebrow">{subtitle || t('common.modal.subtitle')}</span><h2>{title}</h2></div>
+          <button className="modal-close" onClick={onClose} aria-label={t('common.close')}>×</button>
         </div>
         {children}
       </section>
@@ -48,14 +50,16 @@ export function Field({ label, required, hint, children }) {
 }
 
 export function Loading({ text }) {
-  return <div className="loading-state"><span className="loader" />{text || 'جارِ التحميل...'}</div>
+  const t = useT()
+  return <div className="loading-state"><span className="loader" />{text || t('common.loading.default')}</div>
 }
 
 export function Empty({ text, icon }) {
+  const t = useT()
   return (
     <div className="empty-inline">
       <span>{icon || '◇'}</span>
-      <p>{text || 'لا توجد بيانات لعرضها'}</p>
+      <p>{text || t('common.empty.default')}</p>
     </div>
   )
 }
@@ -67,13 +71,14 @@ export function Notice({ kind = 'error', children }) {
 
 // ترقيم صفحات بسيط يعتمد على حجم الصفحة الحالية
 export function Paginator({ page, rows, limit, onPage }) {
+  const t = useT()
   if (!rows || rows.length === 0) return null
   const hasNext = rows.length >= (limit || 50)
   return (
     <div className="pagination">
-      <button type="button" className="secondary-button compact" disabled={page <= 1} onClick={() => onPage(page - 1)}>→ السابق</button>
-      <span>الصفحة {page}</span>
-      <button type="button" className="secondary-button compact" disabled={!hasNext} onClick={() => onPage(page + 1)}>التالي ←</button>
+      <button type="button" className="secondary-button compact" disabled={page <= 1} onClick={() => onPage(page - 1)}>{t('common.pagination.prev')}</button>
+      <span>{t('common.pagination.page', { page })}</span>
+      <button type="button" className="secondary-button compact" disabled={!hasNext} onClick={() => onPage(page + 1)}>{t('common.pagination.next')}</button>
     </div>
   )
 }
