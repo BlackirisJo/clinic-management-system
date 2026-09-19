@@ -311,6 +311,7 @@ export default {
   'changePassword.new': 'كلمة المرور الجديدة',
   'changePassword.confirm': 'تأكيد كلمة المرور الجديدة',
   'changePassword.tooShort': 'كلمة المرور الجديدة يجب أن تكون 12 حرفاً على الأقل',
+  'changePassword.hint': '12 حرفاً على الأقل',
   'changePassword.mismatch': 'كلمتا المرور الجديدتان غير متطابقتين',
   'changePassword.success': 'تم تغيير كلمة المرور بنجاح',
   'changePassword.error': 'تعذّر تغيير كلمة المرور',

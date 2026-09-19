@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
+import { useT } from '../i18n'
 import { todayLabel, ROLE_LABELS } from '../lib/format'
 import { isStandalone, requestInstallUi } from '../lib/pwa'
 
 // عناصر القائمة مع الأدوار المسموح لها بكل قسم — مدير النظام (SUPER_ADMIN/SYSTEM_ADMIN) يرى كل شيء
 export const NAV_ITEMS = [
-  { id: 'overview', label: 'نظرة عامة', icon: '⌂', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
-  { id: 'patients', label: 'المرضى', icon: '◉', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST'] },
-  { id: 'appointments', label: 'المواعيد', icon: '◷', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'] },
-  { id: 'prescriptions', label: 'الروشتات والأدوية', icon: '✎', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR'] },
-  { id: 'billing', label: 'الفواتير والمالية', icon: '◈', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
-  { id: 'reports', label: 'التقارير', icon: '▥', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
-  { id: 'clinics', label: 'العيادات', icon: '⌗', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
-  { id: 'users', label: 'المستخدمون', icon: '♙', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
-  { id: 'backups', label: 'النسخ الاحتياطية', icon: '♺', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
-  { id: 'permissions', label: 'إدارة الصلاحيات', icon: '☰', permission: 'MANAGE_PERMISSIONS' },
+  { id: 'overview', label: 'navigation.overview', icon: '⌂', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
+  { id: 'patients', label: 'navigation.patients', icon: '◉', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST'] },
+  { id: 'appointments', label: 'navigation.appointments', icon: '◷', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'] },
+  { id: 'prescriptions', label: 'navigation.prescriptions', icon: '✎', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR'] },
+  { id: 'billing', label: 'navigation.billing', icon: '◈', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
+  { id: 'reports', label: 'navigation.reports', icon: '▥', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ACCOUNTANT'] },
+  { id: 'clinics', label: 'navigation.clinics', icon: '⌗', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
+  { id: 'users', label: 'navigation.users', icon: '♙', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
+  { id: 'backups', label: 'navigation.backups', icon: '♺', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
+  { id: 'permissions', label: 'navigation.permissions', icon: '☰', permission: 'MANAGE_PERMISSIONS' },
 ]
 
 // تصفية عناصر القائمة حسب دور المستخدم وصلاحياته (الأدوار الإدارية ترى كل شيء)
@@ -27,13 +28,14 @@ export const navItemsForRole = (roleName, permissions = []) =>
   )
 
 export default function Layout({ active, onNavigate, children }) {
+  const t = useT()
   const { user, logout } = useAuth()
   const [navOpen, setNavOpen] = useState(false)
   const [standalone, setStandalone] = useState(() => isStandalone())
-  const roleLabel = user?.roleName ? ROLE_LABELS[user.roleName] || user.roleName : 'مستخدم'
+  const roleLabel = user?.roleName ? ROLE_LABELS[user.roleName] || user.roleName : t('layout.defaultRole')
   const visibleItems = navItemsForRole(user?.roleName, user?.permissions || [])
-  const clinicLabel = user?.clinicId ? `العيادة #${user.clinicId}` : 'إدارة متعددة العيادات'
-  const currentLabel = NAV_ITEMS.find((n) => n.id === active)?.label || 'لوحة التحكم'
+  const clinicLabel = user?.clinicId ? t('layout.clinicById', { id: user.clinicId }) : t('layout.multiClinic')
+  const currentLabel = t(NAV_ITEMS.find((n) => n.id === active)?.label || 'layout.defaultTitle')
 
   const closeNav = useCallback(() => setNavOpen(false), [])
 
@@ -75,45 +77,45 @@ export default function Layout({ active, onNavigate, children }) {
   return (
     <div className="app-shell">
       <div className={navOpen ? 'nav-overlay show' : 'nav-overlay'} onClick={closeNav} aria-hidden="true" />
-      <aside id="app-nav" className={navOpen ? 'sidebar open' : 'sidebar'} aria-label="قائمة التنقل">
+      <aside id="app-nav" className={navOpen ? 'sidebar open' : 'sidebar'} aria-label={t('layout.navAria')}>
         <div className="sidebar-head">
-          <div className="sidebar-brand"><div className="brand-mark small">ن</div><div><strong>نبض</strong><span>إدارة العيادات</span></div></div>
-          <button type="button" className="nav-close" onClick={closeNav} aria-label="إغلاق القائمة">×</button>
+           <div className="sidebar-brand"><div className="brand-mark small">{t('brand.mark')}</div><div><strong>{t('brand.name')}</strong><span>{t('brand.tagline')}</span></div></div>
+          <button type="button" className="nav-close" onClick={closeNav} aria-label={t('layout.closeNav')}>×</button>
         </div>
         <div className="drawer-profile">
-          <div className="avatar" aria-hidden="true">م</div>
+          <div className="avatar" aria-hidden="true">{t('layout.avatarInitial')}</div>
           <div className="drawer-profile-meta"><strong>{roleLabel}</strong><span>{clinicLabel}</span></div>
         </div>
         <nav>
           {visibleItems.map((item) => (
             <button key={item.id} className={active === item.id ? 'nav-item active' : 'nav-item'}
               aria-current={active === item.id ? 'page' : undefined} onClick={() => goTo(item.id)}>
-              <span aria-hidden="true">{item.icon}</span>{item.label}
+              <span aria-hidden="true">{item.icon}</span>{t(item.label)}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
           {!standalone && (
             <button type="button" className="install-entry" onClick={() => { requestInstallUi(); setNavOpen(false) }}>
-               تثبيت التطبيق
+               {t('layout.installApp')}
             </button>
           )}
-          <div className="support-note"><span className="status-dot" />النظام يعمل بشكل طبيعي</div>
-          <button className="logout-button" onClick={() => logout(false)}>↪ تسجيل الخروج</button>
+          <div className="support-note"><span className="status-dot" />{t('layout.systemNormal')}</div>
+          <button className="logout-button" onClick={() => logout(false)}>↪ {t('layout.logout')}</button>
         </div>
       </aside>
       <main className="main-content">
         <header className="topbar">
           <button type="button" className="menu-button" onClick={() => setNavOpen(true)}
-            aria-label="فتح قائمة التنقل" aria-expanded={navOpen} aria-controls="app-nav">☰</button>
+            aria-label={t('layout.openNav')} aria-expanded={navOpen} aria-controls="app-nav">☰</button>
           <div className="topbar-title">
             <p className="eyebrow">{todayLabel()}</p>
             <h1>{currentLabel}</h1>
           </div>
           <div className="top-actions">
-            <button className="icon-button" title="إنهاء جميع الجلسات" aria-label="إنهاء جميع الجلسات" onClick={() => logout(true)}></button>
+            <button className="icon-button" title={t('layout.endAllSessions')} aria-label={t('layout.endAllSessions')} onClick={() => logout(true)}></button>
             <div className="profile">
-              <div className="avatar" aria-hidden="true">م</div>
+              <div className="avatar" aria-hidden="true">{t('layout.avatarInitial')}</div>
               <div><strong>{roleLabel}</strong><span>{clinicLabel}</span></div>
             </div>
           </div>

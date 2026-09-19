@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { t, useT } from '../i18n'
 import { api } from '../lib/api'
 
 // ============================================================================
@@ -22,13 +23,14 @@ export function SearchSelect({
   getOptionLabel,
   getOptionMeta,
   placeholder,
-  emptyText = 'لا توجد نتائج مطابقة',
-  loadingText = 'جارِ البحث...',
+  emptyText,
+  loadingText,
   required,
   disabled,
   limit = DEFAULT_LIMIT,
   debounceMs = DEFAULT_DEBOUNCE,
 }) {
+  const t = useT()
   const listId = useId()
   const [query, setQuery] = useState('')
   const [options, setOptions] = useState([])
@@ -72,7 +74,7 @@ export function SearchSelect({
     } catch (err) {
       if (seq !== seqRef.current) return
       setOptions([])
-      setError(err?.message || 'تعذّر تحميل النتائج')
+      setError(err?.message || t('common.loadFailed'))
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }
@@ -213,13 +215,13 @@ export function SearchSelect({
         <input className="ss-mirror" type="text" value={selectedId} onChange={() => {}} tabIndex={-1} aria-hidden="true" required />
       ) : null}
       {(query || selectedId) ? (
-        <button type="button" className="ss-clear" onClick={clearAll} aria-label="مسح البحث والاختيار" tabIndex={-1}>×</button>
+        <button type="button" className="ss-clear" onClick={clearAll} aria-label={t('common.search.clear')} tabIndex={-1}>×</button>
       ) : null}
       {open ? (
         <div className="ss-panel">
-          {loading ? <div className="ss-state"><span className="loader" />{loadingText}</div> : null}
+          {loading ? <div className="ss-state"><span className="loader" />{loadingText ?? t('common.search.loading')}</div> : null}
           {error ? <div className="ss-state error">{error}</div> : null}
-          {!loading && !error && shown.length === 0 ? <div className="ss-state">{emptyText}</div> : null}
+          {!loading && !error && shown.length === 0 ? <div className="ss-state">{emptyText ?? t('common.search.noResults')}</div> : null}
           {!error && shown.length > 0 ? (
             <ul className="ss-list" id={listId} role="listbox" aria-label={placeholder}>
               {shown.map((option, index) => {
@@ -244,7 +246,7 @@ export function SearchSelect({
               })}
             </ul>
           ) : null}
-          {hitLimit ? <div className="ss-more">اكتب المزيد من الأحرف لتصفية النتائج</div> : null}
+          {hitLimit ? <div className="ss-more">{t('common.search.moreChars')}</div> : null}
         </div>
       ) : null}
     </div>
@@ -270,7 +272,7 @@ const fetchMedicationOptions = async (query) => {
 }
 
 const patientValue = (p) => p.patient_id
-const patientLabel = (p) => p.full_name || `مريض #${p.patient_id}`
+const patientLabel = (p) => p.full_name || t('search.patient.defaultLabel', { id: p.patient_id })
 // بيانات تمييز المرضى المتشابهين: الهاتف ثم الرقم الوطني (حقول موجودة، وغير طبية)
 const patientMeta = (p) => [p.phone, p.national_id].filter(Boolean).join(' · ')
 
@@ -287,8 +289,8 @@ export function PatientSearchSelect({ value, onChange, required, disabled }) {
       getOptionValue={patientValue}
       getOptionLabel={patientLabel}
       getOptionMeta={patientMeta}
-      placeholder="ابحث بالاسم أو الرقم الوطني أو رقم الهاتف"
-      emptyText="لا يوجد مريض مطابق"
+      placeholder={t('search.patient.placeholder')}
+      emptyText={t('search.patient.noResults')}
       required={required}
       disabled={disabled}
       limit={PATIENT_LIMIT}
@@ -305,9 +307,9 @@ export function MedicationSearchSelect({ value, onChange, required, disabled }) 
       getOptionValue={medicationValue}
       getOptionLabel={medicationLabel}
       getOptionMeta={medicationMeta}
-      placeholder="ابحث عن اسم الدواء (التجاري أو العلمي)"
-      emptyText="لا يوجد دواء مطابق"
-      loadingText="جارِ البحث في دليل الأدوية..."
+      placeholder={t('search.medication.placeholder')}
+      emptyText={t('search.medication.noResults')}
+      loadingText={t('search.medication.loading')}
       required={required}
       disabled={disabled}
       limit={MEDICATION_LIMIT}

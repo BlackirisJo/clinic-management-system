@@ -307,6 +307,7 @@ export default {
   'changePassword.new': 'New password',
   'changePassword.confirm': 'Confirm new password',
   'changePassword.tooShort': 'The new password must be at least 12 characters long',
+  'changePassword.hint': 'At least 12 characters',
   'changePassword.mismatch': 'The two new passwords do not match',
   'changePassword.success': 'Password changed successfully',
   'changePassword.error': 'Failed to change the password',
