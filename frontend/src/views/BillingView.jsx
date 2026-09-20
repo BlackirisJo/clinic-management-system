@@ -5,10 +5,12 @@ import { useT } from '../i18n'
 import { fmtMoney, fmtDate, fmtNumber, PAYMENT_TYPES, INVOICE_STATUS, fmtInvoiceNumber } from '../lib/format'
 import { Field, Loading, Empty, Notice, Modal } from '../components/ui'
 import { PatientSearchSelect } from '../components/SearchSelect'
+import { useBaseCurrency } from '../hooks/useBaseCurrency'
 
 export default function BillingView() {
   const [tab, setTab] = useState('invoices')
   const t = useT()
+  const baseCurrency = useBaseCurrency()
   return (
     <section className="full-panel">
       <div className="panel-heading">

@@ -1,8 +1,11 @@
 // أدوات تنسيق عامة
 
-export const fmtMoney = (value) => {
-  const n = Number(value) || 0
-  return new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 2 }).format(n) + ' د.أ'
+import { getBaseCurrency } from '../i18n/currency';
+
+export const fmtMoney = (value, currencyCode) => {
+  const n = Number(value) || 0;
+  const code = (currencyCode || getBaseCurrency());
+  return new Intl.NumberFormat('ar-EG', { style: 'currency', currency: code, maximumFractionDigits: 2 }).format(n);
 }
 
 export const fmtNumber = (value) => {

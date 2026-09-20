@@ -3,6 +3,7 @@
 // — لا تغيير في الأرقام العربية-الهندية للمبالغ، ولا في صيغ التواريخ، ولا في صياغة الزمن النسبي.
 import { getLocale } from './locale'
 import { t } from './dictionaries'
+import { getBaseCurrency } from './currency';
 
 // وسوم Intl لكل لغة (العربية تحتفظ بسلوكها الحالي حرفياً)
 const TAGS = {
@@ -26,10 +27,12 @@ const numberFormatter = (locale, options = {}) => {
 
 export const fmtNumber = (value) => numberFormatter(tagsFor(getLocale()).number).format(Number(value) || 0)
 
-// المبالغ: الرقم عبر Intl + لاحقة العملة من القاموس
-// (العربية: " د.أ" كما هي الآن حرفياً، الإنجليزية: JOD)
-export const fmtMoney = (value) =>
-  numberFormatter(tagsFor(getLocale()).number, { maximumFractionDigits: 2 }).format(Number(value) || 0) + t('number.currencySuffix')
+// المبالغ: Intl.NumberFormat style:currency + الكود من البيانات أو العملة الأساسية
+export const fmtMoney = (value, currencyCode) => {
+  const n = Number(value) || 0
+  const code = (currencyCode || getBaseCurrency())
+  return new Intl.NumberFormat(tagsFor(getLocale()).number, { style: 'currency', currency: code, maximumFractionDigits: 2 }).format(n)
+}
 
 export const fmtDate = (value, compact = false) => {
   if (!value) return '—'

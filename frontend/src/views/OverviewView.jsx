@@ -3,9 +3,11 @@ import { useT } from '../i18n'
 import { api } from '../lib/api'
 import { fmtMoney, fmtNumber, fmtTime, fmtDate, GENDER_LABELS, APPOINTMENT_STATUS } from '../lib/format'
 import { Loading, Empty } from '../components/ui'
+import { useBaseCurrency } from '../hooks/useBaseCurrency'
 
 export default function OverviewView({ onNavigate }) {
   const t = useT()
+  const baseCurrency = useBaseCurrency()
   const [overview, setOverview] = useState(null)
   const [patients, setPatients] = useState([])
   const [appointments, setAppointments] = useState([])
@@ -46,12 +48,12 @@ export default function OverviewView({ onNavigate }) {
     { label: t('dashboard.cards.patientsTotal'), value: fmtNumber(overview?.patients?.total ?? patients.length), note: t('dashboard.cards.patientsTotalNote'), color: 'teal' },
     { label: t('dashboard.cards.visits'), value: fmtNumber(overview?.visits?.total ?? 0), note: t('dashboard.cards.visitsNote'), color: 'blue' },
     { label: t('dashboard.cards.completedAppointments'), value: fmtNumber(overview?.appointments?.completed ?? 0), note: t('dashboard.cards.appointmentsTotalNote', { count: overview?.appointments?.total ?? appointments.length }), color: 'amber' },
-    { label: t('dashboard.cards.revenue'), value: fmtMoney(fin?.revenue ?? 0), note: t('dashboard.cards.revenueNote'), color: 'blue' },
-    { label: t('dashboard.cards.paid'), value: fmtMoney(fin?.paid ?? 0), note: t('dashboard.cards.paidNote'), color: 'teal' },
-    { label: t('dashboard.cards.outstanding'), value: fmtMoney(fin?.outstanding ?? 0), note: t('dashboard.cards.outstandingNote'), color: 'amber' },
-    { label: t('dashboard.cards.expenses'), value: fmtMoney(fin?.expenses ?? 0), note: t('dashboard.cards.expensesNote'), color: 'coral' },
-    { label: t('dashboard.cards.doctorPayout'), value: fmtMoney(fin?.doctor_payout ?? 0), note: t('dashboard.cards.doctorPayoutNote'), color: 'amber' },
-    { label: t('dashboard.cards.netRevenue'), value: fmtMoney(fin?.net_after_expenses ?? 0), note: t('dashboard.cards.netRevenueNote'), color: 'coral' },
+  { label: t('dashboard.cards.revenue'), value: fmtMoney(fin?.revenue ?? 0, baseCurrency), note: t('dashboard.cards.revenueNote'), color: 'blue' },
+  { label: t('dashboard.cards.paid'), value: fmtMoney(fin?.paid ?? 0, baseCurrency), note: t('dashboard.cards.paidNote'), color: 'teal' },
+  { label: t('dashboard.cards.outstanding'), value: fmtMoney(fin?.outstanding ?? 0, baseCurrency), note: t('dashboard.cards.outstandingNote'), color: 'amber' },
+  { label: t('dashboard.cards.expenses'), value: fmtMoney(fin?.expenses ?? 0, baseCurrency), note: t('dashboard.cards.expensesNote'), color: 'coral' },
+  { label: t('dashboard.cards.doctorPayout'), value: fmtMoney(fin?.doctor_payout ?? 0, baseCurrency), note: t('dashboard.cards.doctorPayoutNote'), color: 'amber' },
+  { label: t('dashboard.cards.netRevenue'), value: fmtMoney(fin?.net_after_expenses ?? 0, baseCurrency), note: t('dashboard.cards.netRevenueNote'), color: 'coral' },
   ], [overview, patients, appointments, fin])
 
   if (loading) return <Loading text={t('dashboard.loading')} />

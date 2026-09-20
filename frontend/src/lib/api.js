@@ -255,6 +255,9 @@ export const api = {
     },
     download: (id) => downloadBackupFile(id),
   },
+  settings: {
+    get: () => request('/api/settings'),
+  },
 }
 
 export default api
