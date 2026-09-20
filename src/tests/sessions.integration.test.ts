@@ -11,6 +11,7 @@ const adminUser = process.env.INTEGRATION_USERNAME;
 const adminPassword = process.env.INTEGRATION_PASSWORD;
 const integrationEnabled = Boolean(baseUrl && adminUser && adminPassword);
 const skip = !integrationEnabled;
+const dbAvailable = Boolean(process.env.DATABASE_URL || (process.env.DB_HOST && process.env.DB_USER && process.env.DB_NAME));
 
 interface ApiResult {
   status: number;
@@ -410,7 +411,7 @@ test('C5 - recently revoked session is retained (not cleaned up)', { skip }, asy
   }
 });
 
-test('C6 - session older than 7 days is eligible for cleanup', { skip }, async () => {
+test('C6 - session older than 7 days is eligible for cleanup', { skip: !dbAvailable }, async () => {
   // Verify the cleanup SQL logic: sessions revoked > 7 days ago match the cleanup condition
   const result = await pool.query(
     `SELECT COUNT(*) as count FROM user_sessions
