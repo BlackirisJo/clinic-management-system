@@ -44,6 +44,7 @@ function InvoicesTab() {
 
 function KpisTable() {
   const t = useT()
+  const baseCurrency = useBaseCurrency()
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
 
@@ -67,9 +68,9 @@ function KpisTable() {
                   <td data-label={t('billing.kpi.clinic')}>{k.clinic_name || '—'}</td>
                   <td data-label={t('billing.kpi.patients')}>{fmtNumber(k.unique_patients)}</td>
                   <td data-label={t('billing.kpi.visits')}>{fmtNumber(k.total_visits)}</td>
-                  <td data-label={t('billing.kpi.revenue')}>{fmtMoney(k.total_revenue)}</td>
-                  <td data-label={t('billing.kpi.doctorPayout')}>{fmtMoney(k.total_doctor_payout)}</td>
-                  <td data-label={t('billing.kpi.net')}>{fmtMoney(k.net_clinic_margin)}</td>
+                  <td data-label={t('billing.kpi.revenue')}>{fmtMoney(k.total_revenue, baseCurrency)}</td>
+                  <td data-label={t('billing.kpi.doctorPayout')}>{fmtMoney(k.total_doctor_payout, baseCurrency)}</td>
+                  <td data-label={t('billing.kpi.net')}>{fmtMoney(k.net_clinic_margin, baseCurrency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -93,6 +94,7 @@ function InvoiceForm() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(null)
+  const baseCurrency = useBaseCurrency()
 
   useEffect(() => {
     let cancelled = false
@@ -223,12 +225,12 @@ function InvoiceForm() {
 
       <div className="form-row">
         <Field label={t('billing.invoice.discount')}><input type="number" min="0" step="0.01" value={discount} onChange={(e) => setDiscount(e.target.value)} /></Field>
-        <Field label={t('billing.invoice.total')}><span className="calc-value">{fmtMoney(total)}</span></Field>
+        <Field label={t('billing.invoice.total')}><span className="calc-value">{fmtMoney(total, baseCurrency)}</span></Field>
       </div>
-      <div className="calc-total">{t('billing.invoice.finalInvoice')}: <strong>{fmtMoney(net)}</strong></div>
+      <div className="calc-total">{t('billing.invoice.finalInvoice')}: <strong>{fmtMoney(net, baseCurrency)}</strong></div>
 
       <Notice kind="error">{error}</Notice>
-      {done && <Notice kind="success">{t('billing.invoice.success', { id: done.invoice_id, amount: fmtMoney(done.net_amount) })}</Notice>}
+      {done && <Notice kind="success">{t('billing.invoice.success', { id: done.invoice_id, amount: fmtMoney(done.net_amount, baseCurrency) })}</Notice>}
       <div className="modal-actions">
         <button className="primary-button" disabled={saving || items.length === 0 || !patientId}>{saving ? t('billing.invoice.submitting') : t('billing.invoice.submit')}</button>
       </div>
@@ -241,6 +243,7 @@ function InvoiceForm() {
 // قائمة الفواتير: صف واحد لكل فاتورة (البنود مجمّعة داخلها) + عرض/طباعة
 function InvoicesList({ refreshKey }) {
   const t = useT()
+  const baseCurrency = useBaseCurrency()
   const [rows, setRows] = useState([])
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
@@ -266,7 +269,7 @@ function InvoicesList({ refreshKey }) {
     setActionError('')
     try {
       const r = await api.billing.getInvoice(id)
-      printInvoiceHtml(r.invoice, t)
+      printInvoiceHtml(r.invoice, t, baseCurrency)
     } catch (err) { setActionError(err.message || t('billing.invoices.errorPrint')) }
   }
 
@@ -290,9 +293,9 @@ function InvoicesList({ refreshKey }) {
                   <td data-label={t('billing.invoices.list.clinic')}>{inv.clinic_names?.join('، ') || '—'}</td>
                   <td data-label={t('billing.invoices.list.doctor')}>{inv.doctor_names?.join('، ') || '—'}</td>
                   <td data-label={t('billing.invoices.list.items')}>{fmtNumber(inv.items_count)}</td>
-                  <td data-label={t('billing.invoices.list.total')}>{fmtMoney(inv.net_amount)}</td>
-                  <td data-label={t('billing.invoices.list.paid')}>{fmtMoney(inv.paid_amount)}</td>
-                  <td data-label={t('billing.invoices.list.remaining')}>{fmtMoney(inv.remaining)}</td>
+                  <td data-label={t('billing.invoices.list.total')}>{fmtMoney(inv.net_amount, baseCurrency)}</td>
+                  <td data-label={t('billing.invoices.list.paid')}>{fmtMoney(inv.paid_amount, baseCurrency)}</td>
+                  <td data-label={t('billing.invoices.list.remaining')}>{fmtMoney(inv.remaining, baseCurrency)}</td>
                   <td data-label={t('billing.invoices.list.status')}><span className={`status ${st.cls}`}>{t('invoiceStatus.' + inv.status)}</span></td>
                   <td data-label={t('billing.invoices.list.date')}>{fmtDate(inv.created_at, true)}</td>
                   <td className="cell-actions" data-label={t('billing.invoices.list.actions')}>
@@ -313,7 +316,7 @@ function InvoicesList({ refreshKey }) {
 }
 
 // طباعة الفاتورة فقط عبر نافذة معزولة بأنماط A4 (لا تطبع واجهة النظام)
-function printInvoiceHtml(invoice, t) {
+function printInvoiceHtml(invoice, t, baseCurrency) {
   const st = INVOICE_STATUS[invoice.status] || { label: invoice.status || '' }
   const esc = (v) => String(v ?? '—').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
   const clinicNames = [...new Set((invoice.items || []).map((x) => x.clinic_name).filter(Boolean))].join('، ')
@@ -321,7 +324,7 @@ function printInvoiceHtml(invoice, t) {
   const itemsRows = (invoice.items || []).map((it, i) => (
     `<tr><td>${i + 1}</td><td>${esc(it.service_name || t('billing.print.noService'))}</td><td>${esc(it.clinic_name || '—')}</td>`
     + `<td>${esc(it.doctor_name || '—')}</td><td>${esc(it.quantity ?? 1)}</td>`
-    + `<td>${esc(fmtMoney(it.price))}</td><td>${esc(fmtMoney(it.line_total ?? Number(it.price) * Number(it.quantity ?? 1)))}</td></tr>`
+    + `<td>${esc(fmtMoney(it.price, baseCurrency))}</td><td>${esc(fmtMoney(it.line_total ?? Number(it.price) * Number(it.quantity ?? 1), baseCurrency))}</td></tr>`
   )).join('')
   const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
     <title>${esc(fmtInvoiceNumber(invoice.invoice_id, invoice.created_at))}</title>
@@ -372,11 +375,11 @@ function printInvoiceHtml(invoice, t) {
       </table>
     </div>
     <div class="inv-summary">
-      <div class="row"><span>${t('billing.print.subtotal')}</span><span>${esc(fmtMoney(invoice.total_amount))}</span></div>
-      <div class="row"><span>${t('billing.print.discount')}</span><span>${esc(fmtMoney(invoice.discount_amount))}</span></div>
-      <div class="row total"><span>${t('billing.print.netTotal')}</span><span>${esc(fmtMoney(invoice.net_amount))}</span></div>
-      <div class="row"><span>${t('billing.print.paid')}</span><span>${esc(fmtMoney(invoice.paid_amount))}</span></div>
-      <div class="row"><span>${t('billing.print.remaining')}</span><span>${esc(fmtMoney(invoice.remaining))}</span></div>
+      <div class="row"><span>${t('billing.print.subtotal')}</span><span>${esc(fmtMoney(invoice.total_amount, baseCurrency))}</span></div>
+      <div class="row"><span>${t('billing.print.discount')}</span><span>${esc(fmtMoney(invoice.discount_amount, baseCurrency))}</span></div>
+      <div class="row total"><span>${t('billing.print.netTotal')}</span><span>${esc(fmtMoney(invoice.net_amount, baseCurrency))}</span></div>
+      <div class="row"><span>${t('billing.print.paid')}</span><span>${esc(fmtMoney(invoice.paid_amount, baseCurrency))}</span></div>
+      <div class="row"><span>${t('billing.print.remaining')}</span><span>${esc(fmtMoney(invoice.remaining, baseCurrency))}</span></div>
     </div>
     <div class="inv-footer">${t('billing.print.footer')}</div>
     <script>window.onload = function () { window.focus(); window.print(); }</script>
@@ -391,6 +394,7 @@ function printInvoiceHtml(invoice, t) {
 // نافذة عرض الفاتورة كاملة مع بنودها وملخصها المالي (تنطبق عليها أنماط الفاتورة invoice-sheet عند الطباعة)
 function InvoiceViewModal({ invoice, onClose }) {
   const t = useT()
+  const baseCurrency = useBaseCurrency()
   const st = INVOICE_STATUS[invoice.status] || { label: invoice.status, cls: 'scheduled' }
   const items = invoice.items || []
   return (
@@ -418,22 +422,22 @@ function InvoiceViewModal({ invoice, onClose }) {
                 <td>{it.clinic_name || '—'}</td>
                 <td>{it.doctor_name || '—'}</td>
                 <td>{it.quantity ?? 1}</td>
-                <td>{fmtMoney(it.price)}</td>
-                <td>{fmtMoney(it.line_total)}</td>
+                <td>{fmtMoney(it.price, baseCurrency)}</td>
+                <td>{fmtMoney(it.line_total, baseCurrency)}</td>
               </tr>
             ))}
           </tbody>
         </table></div>
         <div className="invoice-summary">
-          <div className="sum-row"><span>{t('billing.invoice.view.subtotal')}</span><span>{fmtMoney(invoice.total_amount)}</span></div>
-          <div className="sum-row"><span>{t('billing.invoice.view.discount')}</span><span>{fmtMoney(invoice.discount_amount)}</span></div>
-          <div className="sum-row total"><span>{t('billing.invoice.view.netTotal')}</span><span>{fmtMoney(invoice.net_amount)}</span></div>
-          <div className="sum-row"><span>{t('billing.invoice.view.paid')}</span><span>{fmtMoney(invoice.paid_amount)}</span></div>
-          <div className="sum-row"><span>{t('billing.invoice.view.remaining')}</span><span>{fmtMoney(invoice.remaining)}</span></div>
+          <div className="sum-row"><span>{t('billing.invoice.view.subtotal')}</span><span>{fmtMoney(invoice.total_amount, baseCurrency)}</span></div>
+          <div className="sum-row"><span>{t('billing.invoice.view.discount')}</span><span>{fmtMoney(invoice.discount_amount, baseCurrency)}</span></div>
+          <div className="sum-row total"><span>{t('billing.invoice.view.netTotal')}</span><span>{fmtMoney(invoice.net_amount, baseCurrency)}</span></div>
+          <div className="sum-row"><span>{t('billing.invoice.view.paid')}</span><span>{fmtMoney(invoice.paid_amount, baseCurrency)}</span></div>
+          <div className="sum-row"><span>{t('billing.invoice.view.remaining')}</span><span>{fmtMoney(invoice.remaining, baseCurrency)}</span></div>
           <div className="sum-row"><span>{t('billing.invoice.view.status')}</span><span className={`status ${st.cls}`}>{t('invoiceStatus.' + invoice.status)}</span></div>
         </div>
         <div className="modal-actions">
-          <button className="secondary-button" onClick={() => printInvoiceHtml(invoice, t)}>{t('billing.invoice.view.print')}</button>
+          <button className="secondary-button" onClick={() => printInvoiceHtml(invoice, t, baseCurrency)}>{t('billing.invoice.view.print')}</button>
           <button className="primary-button" onClick={onClose}>{t('billing.invoice.view.close')}</button>
         </div>
       </div>
@@ -472,6 +476,7 @@ function ServicesList() {
   const [actionError, setActionError] = useState('')
   const [actionNotice, setActionNotice] = useState('')
   const [selected, setSelected] = useState(null) // { mode: 'view'|'edit', service }
+  const baseCurrency = useBaseCurrency()
 
   const load = () => {
     api.billing.listServices({ limit: 100 })
@@ -515,7 +520,7 @@ function ServicesList() {
               <tr key={s.service_id} className={s.is_active === false ? 'row-muted' : ''}>
                 <td>{s.service_name}</td>
                 <td>{s.clinic_name || t('billing.services.unknownClinic', { id: s.clinic_id })}</td>
-                <td>{fmtMoney(s.price)}</td>
+                <td>{fmtMoney(s.price, baseCurrency)}</td>
                 <td>{fmtNumber(s.doctor_percentage)}%</td>
                 <td>{s.is_active === false ? t('billing.services.status.inactive') : t('billing.services.status.active')}</td>
                 <td>
@@ -546,6 +551,7 @@ function ServiceModal({ mode, service, onClose, onSaved }) {
   })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const baseCurrency = useBaseCurrency()
   const price = Number(form.price) || 0
   const pct = Number(form.doctor_percentage) || 0
   const displayDoctorShare = Math.round((price * pct / 100) * 100) / 100
@@ -574,7 +580,7 @@ function ServiceModal({ mode, service, onClose, onSaved }) {
             <Field label={t('billing.services.form.doctorPct')} required><input type="number" min="0" max="100" required value={form.doctor_percentage} onChange={(e) => setForm({ ...form, doctor_percentage: e.target.value })} /></Field>
           </div>
           <Notice kind="error">{error}</Notice>
-          <div className="calc-total">{t('billing.services.calc.doctorShare')}: <strong>{fmtMoney(displayDoctorShare)}</strong> · {t('billing.services.calc.centerShare')}: <strong>{fmtMoney(Math.max(0, price - displayDoctorShare))}</strong></div>
+          <div className="calc-total">{t('billing.services.calc.doctorShare')}: <strong>{fmtMoney(displayDoctorShare, baseCurrency)}</strong> · {t('billing.services.calc.centerShare')}: <strong>{fmtMoney(Math.max(0, price - displayDoctorShare), baseCurrency)}</strong></div>
           <div className="modal-actions">
             <button className="primary-button" disabled={saving}>{saving ? t('billing.services.saving') : t('billing.services.save')}</button>
             <button type="button" className="secondary-button" onClick={onClose}>{t('billing.services.cancel')}</button>
@@ -584,10 +590,10 @@ function ServiceModal({ mode, service, onClose, onSaved }) {
         <div className="service-detail">
           <p><strong>{t('billing.services.detail.name')}:</strong> {service.service_name}</p>
           <p><strong>{t('billing.services.detail.clinic')}:</strong> {service.clinic_name || t('billing.services.unknownClinic', { id: service.clinic_id })}</p>
-          <p><strong>{t('billing.services.detail.price')}:</strong> {fmtMoney(service.price)}</p>
+          <p><strong>{t('billing.services.detail.price')}:</strong> {fmtMoney(service.price, baseCurrency)}</p>
           <p><strong>{t('billing.services.detail.doctorPct')}:</strong> {fmtNumber(service.doctor_percentage)}%</p>
-          <p><strong>{t('billing.services.detail.doctorShare')}:</strong> {fmtMoney(service.doctor_share)}</p>
-          <p><strong>{t('billing.services.detail.centerShare')}:</strong> {fmtMoney(service.center_share)}</p>
+          <p><strong>{t('billing.services.detail.doctorShare')}:</strong> {fmtMoney(service.doctor_share, baseCurrency)}</p>
+          <p><strong>{t('billing.services.detail.centerShare')}:</strong> {fmtMoney(service.center_share, baseCurrency)}</p>
           <p><strong>{t('billing.services.detail.status')}:</strong> {service.is_active === false ? t('billing.services.status.inactive') : t('billing.services.status.active')}</p>
           {service.created_at && <p><strong>{t('billing.services.detail.createdAt')}:</strong> {fmtDate(service.created_at, true)}</p>}
           {service.updated_at && <p><strong>{t('billing.services.detail.updatedAt')}:</strong> {fmtDate(service.updated_at, true)}</p>}
@@ -667,6 +673,7 @@ function ExpensesList() {
   const [actionError, setActionError] = useState('')
   const [actionNotice, setActionNotice] = useState('')
   const [selected, setSelected] = useState(null) // { mode: 'view'|'edit', expense }
+  const baseCurrency = useBaseCurrency()
 
   const load = () => {
     api.billing.listExpenses({ limit: 100 })
@@ -690,7 +697,7 @@ function ExpensesList() {
 
   async function removeExpense(e2) {
     setActionError(''); setActionNotice('')
-    if (!window.confirm(t('billing.expenses.confirmDelete', { category: e2.category, amount: fmtMoney(e2.amount) }))) return
+    if (!window.confirm(t('billing.expenses.confirmDelete', { category: e2.category, amount: fmtMoney(e2.amount, baseCurrency) }))) return
     try {
       const r = await api.billing.deleteExpense(e2.expense_id)
       setActionNotice(r.soft_deleted ? t('billing.expenses.softDeletedNotice') : t('billing.expenses.deletedSuccess'))
@@ -710,7 +717,7 @@ function ExpensesList() {
               <tr key={e2.expense_id}>
                 <td>{e2.category}</td>
                 <td>{e2.clinic_name || (e2.clinic_id ? t('billing.expenses.unknownClinic', { id: e2.clinic_id }) : t('billing.expenses.none'))}</td>
-                <td>{fmtMoney(e2.amount)}</td>
+                <td>{fmtMoney(e2.amount, baseCurrency)}</td>
                 <td>{e2.spent_by_name || t('billing.expenses.none')}</td>
                 <td>{fmtDate(e2.created_at, true)}</td>
                 <td>
@@ -741,6 +748,7 @@ function ExpenseModal({ mode, expense, onClose, onSaved }) {
   })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const baseCurrency = useBaseCurrency()
 
   async function submit(e) {
     e.preventDefault()
@@ -774,7 +782,7 @@ function ExpenseModal({ mode, expense, onClose, onSaved }) {
           <p><strong>{t('billing.expenses.detail.id')}:</strong> #{expense.expense_id}</p>
           <p><strong>{t('billing.expenses.detail.clinic')}:</strong> {expense.clinic_name || (expense.clinic_id ? t('billing.expenses.unknownClinic', { id: expense.clinic_id }) : t('billing.expenses.none'))}</p>
           <p><strong>{t('billing.expenses.detail.category')}:</strong> {expense.category}</p>
-          <p><strong>{t('billing.expenses.detail.amount')}:</strong> {fmtMoney(expense.amount)}</p>
+          <p><strong>{t('billing.expenses.detail.amount')}:</strong> {fmtMoney(expense.amount, baseCurrency)}</p>
           <p><strong>{t('billing.expenses.detail.description')}:</strong> {expense.description || t('billing.expenses.none')}</p>
           <p><strong>{t('billing.expenses.detail.date')}:</strong> {fmtDate(expense.created_at, true)}</p>
           <p><strong>{t('billing.expenses.detail.createdBy')}:</strong> {expense.spent_by_name || t('billing.expenses.none')}</p>

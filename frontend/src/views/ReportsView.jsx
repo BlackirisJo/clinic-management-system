@@ -17,7 +17,7 @@ const REPORT_TABS = [
 export default function ReportsView() {
   const t = useT()
   const { user } = useAuth()
-  useBaseCurrency() // populate currency cache for fmtMoney fallback
+  const baseCurrency = useBaseCurrency() // populate currency cache for fmtMoney fallback
   const [tab, setTab] = useState('overview')
   const [filters, setFilters] = useState({ date_from: '', date_to: '', clinic_id: '' })
   const [data, setData] = useState(null)
@@ -89,8 +89,8 @@ export default function ReportsView() {
       <Notice kind="error">{error}</Notice>
       {loading ? <Loading text={t('reports.loading')} /> : !data ? <Empty text={t('reports.empty')} /> : (
         <div className="tab-content report-content">
-          {tab === 'overview' && <OverviewTab data={data.overview || {}} />}
-          {tab === 'financial' && <FinancialTab data={data} />}
+          {tab === 'overview' && <OverviewTab data={data.overview || {}} baseCurrency={baseCurrency} />}
+          {tab === 'financial' && <FinancialTab data={data} baseCurrency={baseCurrency} />}
           {tab === 'clinical' && <ClinicalTab data={data} />}
           {tab === 'appointments' && <AppointmentsTab statuses={data.statuses || []} rows={data.appointments || []} />}
           {tab === 'patients' && <PatientsTab rows={data.patients || []} />}
@@ -129,7 +129,7 @@ function exportCSV(tab, data, t) {
   }
 }
 
-function OverviewTab({ data }) {
+function OverviewTab({ data, baseCurrency }) {
   const t = useT()
   return (
     <div className="report-grid">
@@ -140,20 +140,20 @@ function OverviewTab({ data }) {
         { label: t('reports.overview.completed'), value: data.appointments?.completed ?? 0 },
         { label: t('reports.overview.cancelled'), value: data.appointments?.cancelled ?? 0 },
         { label: t('reports.overview.prescriptions'), value: data.prescriptions?.total ?? 0 },
-        { label: t('reports.overview.revenue'), value: fmtMoney(data.financial?.revenue ?? 0) },
-        { label: t('reports.overview.paid'), value: fmtMoney(data.financial?.paid ?? 0) },
-        { label: t('reports.overview.outstanding'), value: fmtMoney(data.financial?.outstanding ?? 0) },
-        { label: t('reports.overview.expenses'), value: fmtMoney(data.financial?.expenses ?? 0) },
-        { label: t('reports.overview.doctorPayout'), value: fmtMoney(data.financial?.doctor_payout ?? 0) },
-        { label: t('reports.overview.discounts'), value: fmtMoney(data.financial?.discounts ?? 0) },
-        { label: t('reports.overview.netAfterExpenses'), value: fmtMoney(data.financial?.net_after_expenses ?? 0) },
+        { label: t('reports.overview.revenue'), value: fmtMoney(data.financial?.revenue ?? 0, baseCurrency) },
+        { label: t('reports.overview.paid'), value: fmtMoney(data.financial?.paid ?? 0, baseCurrency) },
+        { label: t('reports.overview.outstanding'), value: fmtMoney(data.financial?.outstanding ?? 0, baseCurrency) },
+        { label: t('reports.overview.expenses'), value: fmtMoney(data.financial?.expenses ?? 0, baseCurrency) },
+        { label: t('reports.overview.doctorPayout'), value: fmtMoney(data.financial?.doctor_payout ?? 0, baseCurrency) },
+        { label: t('reports.overview.discounts'), value: fmtMoney(data.financial?.discounts ?? 0, baseCurrency) },
+        { label: t('reports.overview.netAfterExpenses'), value: fmtMoney(data.financial?.net_after_expenses ?? 0, baseCurrency) },
       ].map((item) => (
         <div className="report-cell" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>
       ))}
     </div>
   )
 }
-function FinancialTab({ data }) {
+function FinancialTab({ data, baseCurrency }) {
   const t = useT()
   const s = data.summary || {}
   const paymentMethods = data.payment_methods || []
@@ -161,14 +161,14 @@ function FinancialTab({ data }) {
   const services = data.services || []
   const cells = [
     { label: t('reports.financial.invoices'), value: fmtNumber(s.invoices) },
-    { label: t('reports.financial.gross'), value: fmtMoney(s.gross) },
-    { label: t('reports.financial.discounts'), value: fmtMoney(s.discounts) },
-    { label: t('reports.financial.net'), value: fmtMoney(s.net) },
-    { label: t('reports.financial.paid'), value: fmtMoney(s.paid) },
-    { label: t('reports.financial.outstanding'), value: fmtMoney(s.outstanding) },
-    { label: t('reports.financial.expenses'), value: fmtMoney(expenses.total) },
-    { label: t('reports.financial.doctorPayout'), value: fmtMoney(s.doctor_payout) },
-    { label: t('reports.financial.netAfterExpenses'), value: fmtMoney(s.net_after_expenses) },
+    { label: t('reports.financial.gross'), value: fmtMoney(s.gross, baseCurrency) },
+    { label: t('reports.financial.discounts'), value: fmtMoney(s.discounts, baseCurrency) },
+    { label: t('reports.financial.net'), value: fmtMoney(s.net, baseCurrency) },
+    { label: t('reports.financial.paid'), value: fmtMoney(s.paid, baseCurrency) },
+    { label: t('reports.financial.outstanding'), value: fmtMoney(s.outstanding, baseCurrency) },
+    { label: t('reports.financial.expenses'), value: fmtMoney(expenses.total, baseCurrency) },
+    { label: t('reports.financial.doctorPayout'), value: fmtMoney(s.doctor_payout, baseCurrency) },
+    { label: t('reports.financial.netAfterExpenses'), value: fmtMoney(s.net_after_expenses, baseCurrency) },
   ]
   return (
     <div className="tab-stack">
@@ -185,7 +185,7 @@ function FinancialTab({ data }) {
               <thead><tr><th style={{ textAlign: 'start' }}>{t('reports.financial.method')}</th><th style={{ textAlign: 'start' }}>{t('reports.financial.count')}</th><th style={{ textAlign: 'start' }}>{t('reports.financial.amount')}</th></tr></thead>
               <tbody>
                 {paymentMethods.map((p, i) => (
-                  <tr key={i}><td>{t(`paymentType.${p.payment_type}`) || p.payment_type}</td><td>{fmtNumber(p.invoices)}</td><td>{fmtMoney(p.paid)}</td></tr>
+                  <tr key={i}><td>{t(`paymentType.${p.payment_type}`) || p.payment_type}</td><td>{fmtNumber(p.invoices)}</td><td>{fmtMoney(p.paid, baseCurrency)}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -203,8 +203,8 @@ function FinancialTab({ data }) {
                   <tr key={i}>
                     <td>{sv.service_name}</td>
                     <td data-label={t('reports.financial.times')}>{fmtNumber(sv.items)}</td>
-                    <td data-label={t('reports.financial.revenue')}>{fmtMoney(sv.revenue)}</td>
-                    <td data-label={t('reports.financial.doctorShare')}>{fmtMoney(sv.doctor_payout)}</td>
+                    <td data-label={t('reports.financial.revenue')}>{fmtMoney(sv.revenue, baseCurrency)}</td>
+                    <td data-label={t('reports.financial.doctorShare')}>{fmtMoney(sv.doctor_payout, baseCurrency)}</td>
                   </tr>
                 ))}
               </tbody>
