@@ -97,11 +97,11 @@ export default function VisitModal({ visitId, onClose }) {
 
       <Notice kind="error">{error}</Notice>
 
-      {tab === 'clinical' && <ClinicalTab data={data} reload={load} setError={setError} isEmergency={isEmergency} />}
+      {tab === 'clinical' && <ClinicalTab data={data} reload={load} setError={setError} isEmergency={isEmergency} DISPOSITIONS={DISPOSITIONS} />}
       {tab === 'vitals' && <VitalsTab visitId={visitId} data={data} reload={load} setError={setError} />}
       {tab === 'diagnoses' && <DiagnosesTab visitId={visitId} data={data} reload={load} setError={setError} />}
-      {tab === 'labs' && <LabsTab visitId={visitId} data={data} reload={load} setError={setError} />}
-      {tab === 'imaging' && <ImagingTab visitId={visitId} data={data} reload={load} setError={setError} />}
+      {tab === 'labs' && <LabsTab visitId={visitId} data={data} reload={load} setError={setError} LAB_CATEGORIES={LAB_CATEGORIES} />}
+      {tab === 'imaging' && <ImagingTab visitId={visitId} data={data} reload={load} setError={setError} IMAGING_MODALITIES={IMAGING_MODALITIES} />}
       {tab === 'attachments' && <AttachmentsTab visitId={visitId} data={data} reload={load} setError={setError} />}
       {tab === 'referrals' && <ReferralsTab visitId={visitId} data={data} reload={load} setError={setError} />}
       {tab === 'pregnancy' && hasPregnancy && <PregnancyPanel patientId={visit.patient_id} visitId={Number(visitId)} />}
@@ -110,7 +110,7 @@ export default function VisitModal({ visitId, onClose }) {
 }
 
 // ===== البيانات السريرية العامة للزيارة =====
-function ClinicalTab({ data, reload, setError, isEmergency }) {
+function ClinicalTab({ data, reload, setError, isEmergency, DISPOSITIONS }) {
   const t = useT()
   const v = data.visit
   const [form, setForm] = useState({
@@ -339,7 +339,7 @@ function DiagnosesTab({ visitId, data, reload, setError }) {
 }
 
 // ===== المختبر: الطلبات والنتائج =====
-function LabsTab({ visitId, data, reload, setError }) {
+function LabsTab({ visitId, data, reload, setError, LAB_CATEGORIES }) {
   const t = useT()
   const [form, setForm] = useState({ test_name: '', category: 'CBC', priority: 'ROUTINE', notes: '' })
   const [saving, setSaving] = useState(false)
@@ -443,7 +443,7 @@ function LabsTab({ visitId, data, reload, setError }) {
 }
 
 // ===== التصوير والفحوصات (أشعة/سونار/ECG) =====
-function ImagingTab({ visitId, data, reload, setError }) {
+function ImagingTab({ visitId, data, reload, setError, IMAGING_MODALITIES }) {
   const t = useT()
   const [form, setForm] = useState({ modality: 'XRAY', body_part: '', findings: '', impression: '' })
   const [saving, setSaving] = useState(false)

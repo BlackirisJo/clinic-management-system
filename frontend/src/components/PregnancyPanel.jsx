@@ -62,7 +62,7 @@ export default function PregnancyPanel({ patientId, visitId }) {
             <button key={p.pregnancy_id} className={`pregnancy-card ${active?.pregnancy?.pregnancy_id === p.pregnancy_id ? 'selected' : ''}`} onClick={() => openDetails(p.pregnancy_id)}>
               <div>
                 <strong>{t('pregnancy.card.pregnancyId', { id: p.pregnancy_id })}</strong>
-                <span className={`chip small ${p.risk_level === 'HIGH' ? 'chip-warn' : ''}`}>t('pregnancy.riskNormal')</span>
+                <span className={`chip small ${p.risk_level === 'HIGH' ? 'chip-warn' : ''}`}>{p.risk_level === 'HIGH' ? t('pregnancy.create.riskHigh') : t('pregnancy.create.riskNormal')}</span>
                 <span className="chip small">{p.status === 'ACTIVE' ? t('pregnancy.statusActive') : t('pregnancy.statusEnded')}</span>
               </div>
               <div className="muted-small">
@@ -169,6 +169,22 @@ function PregnancyDetails({ data, visitId, reload, setError }) {
   const { pregnancy, pregnancy_visits, ultrasounds, attachments } = data
   const [section, setSection] = useState('timeline')
 
+  const RISK_LABELS = {
+    NORMAL: t('pregnancy.create.riskNormal'),
+    HIGH: t('pregnancy.create.riskHigh'),
+  }
+  const OUTCOME_LABELS = {
+    ONGOING: t('pregnancy.outcome.ongoing'),
+    LIVE_BIRTH: t('pregnancy.outcome.liveBirth'),
+    STILLBIRTH: t('pregnancy.outcome.stillbirth'),
+    MISCARRIAGE: t('pregnancy.outcome.miscarriage'),
+  }
+  const DELIVERY_METHODS = {
+    VAGINAL: t('pregnancy.delivery.vaginal'),
+    VAGINAL_ASSISTED: t('pregnancy.delivery.vaginalAssisted'),
+    CESAREAN: t('pregnancy.delivery.cesarean'),
+  }
+
   return (
     <div className="pregnancy-details">
       <div className="pregnancy-summary">
@@ -186,7 +202,7 @@ function PregnancyDetails({ data, visitId, reload, setError }) {
           <p className="profile-meta"><strong>{t('pregnancy.details.outcome')}</strong> {OUTCOME_LABELS[pregnancy.outcome]}{pregnancy.delivery_date ? ` — ${fmtDate(pregnancy.delivery_date)}` : ''}{pregnancy.delivery_method ? ` — ${DELIVERY_METHODS[pregnancy.delivery_method] || pregnancy.delivery_method}` : ''}</p>
         )}
         {pregnancy.status === 'ACTIVE' && (
-          <ClosePregnancyControl pregnancy={pregnancy} reload={reload} setError={setError} />
+          <ClosePregnancyControl pregnancy={pregnancy} reload={reload} setError={setError} OUTCOME_LABELS={OUTCOME_LABELS} />
         )}
       </div>
 
@@ -197,7 +213,7 @@ function PregnancyDetails({ data, visitId, reload, setError }) {
         <button className={section === 'attachments' ? 'tab-item active' : 'tab-item'} onClick={() => setSection('attachments')}>{t('pregnancy.attachmentsTab', { count: attachments.length })}</button>
       </div>
 
-      {section === 'timeline' && <PregnancyTimeline visits={pregnancy_visits} pregnancyId={pregnancy.pregnancy_id} reload={reload} setError={setError} />}
+      {section === 'timeline' && <PregnancyTimeline visits={pregnancy_visits} pregnancyId={pregnancy.pregnancy_id} reload={reload} setError={setError} RISK_LABELS={RISK_LABELS} />}
       {section === 'addvisit' && <AddPregnancyVisit pregnancy={pregnancy} visitId={visitId} reload={reload} setError={setError} />}
       {section === 'ultrasound' && <UltrasoundSection pregnancy={pregnancy} ultrasounds={ultrasounds} visitId={visitId} reload={reload} setError={setError} />}
       {section === 'attachments' && <PregnancyAttachments attachments={attachments} setError={setError} />}
@@ -206,7 +222,7 @@ function PregnancyDetails({ data, visitId, reload, setError }) {
 }
 
 // التحكم بإغلاق الحمل عند الولادة
-function ClosePregnancyControl({ pregnancy, reload, setError }) {
+function ClosePregnancyControl({ pregnancy, reload, setError, OUTCOME_LABELS }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ outcome: 'LIVE_BIRTH', delivery_date: '', delivery_method: 'VAGINAL', delivery_notes: '' })
@@ -258,7 +274,7 @@ function ClosePregnancyControl({ pregnancy, reload, setError }) {
 }
 
 // الخط الزمني للحمل: كل زيارة ببياناتها من البداية حتى الولادة
-function PregnancyTimeline({ visits, pregnancyId, reload, setError }) {
+function PregnancyTimeline({ visits, pregnancyId, reload, setError, RISK_LABELS }) {
   const t = useT()
   if (visits.length === 0) return <Empty text={t('pregnancy.timeline.empty')} />
 
