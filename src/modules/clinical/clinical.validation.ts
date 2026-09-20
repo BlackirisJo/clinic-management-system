@@ -215,3 +215,26 @@ export const clinicCreateSchema = clinicUpdateSchema.extend({
   clinic_name: z.string().trim().min(2).max(150),
   specialty_id: id,
 });
+
+// ===== سجل الحمل — طلبات المختبر =====
+export const pregnancyLabOrderSchema = z.object({
+  test_name: z.string().trim().min(2).max(200),
+  category: shortText(50),
+  priority: z.enum(['ROUTINE', 'URGENT', 'STAT']).default('ROUTINE'),
+  notes: longText(2000),
+  pregnancy_visit_id: optionalId.nullable().optional(),
+});
+export const pregnancyLabOrderUpdateSchema = z.object({
+  status: z.enum(['ORDERED', 'COLLECTED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']).optional(),
+  notes: longText(2000).optional(),
+});
+export const pregnancyLabResultSchema = z.object({
+  results: z.array(z.object({
+    analyte: z.string().trim().min(1).max(200),
+    result_value: shortText(200),
+    unit: shortText(50),
+    reference_range: shortText(100),
+    is_abnormal: z.boolean().default(false),
+    notes: longText(1000),
+  })).min(1).max(100),
+});

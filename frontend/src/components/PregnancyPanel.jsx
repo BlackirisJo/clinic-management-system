@@ -189,7 +189,7 @@ function PregnancyDetails({ data, visitId, reload, setError }) {
     <div className="pregnancy-details">
       <div className="pregnancy-summary">
         <div className="summary-grid">
-          <div><span>{t('pregnancy.details.currentGa')}</span><strong>{pregnancy.current_gestational_age ? `${pregnancy.current_gestational_age.weeks} أسبوع + ${pregnancy.current_gestational_age.days} يوم` : '—'}</strong></div>
+          <div><span>{t('pregnancy.details.currentGa')}</span><strong>{pregnancy.current_gestational_age ? t('pregnancy.gaDisplay', { weeks: pregnancy.current_gestational_age.weeks, days: pregnancy.current_gestational_age.days }) : '—'}</strong></div>
           <div><span>{t('pregnancy.details.lmp')}</span><strong>{fmtDate(pregnancy.lmp_date)}</strong></div>
           <div><span>{t('pregnancy.details.edd')}</span><strong>{fmtDate(pregnancy.edd_date)}</strong></div>
           <div><span>{t('pregnancy.details.gpa')}</span><strong>G{pregnancy.gravida ?? 1} P{pregnancy.para ?? 0} A{pregnancy.abortions ?? 0}</strong></div>
@@ -211,12 +211,14 @@ function PregnancyDetails({ data, visitId, reload, setError }) {
         <button className={section === 'addvisit' ? 'tab-item active' : 'tab-item'} onClick={() => setSection('addvisit')}>{t('pregnancy.addVisitTab')}</button>
         <button className={section === 'ultrasound' ? 'tab-item active' : 'tab-item'} onClick={() => setSection('ultrasound')}>{t('pregnancy.ultrasoundTab', { count: ultrasounds.length })}</button>
         <button className={section === 'attachments' ? 'tab-item active' : 'tab-item'} onClick={() => setSection('attachments')}>{t('pregnancy.attachmentsTab', { count: attachments.length })}</button>
+        <button className={section === 'labs' ? 'tab-item active' : 'tab-item'} onClick={() => setSection('labs')}>{t('pregnancy.labsTab')}</button>
       </div>
 
       {section === 'timeline' && <PregnancyTimeline visits={pregnancy_visits} pregnancyId={pregnancy.pregnancy_id} reload={reload} setError={setError} RISK_LABELS={RISK_LABELS} />}
       {section === 'addvisit' && <AddPregnancyVisit pregnancy={pregnancy} visitId={visitId} reload={reload} setError={setError} />}
       {section === 'ultrasound' && <UltrasoundSection pregnancy={pregnancy} ultrasounds={ultrasounds} visitId={visitId} reload={reload} setError={setError} />}
       {section === 'attachments' && <PregnancyAttachments attachments={attachments} setError={setError} />}
+      {section === 'labs' && <LabsSection pregnancy={pregnancy} reload={reload} setError={setError} />}
     </div>
   )
 }
@@ -363,8 +365,8 @@ function AddPregnancyVisit({ pregnancy, visitId, reload, setError }) {
         <Field label={t('pregnancy.addVisit.gaDays')}><input type="number" min="0" max="6" value={form.ga_days} onChange={(e) => setForm({ ...form, ga_days: e.target.value })} /></Field>
         <Field label={t('pregnancy.addVisit.riskLevel')}>
           <select value={form.risk_level} onChange={(e) => setForm({ ...form, risk_level: e.target.value })}>
-            <option value="NORMAL">{t('pregnancy.addVisit.riskNormal')}</option>
-            <option value="HIGH">{t('pregnancy.addVisit.riskHigh')}</option>
+            <option value="NORMAL">{t('pregnancy.create.riskNormal')}</option>
+            <option value="HIGH">{t('pregnancy.create.riskHigh')}</option>
           </select>
         </Field>
       </div>
@@ -518,6 +520,248 @@ function PregnancyAttachments({ attachments, setError }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// قسم المختبر: طلبات الفحص + النتائج
+function LabsSection({ pregnancy, reload, setError }) {
+  const t = useT()
+  const [labOrders, setLabOrders] = useState(null)
+  const [showOrder, setShowOrder] = useState(false)
+  const [orderForm, setOrderForm] = useState({ test_name: '', category: '', priority: 'ROUTINE', notes: '' })
+  const [saving, setSaving] = useState(false)
+  const [editTarget, setEditTarget] = useState(null)
+  const [editMode, setEditMode] = useState(null) // 'status' | 'results' | null
+  const [statusForm, setStatusForm] = useState({ status: '', notes: '' })
+  const [resultsForm, setResultsForm] = useState([])
+
+  const loadOrders = useCallback(async () => {
+    try {
+      const result = await api.clinical.pregnancyLabOrders(pregnancy.pregnancy_id)
+      setLabOrders(result.lab_orders || [])
+    } catch (err) { setError(err.message) }
+  }, [pregnancy.pregnancy_id])
+
+  useEffect(() => { loadOrders() }, [loadOrders])
+
+  async function submitOrder(e) {
+    e.preventDefault()
+    setSaving(true); setError('')
+    try {
+      await api.clinical.addPregnancyLabOrder(pregnancy.pregnancy_id, {
+        test_name: orderForm.test_name,
+        category: orderForm.category || null,
+        priority: orderForm.priority,
+        notes: orderForm.notes || null,
+      })
+      setShowOrder(false)
+      setOrderForm({ test_name: '', category: '', priority: 'ROUTINE', notes: '' })
+      loadOrders()
+      reload()
+    } catch (err) { setError(err.message) }
+    finally { setSaving(false) }
+  }
+
+  function openStatusEdit(order) {
+    setEditTarget(order)
+    setEditMode('status')
+    setStatusForm({ status: order.status, notes: order.notes || '' })
+  }
+
+  async function saveStatus(e) {
+    e.preventDefault()
+    setSaving(true); setError('')
+    try {
+      await api.clinical.updatePregnancyLabOrder(pregnancy.pregnancy_id, editTarget.pregnancy_lab_id, {
+        status: statusForm.status,
+        notes: statusForm.notes || null,
+      })
+      closeEdit()
+      loadOrders()
+      reload()
+    } catch (err) { setError(err.message) }
+    finally { setSaving(false) }
+  }
+
+  function openResultsEdit(order) {
+    setEditTarget(order)
+    setEditMode('results')
+    setResultsForm([])
+  }
+
+  function addAnalyte() {
+    setResultsForm([...resultsForm, { analyte: '', result_value: '', unit: '', reference_range: '', is_abnormal: false, notes: '' }])
+  }
+
+  function updateAnalyte(index, field, value) {
+    setResultsForm(resultsForm.map((r, i) => i === index ? { ...r, [field]: value } : r))
+  }
+
+  function removeAnalyte(index) {
+    setResultsForm(resultsForm.filter((_, i) => i !== index))
+  }
+
+  async function saveResults(e) {
+    e.preventDefault()
+    setSaving(true); setError('')
+    try {
+      await api.clinical.savePregnancyLabResults(pregnancy.pregnancy_id, editTarget.pregnancy_lab_id, {
+        results: resultsForm.filter((r) => r.analyte),
+      })
+      closeEdit()
+      loadOrders()
+      reload()
+    } catch (err) { setError(err.message) }
+    finally { setSaving(false) }
+  }
+
+  function closeEdit() {
+    setEditTarget(null)
+    setEditMode(null)
+    setResultsForm([])
+  }
+
+  async function cancelOrder(order) {
+    if (!window.confirm(t('pregnancy.labs.cancelConfirm'))) return
+    try {
+      await api.clinical.updatePregnancyLabOrder(pregnancy.pregnancy_id, order.pregnancy_lab_id, { status: 'CANCELLED' })
+      loadOrders()
+      reload()
+    } catch (err) { setError(err.message) }
+  }
+
+  async function deleteOrder(order) {
+    if (!window.confirm(t('pregnancy.labs.confirmDelete'))) return
+    try {
+      await api.clinical.deletePregnancyLabOrder(pregnancy.pregnancy_id, order.pregnancy_lab_id)
+      loadOrders()
+      reload()
+    } catch (err) { setError(err.message) }
+  }
+
+  if (labOrders === null) return <Loading text={t('pregnancy.loading')} />
+
+  const STATUS_LABELS = {
+    ORDERED: t('pregnancy.labs.statusOrdered'),
+    COLLECTED: t('pregnancy.labs.statusCollected'),
+    IN_PROGRESS: t('pregnancy.labs.statusInProgress'),
+    COMPLETED: t('pregnancy.labs.statusCompleted'),
+    CANCELLED: t('pregnancy.labs.statusCancelled'),
+  }
+
+  return (
+    <div>
+      <div className="modal-actions" style={{ marginBottom: 12 }}>
+        <button type="button" className="primary-button" onClick={() => setShowOrder(!showOrder)}>{t('pregnancy.labs.order')}</button>
+      </div>
+
+      {showOrder && (
+        <form className="patient-form" onSubmit={submitOrder} style={{ marginBottom: 16 }}>
+          <div className="form-row">
+            <Field label={t('pregnancy.labs.testName')} required>
+              <input value={orderForm.test_name} onChange={(e) => setOrderForm({ ...orderForm, test_name: e.target.value })} placeholder={t('pregnancy.labs.testNamePlaceholder')} required />
+            </Field>
+            <Field label={t('pregnancy.labs.category')}>
+              <input value={orderForm.category} onChange={(e) => setOrderForm({ ...orderForm, category: e.target.value })} placeholder={t('pregnancy.labs.category')} />
+            </Field>
+          </div>
+          <div className="form-row">
+            <Field label={t('pregnancy.labs.priority')}>
+              <select value={orderForm.priority} onChange={(e) => setOrderForm({ ...orderForm, priority: e.target.value })}>
+                <option value="ROUTINE">{t('pregnancy.labs.priorityRoutine')}</option>
+                <option value="URGENT">{t('pregnancy.labs.priorityUrgent')}</option>
+                <option value="STAT">{t('pregnancy.labs.priorityStat')}</option>
+              </select>
+            </Field>
+            <Field label={t('pregnancy.addVisit.notes')}><input value={orderForm.notes} onChange={(e) => setOrderForm({ ...orderForm, notes: e.target.value })} /></Field>
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={() => { setShowOrder(false); setOrderForm({ test_name: '', category: '', priority: 'ROUTINE', notes: '' }) }}>{t('pregnancy.close.cancel')}</button>
+            <button className="primary-button" disabled={saving}>{saving ? t('pregnancy.addVisit.saving') : t('pregnancy.labs.order')}</button>
+          </div>
+        </form>
+      )}
+
+      {labOrders.length === 0 ? <Empty text={t('pregnancy.labs.empty')} /> : (
+        <div className="lab-orders">
+          {labOrders.map((order) => (
+            <div className="lab-order-card" key={order.pregnancy_lab_id}>
+              <div className="lab-order-head">
+                <strong>{order.test_name}</strong>
+                <span className="chip small">{STATUS_LABELS[order.status] || order.status}</span>
+                <span className="chip small">{order.category || '-'}</span>
+                <span className="chip small">{order.priority}</span>
+                <div className="spacer" />
+                <button type="button" className="text-button" onClick={() => openResultsEdit(order)}>{t('pregnancy.labs.editResults')}</button>
+                <button type="button" className="text-button" onClick={() => openStatusEdit(order)}>{t('pregnancy.labs.status') || 'Status'}</button>
+                <button type="button" className="text-button danger" onClick={() => deleteOrder(order)}>{t('pregnancy.labs.delete')}</button>
+              </div>
+              <div className="timeline-vitals">
+                <span>{t('pregnancy.addVisit.notes')}: {order.notes || '-'}</span>
+                {` • ${t('pregnancy.labs.orderedBy')}: ${order.ordered_by_name || '-'}`}
+                <span>{` • ${t('pregnancy.labs.date')}: ${fmtDateTime(order.created_at)}`}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {editTarget && editMode === 'status' && (
+        <form className="patient-form" onSubmit={saveStatus} style={{ marginTop: 16 }}>
+          <div className="form-row">
+            <Field label={t('pregnancy.labs.status')}>
+              <select value={statusForm.status} onChange={(e) => setStatusForm({ ...statusForm, status: e.target.value })}>
+                {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </Field>
+            <Field label={t('pregnancy.addVisit.notes')}><input value={statusForm.notes} onChange={(e) => setStatusForm({ ...statusForm, notes: e.target.value })} /></Field>
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={closeEdit}>{t('pregnancy.close.cancel')}</button>
+            <button className="primary-button" disabled={saving}>{saving ? t('pregnancy.addVisit.saving') : t('pregnancy.labs.saveResults')}</button>
+          </div>
+        </form>
+      )}
+
+      {editTarget && editMode === 'results' && (
+        <form className="patient-form" onSubmit={saveResults} style={{ marginTop: 16 }}>
+          <div className="form-row">
+            <Field label={t('pregnancy.labs.testName')}><strong>{editTarget.test_name}</strong></Field>
+            <Field label={t('pregnancy.labs.priority')}><strong>{editTarget.priority}</strong></Field>
+          </div>
+          {resultsForm.map((r, i) => (
+            <div key={i} className="form-row" style={{ borderBottom: '1px solid #eee', paddingBottom: 8, marginBottom: 8 }}>
+              <Field label={t('pregnancy.labs.analyte')}>
+                <input value={r.analyte} onChange={(e) => updateAnalyte(i, 'analyte', e.target.value)} required />
+              </Field>
+              <Field label={t('pregnancy.labs.result')}>
+                <input value={r.result_value} onChange={(e) => updateAnalyte(i, 'result_value', e.target.value)} />
+              </Field>
+              <Field label={t('pregnancy.labs.unit')}>
+                <input value={r.unit} onChange={(e) => updateAnalyte(i, 'unit', e.target.value)} />
+              </Field>
+              <Field label={t('pregnancy.labs.referenceRange')}>
+                <input value={r.reference_range} onChange={(e) => updateAnalyte(i, 'reference_range', e.target.value)} />
+              </Field>
+              <Field label={t('pregnancy.labs.state')}>
+                <select value={r.is_abnormal} onChange={(e) => updateAnalyte(i, 'is_abnormal', e.target.value === 'true')}>
+                  <option value={false}>{t('pregnancy.labs.normal')}</option>
+                  <option value={true}>{t('pregnancy.labs.abnormal')}</option>
+                </select>
+              </Field>
+              <button type="button" className="text-button danger" onClick={() => removeAnalyte(i)}>{t('pregnancy.labs.delete')}</button>
+            </div>
+          ))}
+          <div className="form-row">
+            <button type="button" className="secondary-button" onClick={addAnalyte}>{t('pregnancy.labs.addAnalyte')}</button>
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={closeEdit}>{t('pregnancy.close.cancel')}</button>
+            <button className="primary-button" disabled={saving}>{saving ? t('pregnancy.addVisit.saving') : t('pregnancy.labs.saveResults')}</button>
+          </div>
+        </form>
+      )}
     </div>
   )
 }

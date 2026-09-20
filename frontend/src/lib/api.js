@@ -215,6 +215,11 @@ export const api = {
     addUltrasound: (id, body) => request(`/api/clinical/pregnancies/${id}/ultrasounds`, { method: 'POST', body }),
     updateUltrasound: (id, usId, body) => request(`/api/clinical/pregnancies/${id}/ultrasounds/${usId}`, { method: 'PATCH', body }),
     deleteUltrasound: (id, usId) => request(`/api/clinical/pregnancies/${id}/ultrasounds/${usId}`, { method: 'DELETE' }),
+    pregnancyLabOrders: (id) => request(`/api/clinical/pregnancies/${id}/lab-orders`),
+    addPregnancyLabOrder: (id, body) => request(`/api/clinical/pregnancies/${id}/lab-orders`, { method: 'POST', body }),
+    updatePregnancyLabOrder: (id, labId, body) => request(`/api/clinical/pregnancies/${id}/lab-orders/${labId}`, { method: 'PATCH', body }),
+    deletePregnancyLabOrder: (id, labId) => request(`/api/clinical/pregnancies/${id}/lab-orders/${labId}`, { method: 'DELETE' }),
+    savePregnancyLabResults: (id, labId, body) => request(`/api/clinical/pregnancies/${id}/lab-orders/${labId}/results`, { method: 'PUT', body }),
   },
   users: {
         doctors: (params) => request('/api/users/doctors', { params }),

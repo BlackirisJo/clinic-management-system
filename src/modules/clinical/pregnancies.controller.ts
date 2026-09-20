@@ -489,3 +489,114 @@ export const deleteUltrasound = async (req: AuthenticatedRequest, res: Response)
     return res.status(500).json({ message: 'حدث خطأ عند حذف فحص السونار' });
   }
 };
+
+// ===== 11) قائمة طلبات المختبر لسجل الحمل =====
+export const listPregnancyLabOrders = async (req: AuthenticatedRequest, res: Response) => {
+  const pregnancy = await requirePregnancyAccess(req, res, req.params.pregnancyId);
+  if (!pregnancy) return;
+  try {
+    const result = await pool.query(
+      `SELECT plo.*, u.full_name AS ordered_by_name
+       FROM pregnancy_lab_orders plo
+       LEFT JOIN users u ON u.user_id = plo.ordered_by
+       WHERE plo.pregnancy_id = $1
+       ORDER BY plo.created_at DESC`,
+      [pregnancy.pregnancy_id]
+    );
+    return res.status(200).json({ lab_orders: result.rows });
+  } catch (error) {
+    console.error('List Pregnancy Lab Orders Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ عند استرجاع طلبات المختبر' });
+  }
+};
+
+// ===== 12) إنشاء طلب مختبر لسجل الحمل =====
+export const createPregnancyLabOrder = async (req: AuthenticatedRequest, res: Response) => {
+  const pregnancy = await requirePregnancyWrite(req, res, req.params.pregnancyId);
+  if (!pregnancy) return;
+  const { test_name, category, priority, notes, pregnancy_visit_id } = req.body;
+  try {
+    if (pregnancy_visit_id) {
+      const pv = await pool.query('SELECT pv_id FROM pregnancy_visits WHERE pv_id = $1 AND pregnancy_id = $2', [pregnancy_visit_id, pregnancy.pregnancy_id]);
+      if (!pv.rowCount) return res.status(400).json({ message: 'زيارة الحمل المرتبطة غير موجودة' });
+    }
+    const result = await pool.query(
+      `INSERT INTO pregnancy_lab_orders (pregnancy_id, pregnancy_visit_id, test_name, category, priority, notes, ordered_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [pregnancy.pregnancy_id, pregnancy_visit_id ?? null, test_name, category ?? null, priority ?? 'ROUTINE', notes ?? null, req.user?.userId]
+    );
+    await audit(req.user?.userId, pregnancy.clinic_id, 'PREGNANCY_LAB_CREATED', 'PREGNANCY', pregnancy.pregnancy_id, { pregnancy_lab_id: result.rows[0].pregnancy_lab_id });
+    return res.status(201).json({ message: 'تمت إضافة طلب الفحص المخبري', lab_order: result.rows[0] });
+  } catch (error) {
+    console.error('Create Pregnancy Lab Order Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ عند إنشاء طلب الفحص' });
+  }
+};
+
+// ===== 13) تحديث طلب مختبر لسجل الحمل =====
+export const updatePregnancyLabOrder = async (req: AuthenticatedRequest, res: Response) => {
+  const pregnancy = await requirePregnancyWrite(req, res, req.params.pregnancyId);
+  if (!pregnancy) return;
+  const { status, notes } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE pregnancy_lab_orders SET status = $1, notes = COALESCE($2, notes), updated_at = NOW()
+       WHERE pregnancy_lab_id = $3 AND pregnancy_id = $4 RETURNING *`,
+      [status, notes ?? null, req.params.labId, pregnancy.pregnancy_id]
+    );
+    if (!result.rowCount) return res.status(404).json({ message: 'طلب الفحص غير موجود' });
+    return res.status(200).json({ message: 'تم تحديث طلب الفحص', lab_order: result.rows[0] });
+  } catch (error) {
+    console.error('Update Pregnancy Lab Order Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ عند تحديث طلب الفحص' });
+  }
+};
+
+// ===== 14) حذف طلب مختبر لسجل الحمل =====
+export const deletePregnancyLabOrder = async (req: AuthenticatedRequest, res: Response) => {
+  const pregnancy = await requirePregnancyWrite(req, res, req.params.pregnancyId);
+  if (!pregnancy) return;
+  try {
+    const result = await pool.query(
+      'DELETE FROM pregnancy_lab_orders WHERE pregnancy_lab_id = $1 AND pregnancy_id = $2 RETURNING pregnancy_lab_id',
+      [req.params.labId, pregnancy.pregnancy_id]
+    );
+    if (!result.rowCount) return res.status(404).json({ message: 'طلب الفحص غير موجود' });
+    return res.status(200).json({ message: 'تم حذف طلب الفحص' });
+  } catch (error) {
+    console.error('Delete Pregnancy Lab Order Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ عند حذف طلب الفحص' });
+  }
+};
+
+// ===== 15) حفظ نتائج طلب مختبر لسجل الحمل =====
+export const savePregnancyLabResults = async (req: AuthenticatedRequest, res: Response) => {
+  const pregnancy = await requirePregnancyWrite(req, res, req.params.pregnancyId);
+  if (!pregnancy) return;
+  const { results } = req.body;
+  const client = await pool.connect();
+  try {
+    const order = await client.query(
+      'SELECT pregnancy_lab_id FROM pregnancy_lab_orders WHERE pregnancy_lab_id = $1 AND pregnancy_id = $2',
+      [req.params.labId, pregnancy.pregnancy_id]
+    );
+    if (!order.rowCount) { client.release(); return res.status(404).json({ message: 'طلب الفحص غير موجود' }); }
+    await client.query('BEGIN');
+    await client.query('DELETE FROM pregnancy_lab_results WHERE pregnancy_lab_id = $1', [req.params.labId]);
+    for (const r of results) {
+      await client.query(
+        `INSERT INTO pregnancy_lab_results (pregnancy_lab_id, analyte, result_value, unit, reference_range, is_abnormal, notes, resulted_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [req.params.labId, r.analyte, r.result_value, r.unit, r.reference_range, r.is_abnormal ?? false, r.notes ?? null, req.user?.userId]
+      );
+    }
+    await client.query('COMMIT');
+    client.release();
+    return res.status(200).json({ message: 'تم حفظ النتائج' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    client.release();
+    console.error('Save Pregnancy Lab Results Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ عند حفظ النتائج' });
+  }
+};

@@ -13,6 +13,7 @@ import {
   listPregnancies, getPregnancyDetails, createPregnancy, updatePregnancy,
   createPregnancyVisit, updatePregnancyVisit, deletePregnancyVisit,
   createUltrasound, updateUltrasound, deleteUltrasound,
+  listPregnancyLabOrders, createPregnancyLabOrder, updatePregnancyLabOrder, deletePregnancyLabOrder, savePregnancyLabResults,
 } from './pregnancies.controller';
 import { listSpecialties } from './specialties.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
@@ -23,6 +24,7 @@ import {
   imagingSchema, referralSchema,
   pregnancySchema, pregnancyCreateSchema, pregnancyUpdateSchema, pregnancyVisitSchema, pregnancyVisitUpdateSchema,
   ultrasoundSchema, ultrasoundUpdateSchema,
+  pregnancyLabOrderSchema, pregnancyLabOrderUpdateSchema, pregnancyLabResultSchema,
 } from './clinical.validation';
 
 const router = Router();
@@ -77,5 +79,10 @@ router.delete('/pregnancies/:pregnancyId/visits/:pvId', requirePermission('MANAG
 router.post('/pregnancies/:pregnancyId/ultrasounds', requirePermission('MANAGE_PREGNANCY'), validateBody(ultrasoundSchema), createUltrasound);
 router.patch('/pregnancies/:pregnancyId/ultrasounds/:usId', requirePermission('MANAGE_PREGNANCY'), validateBody(ultrasoundUpdateSchema), updateUltrasound);
 router.delete('/pregnancies/:pregnancyId/ultrasounds/:usId', requirePermission('MANAGE_PREGNANCY'), deleteUltrasound);
+router.get('/pregnancies/:pregnancyId/lab-orders', requirePermission('MANAGE_PREGNANCY'), listPregnancyLabOrders);
+router.post('/pregnancies/:pregnancyId/lab-orders', requirePermission('MANAGE_PREGNANCY'), validateBody(pregnancyLabOrderSchema), createPregnancyLabOrder);
+router.patch('/pregnancies/:pregnancyId/lab-orders/:labId', requirePermission('MANAGE_PREGNANCY'), validateBody(pregnancyLabOrderUpdateSchema), updatePregnancyLabOrder);
+router.delete('/pregnancies/:pregnancyId/lab-orders/:labId', requirePermission('MANAGE_PREGNANCY'), deletePregnancyLabOrder);
+router.put('/pregnancies/:pregnancyId/lab-orders/:labId/results', requirePermission('MANAGE_PREGNANCY'), validateBody(pregnancyLabResultSchema), savePregnancyLabResults);
 
 export default router;
