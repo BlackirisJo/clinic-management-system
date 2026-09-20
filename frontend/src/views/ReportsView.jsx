@@ -182,7 +182,7 @@ function FinancialTab({ data }) {
         {paymentMethods.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>{t('reports.financial.method')}</th><th>{t('reports.financial.count')}</th><th>{t('reports.financial.amount')}</th></tr></thead>
+              <thead><tr><th style={{ textAlign: 'start' }}>{t('reports.financial.method')}</th><th style={{ textAlign: 'start' }}>{t('reports.financial.count')}</th><th style={{ textAlign: 'start' }}>{t('reports.financial.amount')}</th></tr></thead>
               <tbody>
                 {paymentMethods.map((p, i) => (
                   <tr key={i}><td>{t(`paymentType.${p.payment_type}`) || p.payment_type}</td><td>{fmtNumber(p.invoices)}</td><td>{fmtMoney(p.paid)}</td></tr>
@@ -197,7 +197,7 @@ function FinancialTab({ data }) {
         {services.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>{t('reports.financial.service')}</th><th>{t('reports.financial.times')}</th><th>{t('reports.financial.revenue')}</th><th>{t('reports.financial.doctorShare')}</th></tr></thead>
+              <thead><tr><th style={{ textAlign: 'start' }}>{t('reports.financial.service')}</th><th style={{ textAlign: 'start' }}>{t('reports.financial.times')}</th><th style={{ textAlign: 'start' }}>{t('reports.financial.revenue')}</th><th style={{ textAlign: 'start' }}>{t('reports.financial.doctorShare')}</th></tr></thead>
               <tbody>
                 {services.map((sv, i) => (
                   <tr key={i}>
@@ -238,7 +238,7 @@ function ClinicalTab({ data }) {
         {doctors.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>{t('reports.clinical.doctor')}</th><th>{t('reports.clinical.visits')}</th><th>{t('reports.clinical.patients')}</th></tr></thead>
+              <thead><tr><th style={{ textAlign: 'start' }}>{t('reports.clinical.doctor')}</th><th style={{ textAlign: 'start' }}>{t('reports.clinical.visits')}</th><th style={{ textAlign: 'start' }}>{t('reports.clinical.patients')}</th></tr></thead>
               <tbody>
                 {doctors.map((d, i) => (
                   <tr key={i}>
@@ -257,7 +257,7 @@ function ClinicalTab({ data }) {
         {medications.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>{t('reports.clinical.medication')}</th><th>{t('reports.clinical.prescriptionCount')}</th></tr></thead>
+              <thead><tr><th style={{ textAlign: 'start' }}>{t('reports.clinical.medication')}</th><th style={{ textAlign: 'start' }}>{t('reports.clinical.prescriptionCount')}</th></tr></thead>
               <tbody>
                 {medications.map((m, i) => (
                   <tr key={i}><td>{m.trade_name} ({m.scientific_name})</td><td>{fmtNumber(m.prescribed_count)}</td></tr>
@@ -293,7 +293,7 @@ function AppointmentsTab({ statuses, rows }) {
         {rows.length === 0 ? <Empty text={t('reports.appointments.noInPeriod')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>{t('reports.appointments.date')}</th><th>{t('reports.appointments.time')}</th><th>{t('reports.appointments.patient')}</th><th>{t('reports.appointments.clinic')}</th><th>{t('reports.appointments.doctor')}</th><th>{t('reports.appointments.status')}</th></tr></thead>
+              <thead><tr><th style={{ textAlign: 'start' }}>{t('reports.appointments.date')}</th><th style={{ textAlign: 'start' }}>{t('reports.appointments.time')}</th><th style={{ textAlign: 'start' }}>{t('reports.appointments.patient')}</th><th style={{ textAlign: 'start' }}>{t('reports.appointments.clinic')}</th><th style={{ textAlign: 'start' }}>{t('reports.appointments.doctor')}</th><th style={{ textAlign: 'start' }}>{t('reports.appointments.status')}</th></tr></thead>
               <tbody>
                 {rows.map((a) => {
                   const appointmentStatus = APPOINTMENT_STATUS[a.status] || { label: a.status, cls: '' }
@@ -333,7 +333,7 @@ function PatientsTab({ rows }) {
             <col style={{ width: '12%' }} />
             <col style={{ width: '29%' }} />
           </colgroup>
-          <thead><tr><th>{t('reports.csv.patientName')}</th><th>{t('reports.csv.patientPhone')}</th><th>{t('reports.csv.patientGender')}</th><th>{t('reports.csv.patientVisits')}</th><th>{t('reports.csv.patientLastVisit')}</th></tr></thead>
+          <thead><tr><th style={{ textAlign: 'start' }}>{t('reports.csv.patientName')}</th><th style={{ textAlign: 'start' }}>{t('reports.csv.patientPhone')}</th><th style={{ textAlign: 'start' }}>{t('reports.csv.patientGender')}</th><th style={{ textAlign: 'start' }}>{t('reports.csv.patientVisits')}</th><th style={{ textAlign: 'start' }}>{t('reports.csv.patientLastVisit')}</th></tr></thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.patient_id}>
