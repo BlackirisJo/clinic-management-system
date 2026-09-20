@@ -516,7 +516,7 @@ function ServicesList() {
                 <td>{s.service_name}</td>
                 <td>{s.clinic_name || t('billing.services.unknownClinic', { id: s.clinic_id })}</td>
                 <td>{fmtMoney(s.price)}</td>
-                <td>{s.doctor_percentage}%</td>
+                <td>{fmtNumber(s.doctor_percentage)}%</td>
                 <td>{s.is_active === false ? t('billing.services.status.inactive') : t('billing.services.status.active')}</td>
                 <td>
                   <div className="row-actions">
@@ -585,7 +585,7 @@ function ServiceModal({ mode, service, onClose, onSaved }) {
           <p><strong>{t('billing.services.detail.name')}:</strong> {service.service_name}</p>
           <p><strong>{t('billing.services.detail.clinic')}:</strong> {service.clinic_name || t('billing.services.unknownClinic', { id: service.clinic_id })}</p>
           <p><strong>{t('billing.services.detail.price')}:</strong> {fmtMoney(service.price)}</p>
-          <p><strong>{t('billing.services.detail.doctorPct')}:</strong> {service.doctor_percentage}%</p>
+          <p><strong>{t('billing.services.detail.doctorPct')}:</strong> {fmtNumber(service.doctor_percentage)}%</p>
           <p><strong>{t('billing.services.detail.doctorShare')}:</strong> {fmtMoney(service.doctor_share)}</p>
           <p><strong>{t('billing.services.detail.centerShare')}:</strong> {fmtMoney(service.center_share)}</p>
           <p><strong>{t('billing.services.detail.status')}:</strong> {service.is_active === false ? t('billing.services.status.inactive') : t('billing.services.status.active')}</p>

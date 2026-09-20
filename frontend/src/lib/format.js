@@ -1,16 +1,25 @@
 // أدوات تنسيق عامة
 
 import { getBaseCurrency } from '../i18n/currency';
+import { getLocale } from '../i18n/locale';
+
+// وسوم Intl لكل لغة (العربية تحتفظ بسلوكها الحالي حرفياً)
+const TAGS = {
+  ar: { number: 'ar-EG', date: 'ar-EG', dateTime: 'ar-EG-u-nu-latn' },
+  en: { number: 'en-US', date: 'en-GB', dateTime: 'en-GB' },
+}
+
+const tagsFor = (locale) => TAGS[locale] || TAGS.ar
 
 export const fmtMoney = (value, currencyCode) => {
   const n = Number(value) || 0;
   const code = (currencyCode || getBaseCurrency());
-  return new Intl.NumberFormat('ar-EG', { style: 'currency', currency: code, maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat(tagsFor(getLocale()).number, { style: 'currency', currency: code, maximumFractionDigits: 2 }).format(n);
 }
 
 export const fmtNumber = (value) => {
   const n = Number(value) || 0
-  return new Intl.NumberFormat('ar-EG').format(n)
+  return new Intl.NumberFormat(tagsFor(getLocale()).number).format(n)
 }
 
 export const fmtDate = (value, compact = false) => {
@@ -18,7 +27,7 @@ export const fmtDate = (value, compact = false) => {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return String(value)
   try {
-    return d.toLocaleDateString('ar-EG', compact ? { day: 'numeric', month: 'short', year: 'numeric' } : undefined)
+    return d.toLocaleDateString(tagsFor(getLocale()).date, compact ? { day: 'numeric', month: 'short', year: 'numeric' } : undefined)
   } catch {
     return String(value)
   }
@@ -29,7 +38,7 @@ export const fmtDateTime = (value) => {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return String(value)
   try {
-    return d.toLocaleString('ar-EG-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short' })
+    return d.toLocaleString(tagsFor(getLocale()).dateTime, { dateStyle: 'medium', timeStyle: 'short' })
   } catch {
     return String(value)
   }
@@ -43,7 +52,7 @@ export const fmtTime = (value) => {
 // تاريخ اليوم بالعربية لعرضه في الشريط العلوي
 export const todayLabel = () => {
   try {
-    return new Intl.DateTimeFormat('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
+    return new Intl.DateTimeFormat(tagsFor(getLocale()).date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
   } catch {
     return new Date().toLocaleDateString()
   }
