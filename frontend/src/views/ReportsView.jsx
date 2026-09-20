@@ -1,16 +1,16 @@
 ﻿import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import { fmtMoney, fmtNumber, fmtDateTime, fmtDate, fmtTime, PAYMENT_TYPES, APPOINTMENT_STATUS } from '../lib/format'
+import { fmtMoney, fmtNumber, fmtDateTime, fmtDate, fmtTime, APPOINTMENT_STATUS } from '../lib/format'
 import { useT } from '../i18n'
 import { Loading, Empty, Notice, downloadCSV } from '../components/ui'
 import { useAuth } from '../auth/AuthContext'
 
 const REPORT_TABS = [
-  { id: 'overview', label: 'الشامل' },
-  { id: 'financial', label: 'المالي' },
-  { id: 'clinical', label: 'الطبي' },
-  { id: 'appointments', label: 'المواعيد' },
-  { id: 'patients', label: 'المرضى' },
+  { id: 'overview' },
+  { id: 'financial' },
+  { id: 'clinical' },
+  { id: 'appointments' },
+  { id: 'patients' },
 ]
 
 export default function ReportsView() {
@@ -49,43 +49,43 @@ export default function ReportsView() {
       else if (tab === 'appointments') setData(await api.reports.appointments(params))
       else if (tab === 'patients') setData(await api.reports.patients(params))
     } catch (err) {
-      setError(err.message || 'تعذر إنشاء التقرير')
+      setError(err.message || t('reports.error'))
     } finally {
       setLoading(false)
     }
-  }, [tab, filters])
+  }, [tab, filters, t])
 
   useEffect(() => { load() }, [load])
 
   return (
     <section className="reports-view">
       <div className="report-hero">
-        <div><span className="badge">تقرير مباشر</span><h2>صورة واضحة لأداء العيادة</h2><p>فلترة حسب الفترة الزمنية والعيادة.</p></div>
+        <div><span className="badge">{t('reports.badge')}</span><h2>{t('reports.hero.title')}</h2><p>{t('reports.hero.subtitle')}</p></div>
         <div className="top-actions">
-          <button className="secondary-button" onClick={load}>تحديث</button>
-          <button className="primary-button compact" onClick={() => exportCSV(tab, data)}>تنزيل CSV ↓</button>
+          <button className="secondary-button" onClick={load}>{t('reports.refresh')}</button>
+          <button className="primary-button compact" onClick={() => exportCSV(tab, data, t)}>{t('reports.exportCSV')}</button>
         </div>
       </div>
 
       <div className="toolbar report-toolbar">
         <input type="date" className="input" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
-        <span className="muted-small">إلى</span>
+        <span className="muted-small">{t('reports.to')}</span>
         <input type="date" className="input" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
         <select className="input" value={filters.clinic_id} onChange={(e) => setFilters({ ...filters, clinic_id: e.target.value })}>
-          <option value="">جميع العيادات</option>
+          <option value="">{t('reports.allClinics')}</option>
           {clinics.map((c) => <option key={c.clinic_id} value={c.clinic_id}>{c.clinic_name}</option>)}
         </select>
       </div>
       {clinicsError && <Notice kind="error">{clinicsError}</Notice>}
 
       <div className="tabs">
-        {REPORT_TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? 'tab active' : 'tab'} onClick={() => setTab(t.id)}>{t.label}</button>
+        {REPORT_TABS.map((rt) => (
+          <button key={rt.id} className={tab === rt.id ? 'tab active' : 'tab'} onClick={() => setTab(rt.id)}>{t(`reports.tab.${rt.id}`)}</button>
         ))}
       </div>
 
       <Notice kind="error">{error}</Notice>
-      {loading ? <Loading text="جارِ إنشاء التقرير..." /> : !data ? <Empty text="لا توجد بيانات للتقرير" /> : (
+      {loading ? <Loading text={t('reports.loading')} /> : !data ? <Empty text={t('reports.empty')} /> : (
         <div className="tab-content report-content">
           {tab === 'overview' && <OverviewTab data={data.overview || {}} />}
           {tab === 'financial' && <FinancialTab data={data} />}
@@ -98,52 +98,53 @@ export default function ReportsView() {
   )
 }
 
-function exportCSV(tab, data) {
+function exportCSV(tab, data, t) {
   if (!data) return
   const filename = `report_${tab}_${Date.now()}.csv`
   if (tab === 'overview') {
     const o = data.overview || {}
-    downloadCSV(filename, ['المؤشر', 'القيمة'], [
-      ['المرضى', o.patients?.total ?? 0],
-      ['الزيارات', o.visits?.total ?? 0],
-      ['المواعيد الكلية', o.appointments?.total ?? 0],
-      ['المواعيد المكتملة', o.appointments?.completed ?? 0],
-      ['الروشتات', o.prescriptions?.total ?? 0],
-      ['الإيراد', o.financial?.revenue ?? 0],
-      ['حصص الأطباء', o.financial?.doctor_payout ?? 0],
-      ['الخصومات', o.financial?.discounts ?? 0],
+    downloadCSV(filename, [t('reports.csv.index'), t('reports.csv.value')], [
+      [t('reports.overview.patients'), o.patients?.total ?? 0],
+      [t('reports.overview.visits'), o.visits?.total ?? 0],
+      [t('reports.overview.appointments'), o.appointments?.total ?? 0],
+      [t('reports.overview.completed'), o.appointments?.completed ?? 0],
+      [t('reports.overview.prescriptions'), o.prescriptions?.total ?? 0],
+      [t('reports.overview.revenue'), o.financial?.revenue ?? 0],
+      [t('reports.overview.doctorPayout'), o.financial?.doctor_payout ?? 0],
+      [t('reports.overview.discounts'), o.financial?.discounts ?? 0],
     ])
   } else if (tab === 'financial') {
     const summary = data.summary || {}
-    const rows = [['الفواتير', summary.invoices ?? 0], ['الإجمالي', summary.gross ?? 0], ['الخصومات', summary.discounts ?? 0], ['الصافي', summary.net ?? 0], ['المحصّل', summary.paid ?? 0], ['المستحق', summary.outstanding ?? 0], ['المصاريف', data.expenses?.total ?? 0], ['حصص الأطباء', summary.doctor_payout ?? 0], ['الصافي بعد المصاريف', summary.net_after_expenses ?? 0]]
-    downloadCSV(filename, ['المؤشر', 'القيمة'], rows)
+    const rows = [[t('reports.financial.invoices'), summary.invoices ?? 0], [t('reports.financial.gross'), summary.gross ?? 0], [t('reports.financial.discounts'), summary.discounts ?? 0], [t('reports.financial.net'), summary.net ?? 0], [t('reports.financial.paid'), summary.paid ?? 0], [t('reports.financial.outstanding'), summary.outstanding ?? 0], [t('reports.financial.expenses'), data.expenses?.total ?? 0], [t('reports.financial.doctorPayout'), summary.doctor_payout ?? 0], [t('reports.financial.netAfterExpenses'), summary.net_after_expenses ?? 0]]
+    downloadCSV(filename, [t('reports.csv.index'), t('reports.csv.value')], rows)
   } else if (tab === 'appointments') {
-    downloadCSV(filename, ['الحالة', 'العدد'], data.statuses.map((s) => [s.status, s.total]))
+    downloadCSV(filename, [t('reports.csv.appointmentStatus'), t('reports.csv.appointmentCount')], data.statuses.map((s) => [s.status, s.total]))
   } else if (tab === 'patients') {
-    downloadCSV(filename, ['الاسم', 'الهاتف', 'النوع', 'الزيارات', 'آخر زيارة'], data.patients.map((p) => [p.full_name, p.phone, p.gender, p.visits, p.last_visit]))
+    downloadCSV(filename, [t('reports.csv.patientName'), t('reports.csv.patientPhone'), t('reports.csv.patientGender'), t('reports.csv.patientVisits'), t('reports.csv.patientLastVisit')], data.patients.map((p) => [p.full_name, p.phone, p.gender, p.visits, p.last_visit]))
   } else if (tab === 'clinical') {
-    const rows = [['الزيارات', data.summary?.visits ?? 0], ['مرضى فريدون', data.summary?.unique_patients ?? 0], ['الأطباء', data.summary?.doctors ?? 0]]
-    downloadCSV(filename, ['المؤشر', 'القيمة'], rows)
+    const rows = [[t('reports.clinical.visits'), data.summary?.visits ?? 0], [t('reports.clinical.uniquePatients'), data.summary?.unique_patients ?? 0], [t('reports.clinical.doctors'), data.summary?.doctors ?? 0]]
+    downloadCSV(filename, [t('reports.csv.index'), t('reports.csv.value')], rows)
   }
 }
 
 function OverviewTab({ data }) {
+  const t = useT()
   return (
     <div className="report-grid">
       {[
-        { label: 'إجمالي المرضى', value: data.patients?.total ?? 0 },
-        { label: 'الزيارات الطبية', value: data.visits?.total ?? 0 },
-        { label: 'المواعيد', value: data.appointments?.total ?? 0 },
-        { label: 'مواعيد مكتملة', value: data.appointments?.completed ?? 0 },
-        { label: 'مواعيد ملغاة', value: data.appointments?.cancelled ?? 0 },
-        { label: 'الروشتات', value: data.prescriptions?.total ?? 0 },
-        { label: 'الإيرادات', value: fmtMoney(data.financial?.revenue ?? 0) },
-        { label: 'المدفوع', value: fmtMoney(data.financial?.paid ?? 0) },
-        { label: 'المستحق', value: fmtMoney(data.financial?.outstanding ?? 0) },
-        { label: 'المصاريف', value: fmtMoney(data.financial?.expenses ?? 0) },
-        { label: 'حصص الأطباء', value: fmtMoney(data.financial?.doctor_payout ?? 0) },
-        { label: 'الخصومات', value: fmtMoney(data.financial?.discounts ?? 0) },
-        { label: 'الصافي بعد المصاريف', value: fmtMoney(data.financial?.net_after_expenses ?? 0) },
+        { label: t('reports.overview.patients'), value: data.patients?.total ?? 0 },
+        { label: t('reports.overview.visits'), value: data.visits?.total ?? 0 },
+        { label: t('reports.overview.appointments'), value: data.appointments?.total ?? 0 },
+        { label: t('reports.overview.completed'), value: data.appointments?.completed ?? 0 },
+        { label: t('reports.overview.cancelled'), value: data.appointments?.cancelled ?? 0 },
+        { label: t('reports.overview.prescriptions'), value: data.prescriptions?.total ?? 0 },
+        { label: t('reports.overview.revenue'), value: fmtMoney(data.financial?.revenue ?? 0) },
+        { label: t('reports.overview.paid'), value: fmtMoney(data.financial?.paid ?? 0) },
+        { label: t('reports.overview.outstanding'), value: fmtMoney(data.financial?.outstanding ?? 0) },
+        { label: t('reports.overview.expenses'), value: fmtMoney(data.financial?.expenses ?? 0) },
+        { label: t('reports.overview.doctorPayout'), value: fmtMoney(data.financial?.doctor_payout ?? 0) },
+        { label: t('reports.overview.discounts'), value: fmtMoney(data.financial?.discounts ?? 0) },
+        { label: t('reports.overview.netAfterExpenses'), value: fmtMoney(data.financial?.net_after_expenses ?? 0) },
       ].map((item) => (
         <div className="report-cell" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>
       ))}
@@ -151,20 +152,21 @@ function OverviewTab({ data }) {
   )
 }
 function FinancialTab({ data }) {
+  const t = useT()
   const s = data.summary || {}
   const paymentMethods = data.payment_methods || []
   const expenses = data.expenses || {}
   const services = data.services || []
   const cells = [
-    { label: 'عدد الفواتير', value: fmtNumber(s.invoices) },
-    { label: 'الإجمالي', value: fmtMoney(s.gross) },
-    { label: 'الخصومات', value: fmtMoney(s.discounts) },
-    { label: 'الصافي', value: fmtMoney(s.net) },
-    { label: 'المحصّل', value: fmtMoney(s.paid) },
-    { label: 'المستحق', value: fmtMoney(s.outstanding) },
-    { label: 'المصاريف', value: fmtMoney(expenses.total) },
-    { label: 'حصص الأطباء', value: fmtMoney(s.doctor_payout) },
-    { label: 'الصافي بعد المصاريف', value: fmtMoney(s.net_after_expenses) },
+    { label: t('reports.financial.invoices'), value: fmtNumber(s.invoices) },
+    { label: t('reports.financial.gross'), value: fmtMoney(s.gross) },
+    { label: t('reports.financial.discounts'), value: fmtMoney(s.discounts) },
+    { label: t('reports.financial.net'), value: fmtMoney(s.net) },
+    { label: t('reports.financial.paid'), value: fmtMoney(s.paid) },
+    { label: t('reports.financial.outstanding'), value: fmtMoney(s.outstanding) },
+    { label: t('reports.financial.expenses'), value: fmtMoney(expenses.total) },
+    { label: t('reports.financial.doctorPayout'), value: fmtMoney(s.doctor_payout) },
+    { label: t('reports.financial.netAfterExpenses'), value: fmtMoney(s.net_after_expenses) },
   ]
   return (
     <div className="tab-stack">
@@ -174,14 +176,14 @@ function FinancialTab({ data }) {
         ))}
       </div>
       <div className="record-block">
-        <h4>طرق الدفع</h4>
-        {paymentMethods.length === 0 ? <Empty text="لا بيانات" /> : (
+        <h4>{t('reports.financial.paymentMethods')}</h4>
+        {paymentMethods.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>الطريقة</th><th>العدد</th><th>المبلغ</th></tr></thead>
+              <thead><tr><th>{t('reports.financial.method')}</th><th>{t('reports.financial.count')}</th><th>{t('reports.financial.amount')}</th></tr></thead>
               <tbody>
                 {paymentMethods.map((p, i) => (
-                  <tr key={i}><td>{PAYMENT_TYPES[p.payment_type]?.label || p.payment_type}</td><td>{fmtNumber(p.invoices)}</td><td>{fmtMoney(p.paid)}</td></tr>
+                  <tr key={i}><td>{t(`paymentType.${p.payment_type}`) || p.payment_type}</td><td>{fmtNumber(p.invoices)}</td><td>{fmtMoney(p.paid)}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -189,18 +191,18 @@ function FinancialTab({ data }) {
         )}
       </div>
       <div className="record-block">
-        <h4>الإيراد حسب الخدمة</h4>
-        {services.length === 0 ? <Empty text="لا بيانات" /> : (
+        <h4>{t('reports.financial.revenueByService')}</h4>
+        {services.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>الخدمة</th><th>المرات</th><th>الإيراد</th><th>حصة الأطباء</th></tr></thead>
+              <thead><tr><th>{t('reports.financial.service')}</th><th>{t('reports.financial.times')}</th><th>{t('reports.financial.revenue')}</th><th>{t('reports.financial.doctorShare')}</th></tr></thead>
               <tbody>
                 {services.map((sv, i) => (
                   <tr key={i}>
                     <td>{sv.service_name}</td>
-                    <td data-label="المرات">{fmtNumber(sv.items)}</td>
-                    <td data-label="الإيراد">{fmtMoney(sv.revenue)}</td>
-                    <td data-label="حصة الأطباء">{fmtMoney(sv.doctor_payout)}</td>
+                    <td data-label={t('reports.financial.times')}>{fmtNumber(sv.items)}</td>
+                    <td data-label={t('reports.financial.revenue')}>{fmtMoney(sv.revenue)}</td>
+                    <td data-label={t('reports.financial.doctorShare')}>{fmtMoney(sv.doctor_payout)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -213,13 +215,14 @@ function FinancialTab({ data }) {
 }
 
 function ClinicalTab({ data }) {
+  const t = useT()
   const s = data.summary || {}
   const doctors = data.doctors || []
   const medications = data.medications || []
   const cells = [
-    { label: 'الزيارات', value: fmtNumber(s.visits) },
-    { label: 'مرضى فريدون', value: fmtNumber(s.unique_patients) },
-    { label: 'الأطباء', value: fmtNumber(s.doctors) },
+    { label: t('reports.clinical.visits'), value: fmtNumber(s.visits) },
+    { label: t('reports.clinical.uniquePatients'), value: fmtNumber(s.unique_patients) },
+    { label: t('reports.clinical.doctors'), value: fmtNumber(s.doctors) },
   ]
   return (
     <div className="tab-stack">
@@ -229,17 +232,17 @@ function ClinicalTab({ data }) {
         ))}
       </div>
       <div className="record-block">
-        <h4>أداء الأطباء</h4>
-        {doctors.length === 0 ? <Empty text="لا بيانات" /> : (
+        <h4>{t('reports.clinical.doctorPerformance')}</h4>
+        {doctors.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>الطبيب</th><th>الزيارات</th><th>المرضى</th></tr></thead>
+              <thead><tr><th>{t('reports.clinical.doctor')}</th><th>{t('reports.clinical.visits')}</th><th>{t('reports.clinical.patients')}</th></tr></thead>
               <tbody>
                 {doctors.map((d, i) => (
                   <tr key={i}>
                     <td>{d.doctor_name}</td>
-                    <td data-label="الزيارات">{fmtNumber(d.visits)}</td>
-                    <td data-label="المرضى">{fmtNumber(d.patients)}</td>
+                    <td data-label={t('reports.clinical.visits')}>{fmtNumber(d.visits)}</td>
+                    <td data-label={t('reports.clinical.patients')}>{fmtNumber(d.patients)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -248,11 +251,11 @@ function ClinicalTab({ data }) {
         )}
       </div>
       <div className="record-block">
-        <h4>الأدوية الأكثر وصفاً</h4>
-        {medications.length === 0 ? <Empty text="لا بيانات" /> : (
+        <h4>{t('reports.clinical.mostPrescribed')}</h4>
+        {medications.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>الدواء</th><th>الوصفات</th></tr></thead>
+              <thead><tr><th>{t('reports.clinical.medication')}</th><th>{t('reports.clinical.prescriptionCount')}</th></tr></thead>
               <tbody>
                 {medications.map((m, i) => (
                   <tr key={i}><td>{m.trade_name} ({m.scientific_name})</td><td>{fmtNumber(m.prescribed_count)}</td></tr>
@@ -266,38 +269,43 @@ function ClinicalTab({ data }) {
   )
 }
 function AppointmentsTab({ statuses, rows }) {
+  const t = useT()
   return (
     <div className="tab-stack">
       <div className="record-block">
-        <h4>ملخص حالات المواعيد</h4>
-        {statuses.length === 0 ? <Empty text="لا بيانات" /> : (
+        <h4>{t('reports.appointments.summary')}</h4>
+        {statuses.length === 0 ? <Empty text={t('reports.tab.empty')} /> : (
           <div className="report-grid">
             {statuses.map((s, i) => {
               const st = APPOINTMENT_STATUS[s.status] || { label: s.status, cls: '' }
+              const label = t(`appointmentStatus.${s.status}`) || st.label
               return (
-                <div className="report-cell" key={i}><span>{st.label}</span><strong>{fmtNumber(s.total)}</strong></div>
+                <div className="report-cell" key={i}><span>{label}</span><strong>{fmtNumber(s.total)}</strong></div>
               )
             })}
           </div>
         )}
       </div>
       <div className="record-block">
-        <h4>سجل المواعيد ({fmtNumber(rows.length)})</h4>
-        {rows.length === 0 ? <Empty text="لا توجد مواعيد ضمن هذه الفترة" /> : (
+        <h4>{t('reports.appointments.record')} ({fmtNumber(rows.length)})</h4>
+        {rows.length === 0 ? <Empty text={t('reports.appointments.noInPeriod')} /> : (
           <div className="table-wrap table-cards">
             <table>
-              <thead><tr><th>التاريخ</th><th>الوقت</th><th>المريض</th><th>العيادة</th><th>الطبيب</th><th>الحالة</th></tr></thead>
+              <thead><tr><th>{t('reports.appointments.date')}</th><th>{t('reports.appointments.time')}</th><th>{t('reports.appointments.patient')}</th><th>{t('reports.appointments.clinic')}</th><th>{t('reports.appointments.doctor')}</th><th>{t('reports.appointments.status')}</th></tr></thead>
               <tbody>
                 {rows.map((a) => {
-                  const st = APPOINTMENT_STATUS[a.status] || { label: a.status, cls: '' }
+                  const appointmentStatus = APPOINTMENT_STATUS[a.status] || { label: a.status, cls: '' }
+                  const statusLabel = t(`appointmentStatus.${a.status}`) || appointmentStatus.label
                   return (
                     <tr key={a.appointment_id}>
                       <td>{fmtDate(a.appointment_date)}</td>
-                      <td data-label="الوقت">{fmtTime(a.start_time)}</td>
-                      <td data-label="المريض">{a.patient_name}</td>
-                      <td data-label="العيادة">{a.clinic_name}</td>
-                      <td data-label="الطبيب">{a.doctor_name || '—'}</td>
-                      <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>
+                      <td data-label={t('reports.appointments.time')}>{fmtTime(a.start_time)}</td>
+                      <td data-label={t('reports.appointments.patient')}>{a.patient_name}</td>
+                      <td data-label={t('reports.appointments.clinic')}>{a.clinic_name}</td>
+                      <td data-label={t('reports.appointments.doctor')}>{a.doctor_name || '—'}</td>
+                      <td data-label={t('reports.appointments.status')}>
+                        <span className={`status ${appointmentStatus.cls}`}>{statusLabel}</span>
+                      </td>
                     </tr>
                   )
                 })}
@@ -311,25 +319,33 @@ function AppointmentsTab({ statuses, rows }) {
 }
 
 function PatientsTab({ rows }) {
+  const t = useT()
   return (
     <div className="tab-stack">
       <div className="table-wrap table-cards">
-        <table>
-          <thead><tr><th>الاسم</th><th>الهاتف</th><th>النوع</th><th>الزيارات</th><th>آخر زيارة</th></tr></thead>
+        <table style={{ tableLayout: 'fixed' }}>
+          <colgroup>
+            <col style={{ width: '32%' }} />
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '29%' }} />
+          </colgroup>
+          <thead><tr><th>{t('reports.csv.patientName')}</th><th>{t('reports.csv.patientPhone')}</th><th>{t('reports.csv.patientGender')}</th><th>{t('reports.csv.patientVisits')}</th><th>{t('reports.csv.patientLastVisit')}</th></tr></thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.patient_id}>
-                <td>{p.full_name}</td>
-                <td dir="ltr" data-label="الهاتف">{p.phone}</td>
-                <td data-label="النوع">{p.gender === 'FEMALE' ? 'أنثى' : 'ذكر'}</td>
-                <td data-label="الزيارات">{fmtNumber(p.visits)}</td>
-                <td data-label="آخر زيارة">{fmtDateTime(p.last_visit)}</td>
+                <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.full_name}</td>
+                <td dir="ltr" style={{ textAlign: 'center' }} data-label={t('reports.patients.phone')}>{p.phone}</td>
+                <td style={{ textAlign: 'center' }} data-label={t('reports.patients.gender')}>{p.gender === 'FEMALE' ? t('gender.FEMALE') : t('gender.MALE')}</td>
+                <td style={{ textAlign: 'center' }} data-label={t('reports.patients.visits')}>{fmtNumber(p.visits)}</td>
+                <td style={{ textAlign: 'center' }} data-label={t('reports.patients.lastVisit')}>{fmtDateTime(p.last_visit)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-     {rows.length === 0 && <Empty text="لا بيانات للمرضى" />}
+      {rows.length === 0 && <Empty text={t('reports.tab.patientsEmpty')} />}
     </div>
   )
 }
