@@ -4,6 +4,7 @@ import { fmtMoney, fmtNumber, fmtDateTime, fmtDate, fmtTime, APPOINTMENT_STATUS 
 import { useT } from '../i18n'
 import { Loading, Empty, Notice, downloadCSV } from '../components/ui'
 import { useAuth } from '../auth/AuthContext'
+import { useBaseCurrency } from '../hooks/useBaseCurrency'
 
 const REPORT_TABS = [
   { id: 'overview' },
@@ -16,6 +17,7 @@ const REPORT_TABS = [
 export default function ReportsView() {
   const t = useT()
   const { user } = useAuth()
+  useBaseCurrency() // populate currency cache for fmtMoney fallback
   const [tab, setTab] = useState('overview')
   const [filters, setFilters] = useState({ date_from: '', date_to: '', clinic_id: '' })
   const [data, setData] = useState(null)
