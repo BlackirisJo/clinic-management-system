@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import { fmtDateTime } from '../lib/format'
+import { fmtDateTime, fmtNumber } from '../lib/format'
 import { useT } from '../i18n'
 import { Modal, Field, Loading, Empty, Notice } from './ui'
 import PregnancyPanel from './PregnancyPanel'
@@ -548,7 +548,7 @@ function AttachmentsTab({ visitId, data, reload, setError }) {
                 <tr key={a.attachment_id}>
                   <td>{a.file_name}</td>
                   <td data-label={t('visit.attachments.type')}>{KIND_LABELS[a.kind] || a.kind}</td>
-                  <td data-label={t('visit.attachments.size')}>{a.size_bytes ? t('visit.attachments.sizeKb', { size: Math.round(a.size_bytes / 1024) }) : '—'}</td>
+                  <td data-label={t('visit.attachments.size')}>{a.size_bytes ? t('visit.attachments.sizeKb', { size: fmtNumber(Math.round(a.size_bytes / 1024)) }) : '—'}</td>
                   <td data-label={t('visit.by')}>{a.uploaded_by_name || '—'}</td>
                   <td data-label={t('visit.attachments.date')}>{fmtDateTime(a.created_at)}</td>
                   <td className="cell-actions" data-label={t('visit.actions')}>
