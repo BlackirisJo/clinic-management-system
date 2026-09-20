@@ -3,6 +3,7 @@ import { pool } from '../../config/database';
 import { AuthenticatedRequest, accessibleClinicIds, financeClinicScope, isGlobalFinanceRole } from '../../middlewares/auth.middleware';
 import { InvoiceCalcError, invoiceNumberFor, invoiceStatus, resolveItem, round2, servicesKey } from './billing.calculation';
 import type { ServicePricing } from './billing.calculation';
+import { getBaseCurrency } from '../currencies/currency.validation';
 
 // المحاسب دور مالي مركزي: يتعامل مع كل العيادات النشطة دون تقييد بالإسناد.
 // نطاق العمليات المالية موحّد عبر financeClinicScope من auth.middleware.ts
@@ -206,12 +207,14 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
       throw new InvoiceCalcError('طريقة الدفع غير صالحة');
     }
 
+    const baseCurrency = await getBaseCurrency();
+
     // إدراج الفاتورة الرئيسية (المدفوع = الصافي لأنها تُحصَّل فوراً حسب النموذج الحالي)
     const invoiceResult = await client.query(
-      `INSERT INTO invoices (patient_id, visit_id, receptionist_id, total_amount, discount_amount, net_amount, paid_amount, payment_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO invoices (patient_id, visit_id, receptionist_id, total_amount, discount_amount, net_amount, paid_amount, payment_type, currency_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [patient_id, visit_id || null, receptionist_id, totalAmount, discount, netAmount, netAmount, payment_type || 'CASH']
+      [patient_id, visit_id || null, receptionist_id, totalAmount, discount, netAmount, netAmount, payment_type || 'CASH', baseCurrency]
     );
     const invoiceId = invoiceResult.rows[0].invoice_id;
 
@@ -270,11 +273,12 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
     if (!(await ensureActiveClinic(targetClinicId))) {
       return res.status(400).json({ message: 'العيادة غير موجودة أو غير فعالة' });
     }
+    const baseCurrency = await getBaseCurrency();
     const result = await pool.query(
-      `INSERT INTO expenses (clinic_id, category, amount, description, spent_by_user_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO expenses (clinic_id, category, amount, description, spent_by_user_id, currency_code)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [targetClinicId, category, amount, description || null, spent_by_user_id]
+      [targetClinicId, category, amount, description || null, spent_by_user_id, baseCurrency]
     );
     await logAudit(spent_by_user_id, targetClinicId, 'EXPENSE_CREATED', 'EXPENSE', result.rows[0].expense_id);
 
@@ -287,7 +291,7 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
 
 // 3ب. قائمة المصاريف (تستبعد المحذوف soft delete) مع أسماء العيادة والموظف
 const EXPENSE_SELECT = `e.expense_id, e.clinic_id, c.clinic_name, e.category, e.amount,
-        e.description, e.created_at, e.updated_at,
+        e.currency_code, e.description, e.created_at, e.updated_at,
         e.spent_by_user_id, u.full_name AS spent_by_name`;
 
 export const listExpenses = async (req: AuthenticatedRequest, res: Response) => {
@@ -528,7 +532,7 @@ export const getInvoice = async (req: AuthenticatedRequest, res: Response) => {
       `SELECT i.invoice_id, i.patient_id, p.full_name AS patient_name, p.phone,
               i.visit_id, i.receptionist_id, u.full_name AS receptionist_name,
               i.total_amount, i.discount_amount, i.net_amount, i.paid_amount,
-              i.payment_type, i.created_at
+              i.payment_type, i.currency_code, i.created_at
        FROM invoices i
        JOIN patients p ON p.patient_id = i.patient_id
        LEFT JOIN users u ON u.user_id = i.receptionist_id
@@ -606,7 +610,7 @@ export const listInvoices = async (req: AuthenticatedRequest, res: Response) => 
     const invRes = await pool.query(
       `SELECT i.invoice_id, i.patient_id, p.full_name AS patient_name,
               i.visit_id, i.total_amount, i.discount_amount, i.net_amount,
-              i.paid_amount, i.payment_type, i.created_at
+              i.paid_amount, i.payment_type, i.currency_code, i.created_at
        FROM invoices i
        JOIN patients p ON p.patient_id = i.patient_id
        WHERE i.invoice_id = ANY($1::int[])
