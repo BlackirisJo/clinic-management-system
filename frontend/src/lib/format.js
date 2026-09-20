@@ -80,13 +80,14 @@ export const GENDER_LABELS = { MALE: 'ذكر', FEMALE: 'أنثى' }
 
 export const DOCUMENT_TYPE_LABELS = { NATIONAL_ID: 'بطاقة شخصية', PASSPORT: 'جواز سفر', OTHER: 'أخرى' }
 
-export const ALLERGEN_LABELS = { PENICILLIN: 'البنسلين', ASPIRIN: 'الأسبرين', SULFA: 'السلفا', LATEX: 'اللاتكس', FOOD: 'الأطعمة', POLLEN: 'حبوب اللقاح', INSECT_STING: 'لسعات الحشرات', OTHER: 'أخرى' }
-export const ALLERGEN_KEYS = Object.keys(ALLERGEN_LABELS)
+// مفاتيح الحساسية (القيم تُترجم عبر i18n: allergen.KEY)
+export const ALLERGEN_KEYS = ['PENICILLIN', 'ASPIRIN', 'SULFA', 'LATEX', 'FOOD', 'POLLEN', 'INSECT_STING', 'OTHER']
 
-export const CHRONIC_CONDITION_LABELS = { DIABETES: 'السكري', HYPERTENSION: 'ضغط الدم', ASTHMA: 'الربو', HEART_DISEASE: 'أمراض القلب', KIDNEY_DISEASE: 'أمراض الكلى', THYROID: 'الغدة الدرقية', ANEMIA: 'فقر الدم', OTHER: 'أخرى' }
-export const CHRONIC_CONDITION_KEYS = Object.keys(CHRONIC_CONDITION_LABELS)
+// مفاتيح الأمراض المزمنة (القيم تُترجم عبر i18n: chronicCondition.KEY)
+export const CHRONIC_CONDITION_KEYS = ['DIABETES', 'HYPERTENSION', 'ASTHMA', 'HEART_DISEASE', 'KIDNEY_DISEASE', 'THYROID', 'ANEMIA', 'OTHER']
 
-export const CONDITION_SEVERITY_LABELS = { MILD: 'خفيف', MODERATE: 'متوسط', SEVERE: 'شديد', GESTATIONAL: 'حملي', TRANSIENT: 'عرضي / مؤقت', UNSPECIFIED: 'غير محدد' }
+// مفاتيح شدة الحالة (القيم تُترجم عبر i18n: conditionSeverity.KEY)
+export const CONDITION_SEVERITY_KEYS = ['MILD', 'MODERATE', 'SEVERE', 'GESTATIONAL', 'TRANSIENT', 'UNSPECIFIED']
 
 export const APPOINTMENT_STATUS = {
   SCHEDULED: { label: 'مجدول', cls: 'scheduled' },

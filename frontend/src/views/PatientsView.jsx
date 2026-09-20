@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../auth/AuthContext'
 import { useT } from '../i18n'
-import { fmtDate, fmtDateTime, GENDER_LABELS, DOCUMENT_TYPE_LABELS, ALLERGEN_LABELS, ALLERGEN_KEYS, CHRONIC_CONDITION_LABELS, CHRONIC_CONDITION_KEYS, CONDITION_SEVERITY_LABELS } from '../lib/format'
+import { fmtDate, fmtDateTime, GENDER_LABELS, DOCUMENT_TYPE_LABELS, ALLERGEN_KEYS, CHRONIC_CONDITION_KEYS, CONDITION_SEVERITY_KEYS } from '../lib/format'
 import { Modal, Field, Loading, Empty, Notice, Paginator } from '../components/ui'
 import VisitModal from '../components/VisitModal'
 
@@ -375,7 +375,7 @@ function MedicalProfileTab({ patient, user }) {
               <div className="med-item" key={key}>
                 <label className="med-check">
                   <input type="checkbox" disabled={!canEdit} checked={Boolean(allergySel[key]?.checked)} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], checked: e.target.checked } })} />
-                  <span>{ALLERGEN_LABELS[key]}</span>
+                  <span>{t('allergen.' + key)}</span>
                 </label>
                 <input className="med-note" placeholder={t('patients.medical.allergyNotePlaceholder')} disabled={!canEdit || !allergySel[key]?.checked} value={allergySel[key]?.notes || ''} onChange={(e) => setAllergySel({ ...allergySel, [key]: { ...allergySel[key], notes: e.target.value } })} />
               </div>
@@ -390,10 +390,10 @@ function MedicalProfileTab({ patient, user }) {
               <div className="med-item" key={key}>
                 <label className="med-check">
                   <input type="checkbox" disabled={!canEdit} checked={Boolean(condSel[key]?.checked)} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], checked: e.target.checked } })} />
-                  <span>{CHRONIC_CONDITION_LABELS[key]}</span>
+                  <span>{t('chronicCondition.' + key)}</span>
                 </label>
                 <select className="med-sev" disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.severity || 'UNSPECIFIED'} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], severity: e.target.value } })} aria-label={t('patients.medical.severityAria')}>
-                  {Object.entries(CONDITION_SEVERITY_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                  {CONDITION_SEVERITY_KEYS.map((code) => <option key={code} value={code}>{t('conditionSeverity.' + code)}</option>)}
                 </select>
                 <input className="med-note" placeholder={t('patients.medical.notePlaceholder')} disabled={!canEdit || !condSel[key]?.checked} value={condSel[key]?.notes || ''} onChange={(e) => setCondSel({ ...condSel, [key]: { ...condSel[key], notes: e.target.value } })} />
               </div>
