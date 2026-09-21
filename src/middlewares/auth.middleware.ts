@@ -38,17 +38,17 @@ export const accessibleClinicIds = (req: AuthenticatedRequest): number[] | null 
 };
 
 // هل المستخدم "مالي مركزي" يتعامل مع كل العيادات النشطة دون تقييد بالإسناد؟
-// الأدوار المالية المركزية: SUPER_ADMIN, SYSTEM_ADMIN, ACCOUNTANT
+// الأدوار المالية المركزية: SUPER_ADMIN, SYSTEM_ADMIN (عبر canManageAllClinics)
 // (بالإضافة لأي دور يملك صلاحية مالية إدارية كـ MANAGE_SERVICES أو CREATE_EXPENSE)
 export const isGlobalFinanceRole = (req: AuthenticatedRequest): boolean => {
-  if (req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN') return true;
-  if (req.user?.roleName === 'ACCOUNTANT') return true;
+  if (canManageAllClinics(req)) return true;
   const perms: string[] = req.user?.permissions ?? [];
   return perms.includes('MANAGE_SERVICES') || perms.includes('CREATE_EXPENSE');
 };
 
 // نطاق العيادات للعمليات المالية — مصدر الحقيقة الموحد.
-// - الأدوار المالية المركزية (SUPER_ADMIN, SYSTEM_ADMIN, ACCOUNTANT): ترجع null = كل العيادات.
+// - المدراء (SUPER_ADMIN, SYSTEM_ADMIN): يرون كل العيادات (via canManageAllClinics).
+// - الأدوار التي تملك MANAGE_SERVICES أو CREATE_EXPENSE: ترجع null = كل العيادات.
 // - باقي المستخدمين: قائمة عياداتهم المسندة (الأساسية + clinic_staff).
 export const financeClinicScope = (req: AuthenticatedRequest): number[] | null => {
   if (isGlobalFinanceRole(req)) return null;

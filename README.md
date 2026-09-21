@@ -72,6 +72,23 @@ Clinical functionality includes:
 * Clinical attachments
 * Clinical documentation
 
+### Emergency Medical Report
+
+The Emergency Medical Report (`POST /api/clinical/emergency-report`) generates a comprehensive print-ready report for a patient across all clinics with medical data. It includes:
+
+* Patient demographics
+* Report metadata (generator name, role, specialty, clinic, timestamp)
+* Medical profile, allergies, chronic conditions
+* Pregnancy status with visits, labs, ultrasounds
+* Per-clinic visit data with vitals, diagnoses, lab orders, imaging, referrals, prescriptions, and attachments
+* Access is gated by the `GENERATE_EMERGENCY_REPORT` permission; authorized users discover all clinics with records for the patient
+
+### Unified Medical Record
+
+The Unified Medical Record tab on the patient detail page aggregates visits, prescriptions, diagnoses, lab results, imaging, referrals, and attachments across all authorized clinics into a single view, respecting patient-sharing and clinic-scope rules.
+
+---
+
 ### Obstetrics & Gynecology
 
 The system includes a dedicated pregnancy-care workflow with support for:
@@ -112,6 +129,8 @@ Appointment management includes:
 
 The financial module is designed to manage clinic-related financial operations.
 
+Access to billing features is permission-based: users see billing/reports navigation only when holding the relevant permissions (`VIEW_INVOICES` for billing, `VIEW_REPORTS` for reports). Role assignments alone do not determine visibility.
+
 ### Services
 
 * Clinic service management
@@ -142,6 +161,8 @@ Invoice information can include:
 
 Historical invoice values are intended to remain independent from future changes to service pricing.
 
+All invoice operations are protected by backend permission checks (`CREATE_INVOICE`, `VIEW_INVOICES`, `VIEW_FINANCIAL_REPORTS`) and clinic/data scope — a user can only access invoices for clinics within their scope.
+
 ### Expenses
 
 The system supports:
@@ -159,6 +180,8 @@ The system supports:
 
 The system includes reporting functionality for clinical and financial operations.
 
+Reports navigation is gated by the `VIEW_REPORTS` permission. Role assignments alone do not determine visibility.
+
 Financial reporting is designed to provide visibility into:
 
 * Revenue
@@ -168,6 +191,8 @@ Financial reporting is designed to provide visibility into:
 * Outstanding amounts
 * Clinic-level financial activity
 * Financial KPIs
+
+Report access is protected by backend permission checks (`VIEW_REPORTS`) and clinic/data scope — users can only see data from clinics within their authorized scope.
 
 The reporting architecture is being continuously improved to ensure that financial transactions are correctly reflected across reports and dashboard-level summaries.
 
@@ -179,12 +204,15 @@ Security is treated as a core part of the system rather than a frontend-only fea
 
 Authorization is enforced on the backend using:
 
-* Authentication
+* Authentication (JWT with JTI-based session tracking)
 * Role-Based Access Control (RBAC)
-* Permissions
-* Clinic access control
+* Permissions (granular, e.g. `GENERATE_EMERGENCY_REPORT`, `MANAGE_CLINICAL_DATA`, `MANAGE_PREGNANCY`)
+* Clinic access control (per-user clinic scope or global admin override)
 * Resource-level validation
-* Backend request validation
+* Backend request validation (Zod schemas)
+* Audit logging of sensitive operations
+
+Feature visibility in the frontend (navigation tabs, buttons, forms) is driven by permissions where applicable (e.g. `VIEW_INVOICES`, `VIEW_REPORTS`, `MANAGE_SERVICES`, `CREATE_INVOICE`), not by role names. Unintended `roleName`-based authorization bypasses in finance authorization have been removed — access is determined by permissions and clinic/data scope.
 
 Frontend restrictions are considered a user experience feature only and are **not relied upon as the primary security mechanism**.
 
@@ -194,7 +222,7 @@ Sensitive operations are validated on the server before database changes are per
 
 ## Authentication & Authorization
 
-The system uses authenticated sessions/tokens together with role and permission-based authorization.
+The system uses JWT tokens with JTI (unique token identifier) session tracking and server-side session validation.
 
 Access decisions can depend on:
 
@@ -206,9 +234,27 @@ Access decisions can depend on:
 * Requested resource
 * Target clinic
 
+Session lifecycle:
+
+* Tokens carry a `jti` verified against `user_sessions` on every request
+* Sessions can be revoked individually or in bulk
+* Revoked tokens and expired sessions return `403` (`SESSION_REVOKED`)
+* Tokens without a `jti` return `403` (`INVALID_SESSION`)
+* Password changes revoke all other active sessions
+* IP addresses are recorded at login for session auditing
+
 This architecture is intended to prevent users from bypassing frontend restrictions by directly calling backend APIs.
 
 ---
+
+## Audit / System Logs
+
+Sensitive operations are recorded in `audit_logs` across all modules including authentication, user management, clinics, patients, billing, visits, prescriptions, backups, pregnancies, and emergency reports. Each entry captures:
+
+* User ID and clinic ID
+* Action type (e.g. `LOGIN_SUCCESS`, `LOGIN_FAILURE`, `LOGIN_BLOCKED`, `EMERGENCY_REPORT_GENERATED`)
+* Resource type and ID
+* Metadata (context-specific details as JSON)
 
 ## Multi-Clinic Support
 
@@ -389,9 +435,8 @@ clinic-management-system/
 │   ├── middlewares/
 │   ├── migrations/
 │   ├── specialties/
+│   ├── tests/
 │   └── ...
-│
-├── tests/
 │
 ├── docker-compose.yml
 ├── package.json
@@ -527,16 +572,30 @@ Database migrations are maintained within the project and should be applied acco
 
 ---
 
+## i18n — Arabic / English with RTL/LTR
+
+The frontend supports bilingual operation with automatic layout direction:
+
+* **Arabic (`ar`)** — default language, RTL layout (`dir="rtl"`)
+* **English (`en`)** — LTR layout (`dir="ltr"`)
+* Language switcher in the UI (`lang.switchLabel`)
+* Selection persisted to `localStorage` (`clinic_lang`)
+* `document.documentElement.lang` and `dir` updated on every language change
+* All user-facing strings externalized to locale dictionaries (`en.js`, `ar.js`) — no hardcoded UI text
+* Formatters (dates, numbers, currency) respect the active locale
+
+---
+
 ## Testing
 
 The project includes automated tests covering areas such as:
 
-* Authentication
-* Validation
-* Users
-* Appointments
-* Clinical workflows
-* Reports
+* Authentication and session management
+* RBAC and permission enforcement
+* Cross-clinic authorization and patient sharing
+* Financial calculations and invoice integrity
+* Clinical workflows and pregnancy care
+* Validation and data integrity
 * Integration scenarios
 
 Run the available test suite with:
@@ -544,6 +603,8 @@ Run the available test suite with:
 ```bash
 npm test
 ```
+
+Current results (as of the latest run): 163 passed, 0 failed, 31 skipped (integration tests requiring a running Docker environment).
 
 Additional tests should be added as new modules and security-sensitive workflows are introduced.
 
@@ -616,9 +677,37 @@ Healthcare deployments should also be evaluated against the applicable legal, pr
 
 ## Development Status
 
-This project is under active development.
+This project is under active development with the following core areas fully implemented and verified:
 
-Features, workflows, validations, security controls, financial calculations, and reporting capabilities are continuously being improved.
+**Implemented:**
+
+* JWT/JTI authentication with session tracking and revocation
+* RBAC with granular permissions
+* Audit logging across all modules
+* Patient sharing and cross-clinic medical access
+* Unified medical record view
+* Pregnancy full workflow (records, visits, ultrasounds, lab orders, results)
+* Emergency Medical Report generation
+* i18n (Arabic/English) with RTL/LTR support
+* Clinical workflows (visits, vitals, diagnoses, lab orders, imaging, referrals, prescriptions, attachments)
+* Billing, invoices, expenses, and financial reporting
+* Appointments
+* Database migrations with clinic-scoped data integrity
+
+**Planned/Future:**
+
+* Expanded specialty-specific clinical workflows
+* Enhanced financial reporting
+* Advanced invoice management
+* Enhanced audit logging
+* Expanded automated test coverage
+* Stronger file and attachment security
+* Enhanced reporting dashboards
+* Improved database integrity constraints
+* Advanced appointment workflows
+* Performance optimization
+* Production deployment hardening
+* Backup and disaster-recovery workflows
 
 The project is being developed with the goal of evolving from a functional healthcare management application into a maintainable and extensible platform.
 

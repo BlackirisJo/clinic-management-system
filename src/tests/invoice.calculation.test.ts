@@ -139,8 +139,9 @@ test('ACCOUNTANT gains no ADMIN permissions automatically', () => {
   assert.equal(isGlobalFinanceRole(mkReq({ roleName: 'ACCOUNTANT', permissions: accountantPerms, clinicId: 1, clinicIds: [1] })), true)
 })
 
-test('invoice scope: ACCOUNTANT unrestricted, RECEPTIONIST restricted', () => {
-  assert.equal(financeClinicScope(mkReq({ roleName: 'ACCOUNTANT', permissions: ['VIEW_INVOICES'], clinicId: 1, clinicIds: [1] })), null)
+test('invoice scope: ACCOUNTANT with MANAGE_SERVICES unrestricted, RECEPTIONIST restricted', () => {
+  assert.equal(financeClinicScope(mkReq({ roleName: 'ACCOUNTANT', permissions: ['MANAGE_SERVICES', 'VIEW_INVOICES'], clinicId: 1, clinicIds: [1] })), null)
+  assert.deepEqual(financeClinicScope(mkReq({ roleName: 'ACCOUNTANT', permissions: ['VIEW_INVOICES'], clinicId: 1, clinicIds: [1] })), [1])
   assert.deepEqual(financeClinicScope(mkReq({ roleName: 'RECEPTIONIST', permissions: ['VIEW_INVOICES'], clinicId: 3, clinicIds: [3] })), [3])
 })
 

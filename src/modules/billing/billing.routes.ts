@@ -15,7 +15,7 @@ import {
   deleteExpense,
   getMonthlyFinancialKPIs,
 } from './billing.controller';
-import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
+import { authenticateJWT, requirePermission, canManageAllClinics } from '../../middlewares/auth.middleware';
 import { AppError } from '../../middlewares/error.middleware';
 import { ApiErrorCode } from '../../utils/apiErrors';
 import { validateBody } from '../../middlewares/validate.middleware';
@@ -26,10 +26,10 @@ const router = Router();
 // جميع المسارات محمية بالتوثيق
 router.use(authenticateJWT);
 
-// السماح بأي صلاحية مالية للقراءة (المحاسب + الإدارة) بدل صلاحية واحدة
+// السماح بأي صلاحية مالية للقراءة (إدارة + أدوار مالية محددة) بدل صلاحية واحدة
 const requireAny = (keys: string[]) => {
   return (req: any, res: any, next: any) => {
-    if (req.user?.roleName === 'SUPER_ADMIN' || req.user?.roleName === 'SYSTEM_ADMIN') return next();
+    if (canManageAllClinics(req)) return next();
     const perms: string[] = req.user?.permissions ?? [];
     if (keys.some((k) => perms.includes(k))) return next();
     return next(new AppError('عذراً، لا تمتلك الصلاحية الكافية لتنفيذ هذا الإجراء', 403, ApiErrorCode.FORBIDDEN));

@@ -7,35 +7,55 @@ import { Field, Loading, Empty, Notice, Modal } from '../components/ui'
 import { PatientSearchSelect } from '../components/SearchSelect'
 import { useBaseCurrency } from '../hooks/useBaseCurrency'
 
+function hasPerm(perms, key) {
+  return Array.isArray(perms) && perms.includes(key)
+}
+
 export default function BillingView() {
   const [tab, setTab] = useState('invoices')
   const t = useT()
+  const { user } = useAuth()
   const baseCurrency = useBaseCurrency()
+  const perms = user?.permissions ?? []
+  const canCreateInvoice = hasPerm(perms, 'CREATE_INVOICE')
+  const canViewInvoices = hasPerm(perms, 'VIEW_INVOICES') || hasPerm(perms, 'VIEW_FINANCIAL_REPORTS') || hasPerm(perms, 'CREATE_INVOICE')
+  const canManageServices = hasPerm(perms, 'MANAGE_SERVICES') || hasPerm(perms, 'VIEW_INVOICES') || hasPerm(perms, 'VIEW_FINANCIAL_REPORTS') || hasPerm(perms, 'CREATE_INVOICE')
+  const canViewExpenses = hasPerm(perms, 'VIEW_FINANCIAL_REPORTS') || hasPerm(perms, 'VIEW_INVOICES') || hasPerm(perms, 'CREATE_EXPENSE')
+  const hasAnyBilling = canViewInvoices || canManageServices || canViewExpenses
+  if (!hasAnyBilling) return null
   return (
     <section className="full-panel">
       <div className="panel-heading">
         <div><h2>{t('billing.title')}</h2><p>{t('billing.subtitle')}</p></div>
       </div>
       <div className="tabs">
-        <button className={tab === 'invoices' ? 'tab active' : 'tab'} onClick={() => setTab('invoices')}>{t('billing.tab.invoices')}</button>
-        <button className={tab === 'services' ? 'tab active' : 'tab'} onClick={() => setTab('services')}>{t('billing.tab.services')}</button>
-        <button className={tab === 'expenses' ? 'tab active' : 'tab'} onClick={() => setTab('expenses')}>{t('billing.tab.expenses')}</button>
+        {canViewInvoices && (
+          <button className={tab === 'invoices' ? 'tab active' : 'tab'} onClick={() => setTab('invoices')}>{t('billing.tab.invoices')}</button>
+        )}
+        {canManageServices && (
+          <button className={tab === 'services' ? 'tab active' : 'tab'} onClick={() => setTab('services')}>{t('billing.tab.services')}</button>
+        )}
+        {canViewExpenses && (
+          <button className={tab === 'expenses' ? 'tab active' : 'tab'} onClick={() => setTab('expenses')}>{t('billing.tab.expenses')}</button>
+        )}
       </div>
       <div className="tab-content">
-        {tab === 'invoices' && <InvoicesTab />}
-        {tab === 'services' && <ServicesTab />}
-        {tab === 'expenses' && <ExpensesTab />}
+        {tab === 'invoices' && canViewInvoices && <InvoicesTab canCreateInvoice={canCreateInvoice} />}
+        {tab === 'services' && canManageServices && <ServicesTab canManageServices={canManageServices} />}
+        {tab === 'expenses' && canViewExpenses && <ExpensesTab canCreateExpense={hasPerm(perms, 'CREATE_EXPENSE')} />}
       </div>
     </section>
   )
 }
 
-function InvoicesTab() {
+function InvoicesTab({ canCreateInvoice }) {
   const t = useT()
   return (
     <div className="tab-inner">
       <div className="tab-grid two">
-        <div className="record-block"><h4>{t('billing.invoices.create')}</h4><InvoiceForm /></div>
+        {canCreateInvoice && (
+          <div className="record-block"><h4>{t('billing.invoices.create')}</h4><InvoiceForm /></div>
+        )}
         <div className="record-block"><h4>{t('billing.invoices.kpis')}</h4><KpisTable /></div>
       </div>
     </div>
@@ -445,12 +465,14 @@ function InvoiceViewModal({ invoice, onClose }) {
   )
 }
 
-function ServicesTab() {
+function ServicesTab({ canManageServices }) {
   const t = useT()
   return (
     <div className="tab-inner">
       <div className="tab-grid two">
-        <div className="record-block"><h4>{t('billing.services.create')}</h4><ServiceForm /></div>
+        {canManageServices && (
+          <div className="record-block"><h4>{t('billing.services.create')}</h4><ServiceForm /></div>
+        )}
         <div className="record-block"><h4>{t('billing.services.list')}</h4><ServicesList /></div>
       </div>
     </div>
@@ -654,12 +676,14 @@ function ServiceForm() {
   )
 }
 
-function ExpensesTab() {
+function ExpensesTab({ canCreateExpense }) {
   const t = useT()
   return (
     <div className="tab-inner">
       <div className="tab-grid two">
-        <div className="record-block"><h4>{t('billing.expenses.create')}</h4><ExpenseForm /></div>
+        {canCreateExpense && (
+          <div className="record-block"><h4>{t('billing.expenses.create')}</h4><ExpenseForm /></div>
+        )}
         <div className="record-block"><h4>{t('billing.expenses.list')}</h4><ExpensesList /></div>
       </div>
     </div>
