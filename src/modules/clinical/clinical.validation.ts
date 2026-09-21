@@ -238,3 +238,9 @@ export const pregnancyLabResultSchema = z.object({
     notes: longText(1000),
   })).min(1).max(100),
 });
+
+// ===== تقرير الطوارئ الطبي — تجميعي للعيادات =====
+export const emergencyReportSchema = z.object({
+  patient_id: z.coerce.number().int().positive(),
+  clinic_ids: z.array(z.coerce.number().int().positive()).max(20).optional(),
+});

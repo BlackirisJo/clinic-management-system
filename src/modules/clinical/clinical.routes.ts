@@ -16,6 +16,7 @@ import {
   listPregnancyLabOrders, createPregnancyLabOrder, updatePregnancyLabOrder, deletePregnancyLabOrder, savePregnancyLabResults,
 } from './pregnancies.controller';
 import { listSpecialties } from './specialties.controller';
+import { generateEmergencyReport } from './emergency.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
 import { validateBody } from '../../middlewares/validate.middleware';
 import {
@@ -25,6 +26,7 @@ import {
   pregnancySchema, pregnancyCreateSchema, pregnancyUpdateSchema, pregnancyVisitSchema, pregnancyVisitUpdateSchema,
   ultrasoundSchema, ultrasoundUpdateSchema,
   pregnancyLabOrderSchema, pregnancyLabOrderUpdateSchema, pregnancyLabResultSchema,
+  emergencyReportSchema,
 } from './clinical.validation';
 
 const router = Router();
@@ -50,6 +52,8 @@ router.use(authenticateJWT);
 
 // التخصصات الطبية — متاحة لجميع المستخدمين الموثقين (لعرض workflow العيادة)
 router.get('/specialties', listSpecialties);
+
+router.post('/emergency-report', requirePermission('GENERATE_EMERGENCY_REPORT'), validateBody(emergencyReportSchema), generateEmergencyReport);
 
 // ===== بيانات الزيارة السريرية =====
 router.get('/visits/:visitId', getVisitDetails);

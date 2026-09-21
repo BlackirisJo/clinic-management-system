@@ -220,6 +220,7 @@ export const api = {
     updatePregnancyLabOrder: (id, labId, body) => request(`/api/clinical/pregnancies/${id}/lab-orders/${labId}`, { method: 'PATCH', body }),
     deletePregnancyLabOrder: (id, labId) => request(`/api/clinical/pregnancies/${id}/lab-orders/${labId}`, { method: 'DELETE' }),
     savePregnancyLabResults: (id, labId, body) => request(`/api/clinical/pregnancies/${id}/lab-orders/${labId}/results`, { method: 'PUT', body }),
+    emergencyReport: (body) => request('/api/clinical/emergency-report', { method: 'POST', body }),
   },
   users: {
         doctors: (params) => request('/api/users/doctors', { params }),
