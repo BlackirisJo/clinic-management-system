@@ -15,6 +15,7 @@ export const NAV_ITEMS = [
   { id: 'clinics', label: 'navigation.clinics', icon: '⌗', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
   { id: 'users', label: 'navigation.users', icon: '♙', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
   { id: 'backups', label: 'navigation.backups', icon: '♺', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },
+  { id: 'logs', label: 'navigation.systemLogs', icon: '◈', roles: ['SUPER_ADMIN'] },
   { id: 'permissions', label: 'navigation.permissions', icon: '☰', permission: 'MANAGE_PERMISSIONS' },
 ]
 

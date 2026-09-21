@@ -18,6 +18,7 @@ import medicationImportRoutes from './modules/prescriptions/medication.import.ro
 import clinicalRoutes from './modules/clinical/clinical.routes';
 import permissionsRoutes from './modules/permissions/permissions.routes';
 import settingsRoutes from './modules/settings/settings.routes';
+import auditRoutes from './modules/audit/audit.routes';
 import { ApiErrorCode } from './utils/apiErrors';
 import { AppError } from './middlewares/error.middleware';
 
@@ -63,6 +64,7 @@ app.use('/api/medications/import', medicationImportRoutes);
 app.use('/api/clinical', clinicalRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/audit', auditRoutes);
 
 // معالجة المسارات غير الموجودة (404 Not Found)
 // Phase 3: code مستقر للترجمة — message والـ status كما هما

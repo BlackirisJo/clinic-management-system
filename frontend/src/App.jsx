@@ -14,6 +14,7 @@ import AppointmentsView from './views/AppointmentsView'
 import PrescriptionsView from './views/PrescriptionsView'
 import BillingView from './views/BillingView'
 import ReportsView from './views/ReportsView'
+import SystemLogsView from './views/SystemLogsView'
 import UsersView from './views/UsersView'
 import BackupsView from './views/BackupsView'
 import ClinicsView from './views/ClinicsView'
@@ -26,6 +27,7 @@ const VIEWS = {
   prescriptions: PrescriptionsView,
   billing: BillingView,
   reports: ReportsView,
+  logs: SystemLogsView,
   clinics: ClinicsView,
   users: UsersView,
   backups: BackupsView,

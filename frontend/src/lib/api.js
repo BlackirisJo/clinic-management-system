@@ -264,6 +264,9 @@ export const api = {
   settings: {
     get: () => request('/api/settings'),
   },
+  audit: {
+    logs: (params) => request('/api/audit/logs', { params }),
+  },
 }
 
 export default api
