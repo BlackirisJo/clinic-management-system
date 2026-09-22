@@ -1,4 +1,4 @@
-import { exec, execSync } from 'child_process';
+import { exec, execSync, execFile } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -7,6 +7,34 @@ import AdmZip from 'adm-zip';
 import { pool } from '../../config/database';
 
 const execPromise = util.promisify(exec);
+const execFilePromise = util.promisify(execFile);
+
+const getDBConnectionConfig = (): {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+} => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl) {
+    const url = new URL(databaseUrl);
+    return {
+      host: url.hostname,
+      port: url.port ? parseInt(url.port, 10) : 5432,
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password || ''),
+      database: decodeURIComponent(url.pathname.replace(/^\//, '')),
+    };
+  }
+  return {
+    host: process.env.DB_HOST || 'localhost',
+    port: Number(process.env.DB_PORT) || 5432,
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'clinic_db',
+  };
+};
 
 export const BACKUP_DIR = process.env.BACKUP_DIR || path.join(process.cwd(), 'backups');
 const ALGORITHM = 'aes-256-gcm';
@@ -155,18 +183,23 @@ export const generateEncryptedBackup = async (): Promise<{
   const tempSqlPath = path.join(BACKUP_DIR, `dump_${timestamp}.sql`);
   const encryptedPath = path.join(BACKUP_DIR, `backup_${timestamp}.enc`);
 
-  const dbUser = process.env.DB_USER || 'postgres';
-  const dbHost = process.env.DB_HOST || 'localhost';
-  const dbName = process.env.DB_NAME || 'clinic_db';
-  const dbPort = process.env.DB_PORT || '5432';
   const encryptionKey = getBackupKey();
 
-    // --clean --if-exists: توليد أوامر DROP قبل CREATE — يتيح الاسترجاع فوق قاعدة بيانات تحتوي الجداول والبيانات فعلاً
-  // --no-owner --no-privileges: تجنب أخطاء الملكية/الامتيازات عند اختلاف مستخدم القاعدة بين بيئة النسخ والاسترجاع
-  const dumpCommand = `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} -F p --clean --if-exists --no-owner --no-privileges -d ${dbName} -f "${tempSqlPath}"`;
+  const { host: dbHost, port: dbPort, user: dbUser, password: dbPassword, database: dbName } = getDBConnectionConfig();
 
-  await execPromise(dumpCommand, {
-    env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD },
+  await execFilePromise('pg_dump', [
+    '-h', dbHost,
+    '-p', String(dbPort),
+    '-U', dbUser,
+    '-F', 'p',
+    '--clean',
+    '--if-exists',
+    '--no-owner',
+    '--no-privileges',
+    '-d', dbName,
+    '-f', tempSqlPath,
+  ], {
+    env: { ...process.env, PGPASSWORD: dbPassword },
   });
 
   const { iv, authTag } = await encryptFile(tempSqlPath, encryptedPath, encryptionKey);
@@ -222,18 +255,21 @@ export const restoreEncryptedBackup = async (
   const tempSqlPath = path.join(BACKUP_DIR, `restore_temp_${timestamp}.sql`);
   const encryptionKey = getBackupKey();
 
-  const dbUser = process.env.DB_USER || 'postgres';
-  const dbHost = process.env.DB_HOST || 'localhost';
-  const dbName = process.env.DB_NAME || 'clinic_db';
-  const dbPort = process.env.DB_PORT || '5432';
+  const { host: dbHost, port: dbPort, user: dbUser, password: dbPassword, database: dbName } = getDBConnectionConfig();
 
   try {
     await decryptFile(safeFilePath, tempSqlPath, encryptionKey, ivHex, authTagHex);
 
-    const restoreCommand = `psql --set=ON_ERROR_STOP=1 --single-transaction -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -f "${tempSqlPath}"`;
-
-    await execPromise(restoreCommand, {
-      env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD },
+    await execFilePromise('psql', [
+      '--set=ON_ERROR_STOP=1',
+      '--single-transaction',
+      '-h', dbHost,
+      '-p', String(dbPort),
+      '-U', dbUser,
+      '-d', dbName,
+      '-f', tempSqlPath,
+    ], {
+      env: { ...process.env, PGPASSWORD: dbPassword },
     });
   } finally {
     if (fs.existsSync(tempSqlPath)) {
