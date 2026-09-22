@@ -266,6 +266,24 @@ export const api = {
   },
   audit: {
     logs: (params) => request('/api/audit/logs', { params }),
+    exportCSV: (params) => {
+      const query = new URLSearchParams();
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '' && value !== undefined) query.set(key, String(value));
+      });
+      return fetch(`/api/audit/logs/export/csv?${query.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    },
+    exportExcel: (params) => {
+      const query = new URLSearchParams();
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '' && value !== undefined) query.set(key, String(value));
+      });
+      return fetch(`/api/audit/logs/export/excel?${query.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    },
   },
 }
 

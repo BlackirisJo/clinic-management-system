@@ -128,6 +128,12 @@ export default {
   'systemLogs.viewDetails': 'عرض',
   'systemLogs.noDetails': 'لا توجد تفاصيل إضافية',
 
+  'systemLogs.export': 'تصدير',
+  'systemLogs.exportCSV': 'تصدير CSV',
+  'systemLogs.exportExcel': 'تصدير Excel',
+  'systemLogs.exportLoading': 'جارِ تحضير التصدير...',
+  'systemLogs.exportError': 'فشل التصدير',
+
   'backup.title': 'النسخ الاحتياطية',
   'backup.subtitle': 'إنشاء وتنزيل واسترجاع النسخ المشفرة AES-256-GCM',
   'backup.loadError': 'تعذر تحميل سجلات النسخ الاحتياطي',

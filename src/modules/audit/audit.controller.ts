@@ -1,20 +1,23 @@
 import type { Response } from 'express';
 import { pool } from '../../config/database';
 import type { AuthenticatedRequest } from '../../middlewares/auth.middleware';
+import * as XLSX from 'xlsx';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const EXPORT_SAFETY_LIMIT = 100000;
 
-export const list = async (req: AuthenticatedRequest, res: Response) => {
-  if (req.user?.roleName !== 'SUPER_ADMIN') {
-    return res.status(403).json({ message: 'غير مصرّح' });
-  }
+function canAccessLogs(req: AuthenticatedRequest): boolean {
+  if (req.user?.roleName === 'SUPER_ADMIN') return true;
+  if (req.user?.roleName === 'SYSTEM_ADMIN' && (req.user.permissions?.includes('VIEW_SYSTEM_LOGS') ?? false)) return true;
+  return false;
+}
 
-  const rawPage = parseInt(req.query.page as string || '', 10);
-  const rawLimit = parseInt(req.query.limit as string || '', 10);
-  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : DEFAULT_PAGE;
-  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 && rawLimit <= MAX_LIMIT ? rawLimit : DEFAULT_LIMIT;
+function buildLogFilters(query: Record<string, string>) {
+  const filters: string[] = [];
+  const values: (string | number)[] = [];
+  let paramIndex = 0;
 
   const {
     action,
@@ -24,12 +27,7 @@ export const list = async (req: AuthenticatedRequest, res: Response) => {
     date_from,
     date_to,
     search,
-  } = (req.query as Record<string, string>);
-
-  const offset = (page - 1) * limit;
-  const filters: string[] = [];
-  const values: (string | number)[] = [];
-  let paramIndex = 0;
+  } = query;
 
   if (action) {
     paramIndex++;
@@ -82,7 +80,48 @@ export const list = async (req: AuthenticatedRequest, res: Response) => {
     values.push(`%${search}%`);
   }
 
-  const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  return { filters, values, paramIndex, whereClause: filters.length ? `WHERE ${filters.join(' AND ')}` : '' };
+}
+
+function escapeCSV(value: unknown): string {
+  const s = value === null || value === undefined ? '' : String(value);
+  return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+}
+
+function formatLogRow(row: Record<string, unknown>): string[] {
+  return [
+    row.created_at ? new Date(row.created_at as string).toISOString() : '',
+    (row.user_name as string) || '',
+    (row.user_role_name as string) || '',
+    (row.clinic_name as string) || '',
+    (row.action as string) || '',
+    (row.resource_type as string) || '',
+    (row.resource_id as string) || '',
+    row.metadata ? JSON.stringify(row.metadata) : '',
+  ];
+}
+
+function buildCSV(data: Record<string, unknown>[]): string {
+  const headers = ['Date/Time', 'User', 'Role', 'Clinic', 'Action', 'Resource Type', 'Resource ID', 'Metadata'];
+  const lines = [headers.map(escapeCSV).join(',')];
+  for (const row of data) {
+    lines.push(formatLogRow(row).map(escapeCSV).join(','));
+  }
+  return '\uFEFF' + lines.join('\n');
+}
+
+export const list = async (req: AuthenticatedRequest, res: Response) => {
+  if (!canAccessLogs(req)) {
+    return res.status(403).json({ message: 'غير مصرّح' });
+  }
+
+  const rawPage = parseInt(req.query.page as string || '', 10);
+  const rawLimit = parseInt(req.query.limit as string || '', 10);
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : DEFAULT_PAGE;
+  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 && rawLimit <= MAX_LIMIT ? rawLimit : DEFAULT_LIMIT;
+
+  const offset = (page - 1) * limit;
+  const { filters, values, paramIndex, whereClause } = buildLogFilters(req.query as Record<string, string>);
 
   try {
     const countResult = await pool.query(
@@ -131,6 +170,87 @@ export const list = async (req: AuthenticatedRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Audit list error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم' });
+  }
+};
+
+export const exportCSV = async (req: AuthenticatedRequest, res: Response) => {
+  if (!canAccessLogs(req)) {
+    return res.status(403).json({ message: 'غير مصرّح' });
+  }
+
+  try {
+    const { filters, values, whereClause } = buildLogFilters(req.query as Record<string, string>);
+    const data = await pool.query(
+      `SELECT a.created_at, a.action, a.resource_type, a.resource_id, a.metadata,
+              u.full_name AS user_name, u.username, r.role_name AS user_role_name, c.clinic_name
+       FROM audit_logs a
+       LEFT JOIN users u ON u.user_id = a.user_id
+       LEFT JOIN clinics c ON c.clinic_id = a.clinic_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       ${whereClause}
+       ORDER BY a.created_at DESC
+       LIMIT $${values.length + 1}`,
+      [...values, EXPORT_SAFETY_LIMIT]
+    );
+    const rows = data.rows.map((row) => ({
+      created_at: row.created_at,
+      user_name: row.user_name,
+      user_role_name: row.user_role_name,
+      clinic_name: row.clinic_name,
+      action: row.action,
+      resource_type: row.resource_type,
+      resource_id: row.resource_id,
+      metadata: row.metadata,
+    }));
+    const csv = buildCSV(rows);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="system_logs.csv"');
+    return res.status(200).send(csv);
+  } catch (error) {
+    console.error('Audit export CSV error:', error);
+    return res.status(500).json({ message: 'حدث خطأ في الخادم' });
+  }
+};
+
+export const exportExcel = async (req: AuthenticatedRequest, res: Response) => {
+  if (!canAccessLogs(req)) {
+    return res.status(403).json({ message: 'غير مصرّح' });
+  }
+
+  try {
+    const { filters, values, whereClause } = buildLogFilters(req.query as Record<string, string>);
+    const data = await pool.query(
+      `SELECT a.created_at, a.action, a.resource_type, a.resource_id, a.metadata,
+              u.full_name AS user_name, u.username, r.role_name AS user_role_name, c.clinic_name
+       FROM audit_logs a
+       LEFT JOIN users u ON u.user_id = a.user_id
+       LEFT JOIN clinics c ON c.clinic_id = a.clinic_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       ${whereClause}
+       ORDER BY a.created_at DESC
+       LIMIT $${values.length + 1}`,
+      [...values, EXPORT_SAFETY_LIMIT]
+    );
+    const rows = data.rows.map((row) => ({
+      'Date/Time': row.created_at ? new Date(row.created_at as string).toISOString() : '',
+      User: row.user_name || '',
+      Role: row.user_role_name || '',
+      Clinic: row.clinic_name || '',
+      Action: row.action || '',
+      'Resource Type': row.resource_type || '',
+      'Resource ID': row.resource_id || '',
+      Metadata: row.metadata ? JSON.stringify(row.metadata) : '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'System Logs');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="system_logs.xlsx"');
+    return res.status(200).send(buf);
+  } catch (error) {
+    console.error('Audit export Excel error:', error);
     return res.status(500).json({ message: 'حدث خطأ في الخادم' });
   }
 };

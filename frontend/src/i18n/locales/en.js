@@ -124,6 +124,12 @@ export default {
   'systemLogs.viewDetails': 'View',
   'systemLogs.noDetails': 'No additional details',
 
+  'systemLogs.export': 'Export',
+  'systemLogs.exportCSV': 'Export CSV',
+  'systemLogs.exportExcel': 'Export Excel',
+  'systemLogs.exportLoading': 'Preparing export...',
+  'systemLogs.exportError': 'Export failed',
+
   'backup.title': 'Backups',
   'backup.subtitle': 'Create, download, and restore encrypted backups',
   'backup.loadError': 'Failed to load backups',

@@ -64,9 +64,10 @@ export default function PermissionsView() {
   setDescription(role.description || '')
 }, [selectedId])
 
-  const isProtected = role?.role_name === 'SUPER_ADMIN'
-  const isSystem = Boolean(role?.is_system)
-  const canManage = hasPermission(user, 'MANAGE_PERMISSIONS')
+  const isProtected = role?.role_name === 'SUPER_ADMIN';
+  const isSystem = Boolean(role?.is_system);
+  const canManage = hasPermission(user, 'MANAGE_PERMISSIONS');
+  const isNonSystemAdmin = role && role.role_name !== 'SYSTEM_ADMIN' && role.role_name !== 'SUPER_ADMIN';
 
   const toggle = (key) =>
     setSelected((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]))
@@ -235,17 +236,17 @@ const savePermissions = async () => {
                 {groups.map((g) => (
                   <fieldset key={g.group} className="perm-group">
                     <legend><strong>{g.group}</strong></legend>
-                    {g.permissions.map((p) => (
-                      <label key={p.key} className="perm-check">
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(p.key)}
-                          disabled={isProtected || busy}
-                          onChange={() => toggle(p.key)}
-                        />
-                        {' '}<code>{p.key}</code>{p.description ? ` — ${p.description}` : ''}
-                      </label>
-                    ))}
+          {g.permissions.map((p) => (
+            <label key={p.key} className="perm-check">
+              <input
+                type="checkbox"
+                checked={selected.includes(p.key)}
+                disabled={isProtected || busy || (isNonSystemAdmin && p.key === 'VIEW_SYSTEM_LOGS')}
+                onChange={() => toggle(p.key)}
+              />
+              {' '}<code>{p.key}</code>{p.description ? ` — ${p.description}` : ''}
+            </label>
+          ))}
                   </fieldset>
                 ))}
               </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
 import { useT } from '../i18n';
+import { useAuth } from '../auth/AuthContext';
 import { Field, Modal, Loading, Empty, Notice, Paginator } from '../components/ui';
 
 const LIMIT = 20;
@@ -50,6 +51,7 @@ const RESOURCE_TYPE_OPTIONS = [
 
 export default function SystemLogsView() {
   const t = useT();
+  const { user } = useAuth();
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -57,6 +59,7 @@ export default function SystemLogsView() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [selectedLog, setSelectedLog] = useState(null);
 
   const [filters, setFilters] = useState({
@@ -110,13 +113,74 @@ export default function SystemLogsView() {
     setShowFilters(false);
   }
 
+  const canExport = user?.roleName === 'SUPER_ADMIN' || (user?.roleName === 'SYSTEM_ADMIN' && (user?.permissions?.includes('VIEW_SYSTEM_LOGS') ?? false));
+
+  const doExport = async (type) => {
+    setBusy(true);
+    setExportOpen(false);
+    try {
+      const params = {};
+      if (filters.action) params.action = filters.action;
+      if (filters.resource_type) params.resource_type = filters.resource_type;
+      if (filters.user_name) params.user_name = filters.user_name;
+      if (filters.clinic_name) params.clinic_name = filters.clinic_name;
+      if (filters.date_from) params.date_from = filters.date_from;
+      if (filters.date_to) params.date_to = filters.date_to;
+      if (filters.search) params.search = filters.search;
+      const filename = type === 'csv' ? `system_logs_${Date.now()}.csv` : `system_logs_${Date.now()}.xlsx`;
+      const res = type === 'csv' ? await api.audit.exportCSV(params) : await api.audit.exportExcel(params);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || t('systemLogs.exportError'));
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || t('systemLogs.exportError'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="full-panel">
       <div className="panel-heading">
         <div><h2>{t('systemLogs.title')}</h2><p>{t('systemLogs.subtitle')}</p></div>
-        <button className="primary-button compact" onClick={() => setShowFilters((v) => !v)}>
-          {showFilters ? t('systemLogs.hideFilters') : t('systemLogs.showFilters')}
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {canExport && (
+            <div style={{ position: 'relative' }}>
+              <button className="primary-button compact" onClick={() => setExportOpen((v) => !v)} disabled={busy}>
+                {t('systemLogs.export')} ▾
+              </button>
+              {exportOpen && (
+                <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', background: '#fff', border: '1px solid #ddd', borderRadius: '6px', zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+                  <button
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px' }}
+                    onClick={() => doExport('csv')}
+                  >
+                    {t('systemLogs.exportCSV')}
+                  </button>
+                  <button
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px' }}
+                    onClick={() => doExport('excel')}
+                  >
+                    {t('systemLogs.exportExcel')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <button className="primary-button compact" onClick={() => setShowFilters((v) => !v)}>
+            {showFilters ? t('systemLogs.hideFilters') : t('systemLogs.showFilters')}
+          </button>
+        </div>
       </div>
       <Notice kind="error">{error}</Notice>
 

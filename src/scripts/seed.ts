@@ -40,6 +40,7 @@ const PERMISSIONS = [
   { key: 'RESTORE_BACKUPS', group: 'System', desc: 'استرجاع النسخ الاحتياطية' },
   { key: 'MANAGE_PREGNANCY', group: 'Clinical', desc: 'إنشاء ومتابعة سجلات الحمل في عيادة النسائية والتوليد'},
   { key: 'GENERATE_EMERGENCY_REPORT', group: 'Clinical', desc: 'إنشاء تقرير طبي طارئ للعيادة'},
+  { key: 'VIEW_SYSTEM_LOGS', group: 'System', desc: 'عرض وسجلات النظام وتصديرها' },
 ]
 
 const ROLES = [
