@@ -1,9 +1,9 @@
 import { Response } from 'express';
 import fs from 'fs';
-import path from 'path';
 import { pool } from '../../config/database';
 import { AuthenticatedRequest } from '../../middlewares/auth.middleware';
-import { generateEncryptedBackup, restoreEncryptedBackup, resolveSafeBackupPath } from './backups.service';
+import { ApiErrorCode } from '../../utils/apiErrors';
+import { generateEncryptedBackup, restoreEncryptedBackup, resolveSafeBackupPath, createBackupZip, extractBackupZip } from './backups.service';
 
 const createSafetyBackup = async (userId: number | undefined) => {
   const backup = await generateEncryptedBackup();
@@ -34,10 +34,11 @@ export const createBackup = async (req: AuthenticatedRequest, res: Response) => 
     });
   } catch (error: any) {
     console.error('Create Backup Error:', error);
-    // فشل أوامر pg_dump/psql بسبب غياب PostgreSQL client على المضيف يُعاد كـ 503
-    // برسالة واضحة بدلاً من 500 عام (البيئة المزروعة بـ Docker تتضمن postgresql-client).
     const stderr: string = error?.stderr || '';
-    if (error?.code === 'ENOENT' || /pg_dump|psql.*(not recognized|not found)/i.test(stderr) || /ENOENT/i.test(error?.message || '')) {
+    const isPgDumpMissing = error?.code === 'PG_DUMP_MISSING';
+    const isCommandNotFound = error?.code === 'ENOENT' && /command not found|no such file/i.test(stderr + ' ' + (error?.message || ''));
+    const isPgDumpStderr = /pg_dump|psql/i.test(stderr) && /command not found|no such file|not found/i.test(stderr);
+    if (isPgDumpMissing || isCommandNotFound || isPgDumpStderr) {
       return res.status(503).json({
         message: 'خدمة النسخ الاحتياطي غير متاحة: pg_dump غير مثبت على الخادم. ثبّت postgresql-client أو استخدم نشر Docker.',
       });
@@ -67,7 +68,7 @@ export const getBackupLogs = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// 3. تنزيل ملف النسخة الاحتياطية المشفر للكمبيوتر الشخصي
+// 3. تنزيل ملف النسخة الاحتياطية كـ ZIP (يحتوي .enc و .meta.json)
 export const downloadBackup = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
@@ -85,15 +86,19 @@ export const downloadBackup = async (req: AuthenticatedRequest, res: Response) =
     try {
       filePath = resolveSafeBackupPath(backupQuery.rows[0].file_path);
     } catch (error) {
-      return res.status(400).json({ message: (error as Error).message });
+      return res.status(400).json({ message: 'مسار الملف غير صالح', code: ApiErrorCode.FILE_INVALID });
     }
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ message: 'الملف غير موجود على السيرفر' });
     }
 
-    const fileName = path.basename(filePath);
-    return res.download(filePath, fileName);
+    const { zipPath, baseName } = createBackupZip(filePath);
+    const zipFileName = baseName.replace(/\.enc$/, '.zip');
+
+    res.download(zipPath, zipFileName, () => {
+      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+    });
   } catch (error) {
     console.error('Download Backup Error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء تحميل الملف' });
@@ -132,45 +137,79 @@ export const restoreBackup = async (req: AuthenticatedRequest, res: Response) =>
       message: 'تم استرجاع قاعدة البيانات بنجاح',
     });
   } catch (error: any) {
-    console.error('Restore Backup Error:', error);
-    return res.status(500).json({ message: error.message || 'حدث خطأ أثناء استرجاع النسخة' });
+    console.error('Restore Backup Error:', error.message, `requestId=${(req as any).requestId || 'unknown'}`);
+    return res.status(500).json({ message: 'حدث خطأ أثناء استرجاع النسخة', code: ApiErrorCode.INTERNAL_ERROR });
   }
 };
 
-// 5. رفع ملف نسخة احتياطية خارجي واسترجاعه يدوياً
+// 5. رفع ملف نسخة احتياطية خارجي واسترجاعه يدوياً (ZIP أو .enc)
 export const uploadAndRestoreBackup = async (req: AuthenticatedRequest, res: Response) => {
   const file = req.file;
   const { iv, auth_tag } = req.body;
 
   if (!file) {
-    return res.status(400).json({ message: 'يرجى رفع ملف النسخة الاحتياطية (.enc)' });
+    return res.status(400).json({ message: 'يرجى رفع ملف النسخة الاحتياطية' });
   }
 
-  if (!iv || !auth_tag) {
-    // حذف الملف المرفوع إذا كانت المدخلات ناقصة
-    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-    return res.status(400).json({ message: 'قيم التشفير (iv) و (auth_tag) مطلوبة لفك تشفير الملف' });
-  }
+  const isZip = file.originalname.toLowerCase().endsWith('.zip');
+
+  let tempDir: string | undefined;
 
   try {
-    await createSafetyBackup(req.user?.userId);
-    await restoreEncryptedBackup(file.path, iv, auth_tag);
-    await pool.query(
-      `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type)
-       VALUES ($1, $2, 'UPLOADED_BACKUP_RESTORED', 'BACKUP')`,
-      [req.user?.userId, req.user?.clinicId]
-    );
+    if (isZip) {
+      const { encPath, metaPath, tempDir: td } = extractBackupZip(file.path);
+      tempDir = td;
 
-    return res.status(200).json({
-      message: 'تم استرجاع قاعدة البيانات من الملف المرفوع بنجاح',
-    });
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      const metaIv = meta.iv;
+      const metaAuthTag = meta.auth_tag;
+
+      if (!metaIv || !metaAuthTag) {
+        throw new Error('Missing IV or AuthTag in backup metadata');
+      }
+
+      const expectedChecksum = meta.checksum;
+
+      await createSafetyBackup(req.user?.userId);
+      await restoreEncryptedBackup(encPath, metaIv, metaAuthTag, expectedChecksum);
+
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type)
+         VALUES ($1, $2, 'UPLOADED_BACKUP_RESTORED', 'BACKUP')`,
+        [req.user?.userId, req.user?.clinicId]
+      );
+
+      return res.status(200).json({
+        message: 'تم استرجاع قاعدة البيانات من الملف المرفوع بنجاح',
+      });
+    } else {
+      if (!iv || !auth_tag) {
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        return res.status(400).json({ message: 'قيم التشفير (iv) و (auth_tag) مطلوبة لفك تشفير الملف' });
+      }
+
+      await createSafetyBackup(req.user?.userId);
+      await restoreEncryptedBackup(file.path, iv, auth_tag);
+
+      await pool.query(
+        `INSERT INTO audit_logs (user_id, clinic_id, action, resource_type)
+         VALUES ($1, $2, 'UPLOADED_BACKUP_RESTORED', 'BACKUP')`,
+        [req.user?.userId, req.user?.clinicId]
+      );
+
+      return res.status(200).json({
+        message: 'تم استرجاع قاعدة البيانات من الملف المرفوع بنجاح',
+      });
+    }
   } catch (error: any) {
-    console.error('Upload & Restore Error:', error);
-    return res.status(500).json({ message: error.message || 'فشل فك تشفير أو استرجاع الملف المرفوع' });
+    console.error('Upload & Restore Error:', error.message, `requestId=${(req as any).requestId || 'unknown'}`);
+    return res.status(500).json({ message: 'فشل فك تشفير أو استرجاع الملف المرفوع', code: ApiErrorCode.INTERNAL_ERROR });
   } finally {
-    // إزالة الملف المرفوع المؤقت للحفاظ على النظافة والأمان
     if (file && fs.existsSync(file.path)) {
       fs.unlinkSync(file.path);
+    }
+    if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   }
 };

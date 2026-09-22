@@ -79,7 +79,7 @@ export async function downloadMedicationTemplate() {
   URL.revokeObjectURL(url)
 }
 
-// تنزيل ملف النسخة الاحتياطية مع توكن المصادقة
+// تنزيل ملف النسخة الاحتياطية كـ ZIP مع توكن المصادقة
 export async function downloadBackupFile(backupId) {
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
@@ -91,7 +91,7 @@ export async function downloadBackupFile(backupId) {
   const blob = await res.blob()
   const disposition = res.headers.get('Content-Disposition') || ''
   const match = disposition.match(/filename="?([^";]+)"?/)
-  const filename = match?.[1] || `backup_${backupId}.enc`
+  const filename = match?.[1] || `backup_${backupId}.zip`
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -255,8 +255,8 @@ export const api = {
     upload: (file, iv, authTag) => {
       const body = new FormData()
       body.append('backup_file', file)
-      body.append('iv', iv)
-      body.append('auth_tag', authTag)
+      if (iv) body.append('iv', iv)
+      if (authTag) body.append('auth_tag', authTag)
       return request('/api/backups/upload-restore', { method: 'POST', body, isForm: true })
     },
     download: (id) => downloadBackupFile(id),

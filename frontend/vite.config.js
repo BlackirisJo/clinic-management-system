@@ -74,7 +74,7 @@ export default defineConfig({
     proxy: {
       // توجيه طلبات الواجهة الخلفية عبر نفس المنشأ لتجنب مشاكل CORS
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://127.0.0.1:3000',
         changeOrigin: true,
       },
     },

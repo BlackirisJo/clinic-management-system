@@ -33,6 +33,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
   const requestId = randomUUID();
   res.setHeader('X-Request-Id', requestId);
+  (req as any).requestId = requestId;
   const startedAt = Date.now();
   res.on('finish', () => console.log(JSON.stringify({ requestId, method: req.method, path: req.path, status: res.statusCode, durationMs: Date.now() - startedAt })));
   next();
@@ -87,11 +88,10 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   if (typeof err?.message === 'string' && (err.message.includes('CSV') || err.message.includes('غير مسموح'))) {
     return res.status(400).json({ message: err.message, code: ApiErrorCode.FILE_INVALID });
   }
-  console.error('❌ Unhandled Server Error:', err.stack || err.message);
+  console.error('❌ Unhandled Server Error:', process.env.NODE_ENV === 'development' ? err.stack || err.message : err.message, `requestId=${(req as any).requestId || 'unknown'}`);
   res.status(500).json({
     message: 'حدث خطأ داخلي في الخادم',
     code: ApiErrorCode.INTERNAL_ERROR,
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined,
   });
 });
 

@@ -1,8 +1,9 @@
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import util from 'util';
+import AdmZip from 'adm-zip';
 import { pool } from '../../config/database';
 
 const execPromise = util.promisify(exec);
@@ -126,6 +127,18 @@ export const writeBackupMetaFile = (
 };
 
 // 3. إنتاج نسخة احتياطية مشفرة
+export const isPgDumpAvailable = (): { available: boolean; path?: string; error?: string } => {
+  try {
+    const result = execSync('command -v pg_dump 2>/dev/null || echo ""', { encoding: 'utf8', timeout: 5000, env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD } }).trim();
+    if (result) {
+      return { available: true, path: result };
+    }
+    return { available: false, error: 'pg_dump not found in PATH' };
+  } catch (e) {
+    return { available: false, error: (e as Error).message };
+  }
+};
+
 export const generateEncryptedBackup = async (): Promise<{
   filePath: string;
   fileSize: number;
@@ -133,6 +146,11 @@ export const generateEncryptedBackup = async (): Promise<{
   iv: string;
   authTag: string;
 }> => {
+  const pgDumpCheck = isPgDumpAvailable();
+  if (!pgDumpCheck.available) {
+    throw Object.assign(new Error('pg_dump not found — PostgreSQL client not installed'), { code: 'PG_DUMP_MISSING', pgDumpCheck });
+  }
+
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const tempSqlPath = path.join(BACKUP_DIR, `dump_${timestamp}.sql`);
   const encryptedPath = path.join(BACKUP_DIR, `backup_${timestamp}.enc`);
@@ -223,4 +241,57 @@ export const restoreEncryptedBackup = async (
     }
     restoreInProgress = false;
   }
+};
+
+// 6. إنشاء ملف ZIP يحتوي على .enc و .meta.json للتنزيل
+export const createBackupZip = (encPath: string): { zipPath: string; baseName: string } => {
+  const safeEncPath = resolveSafeBackupPath(encPath);
+  const metaPath = `${safeEncPath}.meta.json`;
+
+  if (!fs.existsSync(safeEncPath)) throw new Error('Backup file not found');
+  if (!fs.existsSync(metaPath)) throw new Error('Backup metadata not found');
+
+  const baseName = path.basename(safeEncPath);
+  const zipPath = path.join(BACKUP_DIR, `backup_${Date.now()}.zip`);
+
+  const zip = new AdmZip();
+  zip.addLocalFile(safeEncPath);
+  zip.addLocalFile(metaPath);
+  zip.writeZip(zipPath);
+
+  return { zipPath, baseName };
+};
+
+// 7. استخراج ملف ZIP واسترجاع المسارات
+export const extractBackupZip = (zipPath: string): { encPath: string; metaPath: string; tempDir: string } => {
+  const zip = new AdmZip(zipPath);
+  const entries = zip.getEntries().filter((e) => !e.isDirectory);
+
+  if (entries.length !== 2) throw new Error('ZIP must contain exactly one .enc and one .meta.json');
+
+  const encEntry = entries.find((e) => e.entryName.toLowerCase().endsWith('.enc'));
+  const metaEntry = entries.find((e) => e.entryName.toLowerCase().endsWith('.meta.json'));
+
+  if (!encEntry || !metaEntry) throw new Error('ZIP must contain exactly one .enc and one .meta.json');
+
+  for (const entry of entries) {
+    const name = entry.entryName.replace(/\\/g, '/');
+    if (name !== path.basename(name) || name.includes('..')) {
+      throw new Error('Invalid file path in ZIP');
+    }
+  }
+
+  const tempDir = path.join(BACKUP_DIR, `restore_tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+  fs.mkdirSync(tempDir, { recursive: true });
+  zip.extractAllTo(tempDir, false);
+
+  const encPath = path.join(tempDir, path.basename(encEntry.entryName));
+  const metaPath = path.join(tempDir, path.basename(metaEntry.entryName));
+
+  if (!fs.existsSync(encPath) || !fs.existsSync(metaPath)) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    throw new Error('Missing expected files in ZIP');
+  }
+
+  return { encPath, metaPath, tempDir };
 };

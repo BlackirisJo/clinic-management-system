@@ -120,13 +120,15 @@ function UploadRestoreModal({ onClose, onSaved }) {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const isZip = file ? file.name.toLowerCase().endsWith('.zip') : false
+
   async function submit(e) {
     e.preventDefault()
     setSaving(true)
     setError('')
     try {
       if (!file) throw new Error(t('backup.selectFile'))
-      await api.backups.upload(file, iv.trim(), authTag.trim())
+      await api.backups.upload(file, isZip ? '' : iv.trim(), isZip ? '' : authTag.trim())
       onSaved()
     } catch (err) {
       setError(err.message || t('backup.restoreError'))
@@ -136,15 +138,20 @@ function UploadRestoreModal({ onClose, onSaved }) {
   return (
     <Modal title={t('backup.upload.title')} subtitle={t('backup.title')} onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
-        <Field label={t('backup.upload.fileLabel')} required>
-          <input type="file" required accept=".enc" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        <Field label={isZip ? t('backup.upload.fileLabelZip') : t('backup.upload.fileLabel')} required>
+          <input type="file" required accept=".enc,.zip" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </Field>
-        <Field label={t('backup.upload.ivLabel')} required>
-          <input required dir="ltr" value={iv} onChange={(e) => setIv(e.target.value)} placeholder="iv" />
-        </Field>
-        <Field label={t('backup.upload.authTagLabel')} required>
-          <input required dir="ltr" value={authTag} onChange={(e) => setAuthTag(e.target.value)} placeholder="auth_tag" />
-        </Field>
+        {!isZip && (
+          <>
+            <Field label={t('backup.upload.ivLabel')} required>
+              <input required dir="ltr" value={iv} onChange={(e) => setIv(e.target.value)} placeholder="iv" />
+            </Field>
+            <Field label={t('backup.upload.authTagLabel')} required>
+              <input required dir="ltr" value={authTag} onChange={(e) => setAuthTag(e.target.value)} placeholder="auth_tag" />
+            </Field>
+          </>
+        )}
+        {isZip && <Notice kind="info">{t('backup.zip.metaInfo')}</Notice>}
         <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>

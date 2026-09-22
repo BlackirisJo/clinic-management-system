@@ -13,7 +13,8 @@ const upload = multer({
   dest: 'backups/temp_uploads/',
   limits: { fileSize: 250 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
-    callback(null, file.originalname.toLowerCase().endsWith('.enc'));
+    const ext = file.originalname.toLowerCase().split('.').pop();
+    callback(null, ext === 'enc' || ext === 'zip');
   },
 });
 const router = Router();

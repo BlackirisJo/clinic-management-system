@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
+import { ApiErrorCode } from '../../utils/apiErrors';
 import { AuthenticatedRequest, accessibleClinicIds, canManageAllClinics } from '../../middlewares/auth.middleware';
 
 // 1. إضافة دواء جديد إلى الدليل الشامل للأدوية
@@ -128,8 +129,8 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
-    console.error('Create Prescription Error:', error);
-    return res.status(500).json({ message: error.message || 'حدث خطأ أثناء إنتاج الروشتة' });
+    console.error('Create Prescription Error:', error.message, `requestId=${(req as any).requestId || 'unknown'}`);
+    return res.status(500).json({ message: 'حدث خطأ أثناء إنتاج الروشتة', code: ApiErrorCode.INTERNAL_ERROR });
   } finally {
     client.release();
   }
