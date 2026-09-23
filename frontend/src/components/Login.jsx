@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { Notice } from './ui'
 import LanguageSwitcher from './LanguageSwitcher'
+import Logo from './Logo'
 import { useT } from '../i18n'
 
 export default function Login() {
@@ -29,7 +30,7 @@ export default function Login() {
     <main className="login-shell">
       <section className="login-panel">
         <LanguageSwitcher variant="login" />
-        <div className="brand-mark">{t('brand.mark')}</div>
+        <Logo size={52} />
         <p className="eyebrow">{t('login.eyebrow')}</p>
         <h1>{t('login.title')}</h1>
         <p className="muted">{t('login.subtitle')}</p>

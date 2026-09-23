@@ -3,6 +3,8 @@ import { useAuth } from '../auth/AuthContext'
 import { useT } from '../i18n'
 import { todayLabel, ROLE_LABELS } from '../lib/format'
 import { isStandalone, requestInstallUi } from '../lib/pwa'
+import Logo from './Logo'
+import LogoutIcon from './LogoutIcon'
 
 // عناصر القائمة مع الأدوار المسموح لها بكل قسم — مدير النظام (SUPER_ADMIN/SYSTEM_ADMIN) يرى كل شيء
 export const NAV_ITEMS = [
@@ -80,7 +82,7 @@ export default function Layout({ active, onNavigate, children }) {
       <div className={navOpen ? 'nav-overlay show' : 'nav-overlay'} onClick={closeNav} aria-hidden="true" />
       <aside id="app-nav" className={navOpen ? 'sidebar open' : 'sidebar'} aria-label={t('layout.navAria')}>
         <div className="sidebar-head">
-           <div className="sidebar-brand"><div className="brand-mark small">{t('brand.mark')}</div><div><strong>{t('brand.name')}</strong><span>{t('brand.tagline')}</span></div></div>
+           <div className="sidebar-brand"><Logo small={true} /><div><strong>{t('brand.name')}</strong><span>{t('brand.tagline')}</span></div></div>
           <button type="button" className="nav-close" onClick={closeNav} aria-label={t('layout.closeNav')}>×</button>
         </div>
         <div className="drawer-profile">
@@ -102,7 +104,7 @@ export default function Layout({ active, onNavigate, children }) {
             </button>
           )}
           <div className="support-note"><span className="status-dot" />{t('layout.systemNormal')}</div>
-          <button className="logout-button" onClick={() => logout(false)}>↪ {t('layout.logout')}</button>
+          <button className="logout-button" onClick={() => logout(false)}><LogoutIcon size={16} color="#a9c5bf" /> {t('layout.logout')}</button>
         </div>
       </aside>
       <main className="main-content">
@@ -114,7 +116,7 @@ export default function Layout({ active, onNavigate, children }) {
             <h1>{currentLabel}</h1>
           </div>
           <div className="top-actions">
-            <button className="icon-button" title={t('layout.endAllSessions')} aria-label={t('layout.endAllSessions')} onClick={() => logout(true)}></button>
+            <button className="icon-button" title={t('layout.endAllSessions')} aria-label={t('layout.endAllSessions')} onClick={() => logout(true)}><LogoutIcon size={19} /></button>
             <div className="profile">
               <div className="avatar" aria-hidden="true">{t('layout.avatarInitial')}</div>
               <div><strong>{roleLabel}</strong><span>{clinicLabel}</span></div>
