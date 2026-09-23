@@ -1,8 +1,8 @@
 FROM node:20-alpine
 
-# postgresql16-client: مطابقة إصدار العميل مع سيرفر postgres:16 في docker-compose
-# (عميل أحدث يصدر SET transaction_timeout غير مدعوم في PG16 ويفشل الاسترجاع)
-RUN apk add --no-cache postgresql16-client openssl
+# postgresql18-client: pg_dump must be >= server version; Render runs PostgreSQL 18.
+# pg_dump 18 supports dumping from older servers (PG16 local, PG18 Render).
+RUN apk add --no-cache postgresql18-client openssl
 
 WORKDIR /app
 
