@@ -9,7 +9,7 @@ import { pool } from '../../config/database';
 const execPromise = util.promisify(exec);
 const execFilePromise = util.promisify(execFile);
 
-const getDBConnectionConfig = (): {
+export const getDBConnectionConfig = (): {
   host: string;
   port: number;
   user: string;
@@ -52,7 +52,7 @@ export const resolveSafeBackupPath = (filePath: string): string => {
 };
 let restoreInProgress = false;
 
-const getBackupKey = (): string => {
+export const getBackupKey = (): string => {
   if (!process.env.BACKUP_ENCRYPTION_KEY) {
     throw new Error('BACKUP_ENCRYPTION_KEY is required');
   }

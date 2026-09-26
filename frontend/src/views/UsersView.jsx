@@ -68,7 +68,7 @@ export default function UsersView() {
                         <span className={`presence-dot ${u.is_online ? 'online' : 'offline'}`} aria-hidden="true" title={u.is_online ? t('users.online') : t('users.offline')} />
                         {u.full_name}
                       </td>
-                      <td dir="ltr" data-label="اسم المستخدم">{u.username}</td>
+                      <td dir="ltr" data-label={t('users.table.username')}>{u.username}</td>
                       <td data-label="الدور">{ROLE_LABELS[u.role_name] || u.role_name}</td>
                       <td data-label="العيادة">{u.clinic_name || '—'}</td>
                       <td data-label="الحالة"><span className={`status ${st.cls}`}>{st.label}</span></td>

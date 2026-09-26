@@ -67,11 +67,13 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  transform: translateX(100%);       /* مخفية خارج الشاشة (transform فيزيائي غير معكوس) */
+  transform: translateX(100%);       /* RTL: مخفية خارج الشاشة (اليمين) */
   transition: transform .26s ease;
   box-shadow: -18px 0 44px #0b26264d;
 }
-.sidebar.open { transform: translateX(0); }
+:root[dir="ltr"] .sidebar { transform: translateX(-100%); }   /* LTR: مخفية خارج الشاشة (اليسار) */
+.sidebar.open,
+:root[dir="ltr"] .sidebar.open { transform: translateX(0); }
 
 .sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .nav-close {
@@ -266,10 +268,30 @@ td { padding: 11px 8px; }
 .tabs, .tab-bar {
   display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch; scrollbar-width: thin;
-  margin-inline: -14px; padding-inline: 14px;
+  margin-inline: 0; padding-inline: 0;
 }
 .tab, .tab-item { flex: 0 0 auto; white-space: nowrap; min-height: 42px; }
 .tab { padding: 10px 13px; }
+
+@media (max-width: 767px) {
+  .full-panel .tabs,
+  .patient-modal .tabs,
+  .tabs {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow-x: visible;
+    gap: 8px;
+  }
+  .full-panel .tab,
+  .patient-modal .tab,
+  .tab {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+}
 /* ===== 11) تفاصيل الشاشات ===== */
 /* الروشتة والفاتورة (مع الحفاظ الكامل على قواعد الطباعة) */
 .paper-head { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -407,12 +429,15 @@ td { padding: 11px 8px; }
   /* الجداول تعود جداول حقيقية بتمرير أفقي (التابلت يتحمل ذلك) */
   .table-cards { overflow-x: auto; }
   table { font-size: 11px; white-space: nowrap; }
+.perm-layout { grid-template-columns: 240px minmax(0, 1fr); }
 }
 
 @media (min-width: 1024px) {
-  /* عودة الشريط الجانبي الثابت (نفس قيم App.css الأصلية حرفياً) */
+  /* عودة الشريط الجانبي الثابت ( نفس قيم App.css الأصلية حرفياً) */
   .app-shell { display: flex; }
-  .sidebar {
+  .sidebar,
+  :root[dir="ltr"] .sidebar,
+  :root[dir="rtl"] .sidebar {
     position: static; width: 250px; min-width: 250px;
     inset-inline-start: auto; transform: none; transition: none;
     box-shadow: none; z-index: auto; overflow-y: visible;
