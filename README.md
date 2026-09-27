@@ -715,6 +715,152 @@ Some modules may still require additional testing, security review, performance 
 
 ---
 
+## Master Project Roadmap
+
+### Phase 0–6 — Historical Project Phases
+**Status:** Historical
+
+Detailed Phase 0–6 records are not reconstructed here because their exact historical scope is not reliably documented in the repository. No phase details are to be invented or inferred from commit history.
+
+### Phase 7 — Security, Reliability & Final QA
+**Status:** COMPLETED
+
+#### 7A — Security Audit
+- Security audit and hardening.
+- Authentication, authorization, RBAC and scope-boundary verification.
+- Session security and revocation.
+- Security regression verification.
+
+#### 7B — Error Handling & Observability
+- Centralized API error handling.
+- Stable API error codes.
+- Validation and global 500 handling.
+- Error-handling regression verification.
+
+#### 7C — Database & Backup/Recovery
+- Database integrity and operational reliability.
+- Backup and recovery workflows.
+- Backup/recovery verification and automated tests.
+
+#### 7D — Performance
+- Backend performance optimization.
+- Preserve authentication, RBAC and clinic-scope semantics.
+- Optimize independent asynchronous operations without changing behavior.
+- Performance regression verification.
+
+#### 7E — Docker / Production Reliability
+- Docker and production-runtime reliability.
+- Production configuration verification.
+- CORS and deployment-related reliability checks.
+
+#### 7F — Final QA
+- Backend build and test verification.
+- Frontend build verification.
+- Authentication/session/RBAC regression.
+- Backup/recovery verification.
+- CORS verification.
+- Docker verification.
+- RTL/LTR and i18n verification.
+- Final blocker/regression review.
+
+### Phase 8 — UI/UX Foundation
+**Status:** CURRENT
+
+#### Global Table UI
+- Every system data table must be inside its own visually separated container/box.
+- Tables must not extend to the page edge.
+- Tables must not create page-level horizontal or vertical overflow.
+- Vertical scrolling belongs to the table container.
+- Horizontal scrolling remains internal to the table container when required.
+- Preserve readability; do not solve overflow by shrinking tables to an unusable size.
+- Support RTL and LTR.
+- Support phone, tablet and desktop layouts.
+- Apply consistently across the system.
+
+#### Billing & Finance Monthly Financial Indicators
+- Fully responsive and dynamic.
+- Arabic and English support.
+- No viewport overflow.
+- Progressively reduce font/element sizes or reflow/reorder content into additional rows or move content downward when necessary.
+- Preserve readability.
+- Verify RTL/LTR.
+- Verify phone/tablet/desktop layouts.
+
+### Phase 9 — Medication & Clinical Data Expansion
+**Status:** FUTURE
+
+#### Structured Medication Dosage Form
+- Dosage form must be a structured selectable coded field, not free text.
+- Use stable codes such as `TABLET`, `CAPSULE`, `INJECTION`, `SUPPOSITORY`.
+- Provide Arabic/English i18n labels.
+- Support medication add/edit workflows.
+- Display dosage form correctly in the medication table.
+- Support doctor medication search/select/prescribe workflows.
+- Minimum medication identity: name + strength + dosage form.
+- Support medication import.
+- Provide a downloadable import template.
+- Template headers/content must support Arabic and English.
+- Preserve import/export compatibility.
+- Add appropriate automated tests.
+- Distinguish medications with different strengths and dosage forms, e.g. Paracetamol 500 mg — Tablets vs Paracetamol 120 mg/5ml — Syrup.
+
+### Phase 10 — Security & System Observability
+**Status:** FUTURE
+
+#### System Logs
+- Add Audit Logs and Error Logs.
+- Log critical actions including:
+  - Patient deletion.
+  - Invoice deletion/editing.
+  - Prescriptions.
+  - Permission changes.
+  - Session-related actions.
+- Record username, timestamp, result, and relevant change details when applicable.
+- System Logs API must be protected by backend authorization.
+- System Logs UI and API access must be restricted to `SUPER_ADMIN` only.
+- `SYSTEM_ADMIN` and all other roles must be denied access.
+- Include remaining enhanced audit/security logging requirements where applicable.
+
+### Phase 11 — Financial & Reporting Expansion
+**Status:** FUTURE
+
+- Enhanced financial reporting.
+- Advanced invoice management.
+- Enhanced reporting dashboards.
+- Existing financial/reporting expansion requirements.
+
+### Phase 12 — Clinical & Operational Expansion
+**Status:** FUTURE
+
+- Expanded specialty-specific clinical workflows.
+- Advanced appointment workflows.
+- Existing clinical expansion requirements.
+
+### Phase 13 — Reliability & Production
+**Status:** FUTURE
+
+- Improved database integrity constraints.
+- Backup/disaster-recovery completion and hardening.
+- Expanded automated test coverage.
+- Remaining performance optimization.
+- Production deployment hardening.
+
+### Phase 14 — Product Extensions
+**Status:** FUTURE
+
+#### Technical Support System
+- Partially separate from the main system.
+- Separate database.
+- Separate support login page.
+- Separate support system/interface.
+- Independent development and follow-up.
+
+#### Release Notes
+- Add a Release Notes feature inside the main system.
+- Allow users to view relevant system release/update information.
+
+---
+
 ## Project Goals
 
 The long-term goal is to provide a maintainable and extensible healthcare management platform capable of supporting:

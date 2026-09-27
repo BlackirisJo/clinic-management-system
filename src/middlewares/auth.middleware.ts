@@ -110,18 +110,21 @@ export const authenticateJWT = async (
     );
     if (!session.rowCount) return res.status(403).json({ message: 'انتهت صلاحية جلستك أو تم إنهاؤها من قبل مدير النظام', code: ApiErrorCode.SESSION_REVOKED });
 
-    // جلب اسم الدور والصلاحيات المرتبطة بـ role_id من قاعدة البيانات
-    const roleAndPermissionsQuery = await pool.query(
-      `SELECT r.role_name, p.permission_key 
-       FROM roles r
-       LEFT JOIN role_permissions rp ON r.role_id = rp.role_id
-       LEFT JOIN permissions p ON rp.permission_id = p.permission_id
-       WHERE r.role_id = $1`,
-      [decoded.roleId]
-    );
+    // جلب الدور والصلحيات والعيادات المسندة - استقلالية تامة، تُشغّل المتوازية
+    const [roleAndPermissionsQuery, clinicIds] = await Promise.all([
+      pool.query(
+        `SELECT r.role_name, p.permission_key 
+         FROM roles r
+         LEFT JOIN role_permissions rp ON r.role_id = rp.role_id
+         LEFT JOIN permissions p ON rp.permission_id = p.permission_id
+         WHERE r.role_id = $1`,
+        [decoded.roleId]
+      ),
+      loadUserClinicIds(decoded.userId, decoded.clinicId),
+    ]);
 
     if (roleAndPermissionsQuery.rows.length === 0) {
-      return res.status(403).json({ message: 'الدور الخاص بك غير معرف بالنظام', code: ApiErrorCode.ROLE_UNKNOWN });
+      return res.status(403).json({ message: 'الدور الخاص بك غير معرف والنظام', code: ApiErrorCode.ROLE_UNKNOWN });
     }
 
     const roleName = roleAndPermissionsQuery.rows[0]?.role_name;
@@ -135,7 +138,7 @@ export const authenticateJWT = async (
       clinicId: decoded.clinicId,
       roleName,
       permissions,
-      clinicIds: await loadUserClinicIds(decoded.userId, decoded.clinicId),
+      clinicIds,
     };
     req.authToken = { jti: decoded.jti };
 
