@@ -764,7 +764,7 @@ Detailed Phase 0–6 records are not reconstructed here because their exact hist
 - Final blocker/regression review.
 
 ### Phase 8 — UI/UX Foundation
-**Status:** CURRENT
+**Status:** COMPLETED
 
 #### Global Table UI
 - Every system data table must be inside its own visually separated container/box.
@@ -787,7 +787,7 @@ Detailed Phase 0–6 records are not reconstructed here because their exact hist
 - Verify phone/tablet/desktop layouts.
 
 ### Phase 9 — Medication & Clinical Data Expansion
-**Status:** FUTURE
+**Status:** CURRENT
 
 #### Structured Medication Dosage Form
 - Dosage form must be a structured selectable coded field, not free text.

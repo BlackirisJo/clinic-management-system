@@ -57,17 +57,19 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 .app-shell { min-height: 100vh; min-height: 100dvh; }
 
 .sidebar {
+  box-sizing: border-box;
   position: fixed;
   top: 0;
   bottom: 0;
-  inset-inline-start: 0;            /* RTL: جهة البداية (اليمين) — القائمة تنزلق منها */
+  inset-inline-start: 0;            /* RTL:journal de debut (droite) — le menu glisse d'ici */
   width: min(86vw, 300px);
+  max-width: calc(100vw - 8px);
   z-index: 120;
   padding: calc(18px + var(--safe-top)) 16px calc(18px + var(--safe-bottom));
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  transform: translateX(100%);       /* RTL: مخفية خارج الشاشة (اليمين) */
+  transform: translateX(100%);       /* RTL: masqué hors de l'écran (droite) */
   transition: transform .26s ease;
   box-shadow: -18px 0 44px #0b26264d;
 }
