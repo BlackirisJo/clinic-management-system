@@ -19,6 +19,7 @@ import UsersView from './views/UsersView'
 import BackupsView from './views/BackupsView'
 import ClinicsView from './views/ClinicsView'
 import PermissionsView from './views/PermissionsView'
+import PharmacyView from './views/PharmacyView'
 
 const VIEWS = {
   overview: OverviewView,
@@ -32,6 +33,7 @@ const VIEWS = {
   users: UsersView,
   backups: BackupsView,
   permissions: PermissionsView,
+  pharmacy: PharmacyView,
 }
 
 function Shell() {

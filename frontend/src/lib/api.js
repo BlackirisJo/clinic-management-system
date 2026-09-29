@@ -136,6 +136,7 @@ export const api = {
     deleteMedication: (id) => request(`/api/prescriptions/medications/${id}`, { method: 'DELETE' }),
     create: (body) => request('/api/prescriptions', { method: 'POST', body }),
     get: (id) => request(`/api/prescriptions/${id}`),
+    getPharmacyQueue: () => request('/api/prescriptions/pharmacy/queue'),
     importTemplate: () => downloadMedicationTemplate(),
     validateImport: (formData) => request('/api/medications/import/validate', { method: 'POST', body: formData, isForm: true }),
     executeImport: (formData) => request('/api/medications/import', { method: 'POST', body: formData, isForm: true }),

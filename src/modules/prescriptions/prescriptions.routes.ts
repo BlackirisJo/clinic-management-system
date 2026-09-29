@@ -6,6 +6,7 @@ import {
   deleteMedication,
   createPrescription,
   getPrescriptionById,
+  getPharmacyQueue,
 } from './prescriptions.controller';
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
 import { validateBody } from '../../middlewares/validate.middleware';
@@ -21,6 +22,9 @@ router.post('/medications', requirePermission('MANAGE_MEDICATIONS'), createMedic
 router.get('/medications', requirePermission('VIEW_MEDICATIONS'), getMedications);
 router.put('/medications/:id', requirePermission('MANAGE_MEDICATIONS'), updateMedication);
 router.delete('/medications/:id', requirePermission('MANAGE_MEDICATIONS'), deleteMedication);
+
+// مسارات الصيدلية
+router.get('/pharmacy/queue', requirePermission('VIEW_PHARMACY_QUEUE'), getPharmacyQueue);
 
 // مسارات الروشتة الطبية
 router.post('/', requirePermission('CREATE_PRESCRIPTION'), validateBody(prescriptionSchema), createPrescription);

@@ -12,6 +12,7 @@ export const NAV_ITEMS = [
   { id: 'patients', label: 'navigation.patients', icon: '◉', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST'] },
   { id: 'appointments', label: 'navigation.appointments', icon: '◷', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'] },
   { id: 'prescriptions', label: 'navigation.prescriptions', icon: '✎', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'DOCTOR'] },
+  { id: 'pharmacy', label: 'navigation.pharmacy', icon: '💊', permission: 'VIEW_PHARMACY_QUEUE' },
   { id: 'billing', label: 'navigation.billing', icon: '◈', permission: 'VIEW_INVOICES' },
   { id: 'reports', label: 'navigation.reports', icon: '▥', permission: 'VIEW_REPORTS' },
   { id: 'clinics', label: 'navigation.clinics', icon: '⌗', roles: ['SUPER_ADMIN', 'SYSTEM_ADMIN'] },

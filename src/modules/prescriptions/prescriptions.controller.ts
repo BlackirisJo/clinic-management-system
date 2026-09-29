@@ -310,3 +310,65 @@ export const getPrescriptionById = async (req: AuthenticatedRequest, res: Respon
     return res.status(500).json({ message: 'حدث خطأ عند جلب بيانات الروشتة' });
   }
 };
+
+// 5. Pharmacy Queue - list prescriptions for pharmacist to dispense
+export const getPharmacyQueue = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const allowedClinics = accessibleClinicIds(req);
+    const isAdmin = canManageAllClinics(req);
+
+    let clinicFilter = '';
+    const params: any[] = [];
+    if (!isAdmin && allowedClinics && allowedClinics.length > 0) {
+      clinicFilter = `AND v.clinic_id = ANY($1::int[])`;
+      params.push(allowedClinics);
+    }
+
+    const query = `
+      SELECT
+        p.prescription_id,
+        p.created_at,
+        p.notes,
+        pt.full_name AS patient_name,
+        pt.gender,
+        pt.date_of_birth,
+        u.full_name AS doctor_name,
+        v.clinic_id,
+        c.clinic_name,
+        json_agg(
+          json_build_object(
+            'item_id', pi.item_id,
+            'dosage', pi.dosage,
+            'frequency', pi.frequency,
+            'duration', pi.duration,
+            'timing_instructions', pi.timing_instructions,
+            'repeats_count', pi.repeats_count,
+            'trade_name', m.trade_name,
+            'scientific_name', m.scientific_name,
+            'strength', m.strength,
+            'dosage_form', m.dosage_form
+          )
+        ) AS items
+      FROM prescriptions p
+      JOIN patients pt ON p.patient_id = pt.patient_id
+      JOIN users u ON p.doctor_id = u.user_id
+      JOIN visits v ON p.visit_id = v.visit_id
+      LEFT JOIN clinics c ON c.clinic_id = v.clinic_id
+      LEFT JOIN prescription_items pi ON pi.prescription_id = p.prescription_id
+      LEFT JOIN medications m ON pi.medication_id = m.medication_id
+      WHERE 1=1 ${clinicFilter}
+      GROUP BY p.prescription_id, p.created_at, p.notes, pt.full_name, pt.gender, pt.date_of_birth, u.full_name, v.clinic_id, c.clinic_name
+      ORDER BY p.created_at DESC
+      LIMIT 100
+    `;
+
+    const result = await pool.query(query, params);
+
+    return res.status(200).json({
+      prescriptions: result.rows,
+    });
+  } catch (error) {
+    console.error('Get Pharmacy Queue Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ عند جلب طابور الصيدلية' });
+  }
+};

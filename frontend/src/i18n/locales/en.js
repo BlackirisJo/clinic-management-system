@@ -97,11 +97,29 @@ export default {
   'prescriptions.timing.placeholder': 'e.g. after food',
   'prescriptions.repeats': 'Number of Refills',
   'prescriptions.remove': 'Remove Item',
+
+  // ===== pharmacy (Phase 10A) =====
+  'pharmacy.title': 'Pharmacy',
+  'pharmacy.subtitle': 'Prescription queue and dispensing',
+  'pharmacy.queue.title': 'Prescription Queue',
+  'pharmacy.queue.subtitle': 'Prescriptions awaiting dispensing',
+  'pharmacy.queue.loading': 'Loading queue...',
+  'pharmacy.queue.empty': 'No prescriptions awaiting dispensing',
+  'pharmacy.queue.col.date': 'Date',
+  'pharmacy.queue.col.patient': 'Patient',
+  'pharmacy.queue.col.doctor': 'Doctor',
+  'pharmacy.queue.col.clinic': 'Clinic',
+  'pharmacy.queue.col.medications': 'Medications',
+  'pharmacy.queue.col.actions': 'Actions',
+  'pharmacy.queue.view': 'View',
+  'pharmacy.error.load': 'Failed to load pharmacy queue',
+
   'navigation.billing': 'Billing & finance',
   'navigation.reports': 'Reports',
   'navigation.clinics': 'Clinics',
   'navigation.users': 'Users',
   'navigation.backups': 'Backups',
+  'navigation.pharmacy': 'Pharmacy',
 
   // ===== system logs =====
   'navigation.systemLogs': 'System Logs',
