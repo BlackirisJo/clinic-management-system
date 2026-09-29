@@ -132,6 +132,8 @@ export const api = {
   prescriptions: {
     listMedications: (params) => request('/api/prescriptions/medications', { params }),
     createMedication: (body) => request('/api/prescriptions/medications', { method: 'POST', body }),
+    updateMedication: (id, body) => request(`/api/prescriptions/medications/${id}`, { method: 'PUT', body }),
+    deleteMedication: (id) => request(`/api/prescriptions/medications/${id}`, { method: 'DELETE' }),
     create: (body) => request('/api/prescriptions', { method: 'POST', body }),
     get: (id) => request(`/api/prescriptions/${id}`),
     importTemplate: () => downloadMedicationTemplate(),

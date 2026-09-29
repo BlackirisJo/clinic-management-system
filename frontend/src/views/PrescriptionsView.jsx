@@ -34,6 +34,7 @@ function MedicationsTab() {
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [editMed, setEditMed] = useState(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -48,23 +49,46 @@ function MedicationsTab() {
 
   useEffect(() => { load() }, [load])
 
-  const canImport = user?.permissions?.includes('MANAGE_MEDICATIONS') ||
-    user?.permissions?.includes('CREATE_PRESCRIPTION') ||
+  const canManageMedications = user?.permissions?.includes('MANAGE_MEDICATIONS') ||
     user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN'
+
+  const canImport = canManageMedications ||
+    user?.permissions?.includes('CREATE_PRESCRIPTION')
+
+  async function handleDelete(med) {
+    if (!window.confirm(t('prescriptions.delete.confirm'))) return
+    setError('')
+    try {
+      await api.prescriptions.deleteMedication(med.medication_id)
+      load()
+    } catch (err) {
+      const msg = err.message || ''
+      if (msg.includes('referenced') || msg.includes('prescriptions')) {
+        setError(t('prescriptions.delete.referenced'))
+      } else {
+        setError(t('prescriptions.delete.error'))
+      }
+    }
+  }
+
+  function startEdit(med) {
+    setEditMed(med)
+    setShowAdd(true)
+  }
 
   return (
     <div className="tab-inner">
       <div className="toolbar">
         <input className="input" placeholder={t("search.medication.placeholder")} value={search}
           onChange={(e) => setSearch(e.target.value)} />
-        <button className="primary-button compact" onClick={() => setShowAdd(true)}>{t('prescriptions.add')}</button>
+        <button className="primary-button compact" onClick={() => { setEditMed(null); setShowAdd(true); }}>{t('prescriptions.add')}</button>
         {canImport && <button className="secondary-button compact" onClick={() => setShowImport(true)}>{t('prescriptions.import')}</button>}
       </div>
       <Notice kind="error">{error}</Notice>
       {rows === null ? <Loading /> : rows.length === 0 ? <Empty text={t('prescriptions.medications.empty')} /> : (
         <div className="table-wrap table-cards">
           <table>
-            <thead><tr><th>{t('prescriptions.brand')}</th><th>{t('prescriptions.scientific')}</th><th>{t('prescriptions.strength')}</th><th>{t('prescriptions.dosageForm')}</th><th>{t('prescriptions.dosage')}</th><th>{t('prescriptions.instructions')}</th></tr></thead>
+            <thead><tr><th>{t('prescriptions.brand')}</th><th>{t('prescriptions.scientific')}</th><th>{t('prescriptions.strength')}</th><th>{t('prescriptions.dosageForm')}</th><th>{t('prescriptions.dosage')}</th><th>{t('prescriptions.instructions')}</th><th>{t('prescriptions.actions')}</th></tr></thead>
             <tbody>
               {rows.map((m) => (
                 <tr key={m.medication_id}>
@@ -74,45 +98,86 @@ function MedicationsTab() {
                   <td data-label={t('prescriptions.dosageForm')}>{dosageFormLabel(m.dosage_form, t)}</td>
                   <td data-label={t('prescriptions.dosage')}>{m.default_dosage || '—'}</td>
                   <td data-label={t('prescriptions.instructions')}>{m.instructions || '—'}</td>
+                  <td data-label={t('prescriptions.actions')}>
+                    {canManageMedications && (
+                      <>
+                        <button className="text-button" onClick={() => startEdit(m)}>{t('users.action.edit')}</button>
+                        <button className="text-button danger" onClick={() => handleDelete(m)}>{t('users.action.delete')}</button>
+                      </>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {showAdd && <AddMedicationModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load() }} />}
+      {showAdd && <AddMedicationModal editMed={editMed} onClose={() => { setShowAdd(false); setEditMed(null); }} onSaved={() => { setShowAdd(false); setEditMed(null); load() }} />}
       {showImport && <ImportMedicationsModal onClose={() => setShowImport(false)} onImported={() => load()} />}
     </div>
   )
 }
 
-function AddMedicationModal({ onClose, onSaved }) {
+function AddMedicationModal({ onClose, onSaved, editMed }) {
   const t = useT()
-  const [form, setForm] = useState({ trade_name: '', scientific_name: '', default_dosage: '', strength: '', dosage_form: '', instructions: '' })
+  const isEdit = !!editMed
+  const initialForm = isEdit ? {
+    trade_name: editMed.trade_name || '',
+    scientific_name: editMed.scientific_name || '',
+    default_dosage: editMed.default_dosage || '',
+    strength: editMed.strength || '',
+    dosage_form: editMed.dosage_form || '',
+    instructions: editMed.instructions || '',
+  } : { trade_name: '', scientific_name: '', default_dosage: '', strength: '', dosage_form: '', instructions: '' }
+  const [form, setForm] = useState(initialForm)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (editMed) {
+      setForm({
+        trade_name: editMed.trade_name || '',
+        scientific_name: editMed.scientific_name || '',
+        default_dosage: editMed.default_dosage || '',
+        strength: editMed.strength || '',
+        dosage_form: editMed.dosage_form || '',
+        instructions: editMed.instructions || '',
+      })
+    }
+  }, [editMed])
 
   async function submit(e) {
     e.preventDefault()
     setSaving(true)
     setError('')
     try {
-      await api.prescriptions.createMedication({
-        trade_name: form.trade_name,
-        scientific_name: form.scientific_name,
-        default_dosage: form.default_dosage || undefined,
-        strength: form.strength || undefined,
-        dosage_form: form.dosage_form || undefined,
-        instructions: form.instructions || undefined,
-      })
+      if (isEdit) {
+        await api.prescriptions.updateMedication(editMed.medication_id, {
+          trade_name: form.trade_name,
+          scientific_name: form.scientific_name,
+          default_dosage: form.default_dosage || undefined,
+          strength: form.strength || undefined,
+          dosage_form: form.dosage_form || undefined,
+          instructions: form.instructions || undefined,
+        })
+      } else {
+        await api.prescriptions.createMedication({
+          trade_name: form.trade_name,
+          scientific_name: form.scientific_name,
+          default_dosage: form.default_dosage || undefined,
+          strength: form.strength || undefined,
+          dosage_form: form.dosage_form || undefined,
+          instructions: form.instructions || undefined,
+        })
+      }
       onSaved()
     } catch (err) {
-      setError(err.message || t('prescriptions.modal.error'))
+      setError(err.message || (isEdit ? t('prescriptions.edit.error') : t('prescriptions.modal.error')))
     } finally { setSaving(false) }
   }
 
   return (
-    <Modal title={t('prescriptions.modal.title')} subtitle={t('prescriptions.modal.subtitle')} onClose={onClose}>
+    <Modal title={isEdit ? t('prescriptions.edit.title') : t('prescriptions.modal.title')} subtitle={t('prescriptions.modal.subtitle')} onClose={onClose}>
       <form className="patient-form" onSubmit={submit}>
         <Field label={t('prescriptions.brand')} required><input required value={form.trade_name} onChange={(e) => setForm({ ...form, trade_name: e.target.value })} /></Field>
         <Field label={t('prescriptions.scientific')} required><input required value={form.scientific_name} onChange={(e) => setForm({ ...form, scientific_name: e.target.value })} /></Field>
@@ -128,7 +193,7 @@ function AddMedicationModal({ onClose, onSaved }) {
         <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>
-          <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : t('prescriptions.modal.submit')}</button>
+          <button className="primary-button" disabled={saving}>{saving ? t('common.saving') : (isEdit ? t('prescriptions.edit.title') : t('prescriptions.modal.submit'))}</button>
         </div>
       </form>
     </Modal>

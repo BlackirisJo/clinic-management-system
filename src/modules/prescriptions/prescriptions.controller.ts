@@ -294,7 +294,7 @@ export const getPrescriptionById = async (req: AuthenticatedRequest, res: Respon
 
     const itemsQuery = await pool.query(
       `SELECT pi.item_id, pi.dosage, pi.frequency, pi.duration, pi.timing_instructions, pi.repeats_count,
-              m.trade_name, m.scientific_name
+              m.trade_name, m.scientific_name, m.strength, m.dosage_form
        FROM prescription_items pi
        JOIN medications m ON pi.medication_id = m.medication_id
        WHERE pi.prescription_id = $1`,
