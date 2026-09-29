@@ -1,14 +1,34 @@
 import { z } from 'zod';
+import { DOSAGE_FORM_CODES, isDosageForm } from '../lib/dosageForm';
 
-// أعمدة CSV المطلوبة لدليل الأدوية
-export const REQUIRED_CSV_COLUMNS = ['trade_name', 'scientific_name'] as const;
+// أعمدة CSV المطلوبة لدليل الأدوية (Phase 9D — الترتيب الكانوني: القوة وشكل الجرعة قبل الجرعة الافتراضية)
+export const REQUIRED_CSV_COLUMNS = ['trade_name', 'scientific_name', 'strength', 'dosage_form'] as const;
 export const OPTIONAL_CSV_COLUMNS = ['default_dosage', 'instructions'] as const;
-export const ALL_CSV_COLUMNS = [...REQUIRED_CSV_COLUMNS, ...OPTIONAL_CSV_COLUMNS] as const;
+export const ALL_CSV_COLUMNS = [
+  'trade_name',
+  'scientific_name',
+  'strength',
+  'dosage_form',
+  'default_dosage',
+  'instructions',
+] as const;
+
+// شكل الدواء: قيمة مُشغّلة من القائمة الواحدة الموحّدة (src/lib/dosageForm.ts) — بلا قائمة ثانية يدوية
+const dosageFormCodeSchema = z
+  .string()
+  .trim()
+  .min(1, 'شكل الدواء مطلوب')
+  .transform((value) => value.toUpperCase())
+  .refine((value) => isDosageForm(value), {
+    message: `شكل الدواء غير صحيح. القيم المسموحة: ${DOSAGE_FORM_CODES.join(', ')}`,
+  });
 
 // مخطط التحقق لسطر واحد من CSV
 export const medicationImportRowSchema = z.object({
   trade_name: z.string().trim().min(1, 'الاسم التجاري مطلوب').max(150, 'الاسم التجاري طويل جداً'),
   scientific_name: z.string().trim().min(1, 'الاسم العلمي مطلوب').max(150, 'الاسم العلمي طويل جداً'),
+  strength: z.string().trim().min(1, 'قوة الدواء مطلوبة').max(100, 'قوة الدواء طويلة جداً'),
+  dosage_form: dosageFormCodeSchema,
   default_dosage: z.union([z.string().max(100), z.null()]).optional().default(null),
   instructions: z.union([z.string().max(5000), z.null()]).optional().default(null),
 });

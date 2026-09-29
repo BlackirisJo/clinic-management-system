@@ -2,6 +2,8 @@ import { Router } from 'express';
 import {
   createMedication,
   getMedications,
+  updateMedication,
+  deleteMedication,
   createPrescription,
   getPrescriptionById,
 } from './prescriptions.controller';
@@ -17,6 +19,8 @@ router.use(authenticateJWT);
 // مسارات الدليل العام للأدوية
 router.post('/medications', requirePermission('MANAGE_MEDICATIONS'), createMedication);
 router.get('/medications', requirePermission('VIEW_MEDICATIONS'), getMedications);
+router.put('/medications/:id', requirePermission('MANAGE_MEDICATIONS'), updateMedication);
+router.delete('/medications/:id', requirePermission('MANAGE_MEDICATIONS'), deleteMedication);
 
 // مسارات الروشتة الطبية
 router.post('/', requirePermission('CREATE_PRESCRIPTION'), validateBody(prescriptionSchema), createPrescription);

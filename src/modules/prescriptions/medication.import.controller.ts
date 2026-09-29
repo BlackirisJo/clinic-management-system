@@ -18,20 +18,37 @@ function csvInjectionSafe(value: string): string {
   return /^[=+\-@]/.test(value) ? `'${value}` : value;
 }
 
-function normalizeRow(rawRow: Record<string, string>): MedicationImportRow | null {
+// قواعد الأعمدة الموحّدة — نفس القاعدة تماماً في /validate و /import (عمود ناقص أو مجهول = رفض)
+function checkCsvColumns(fileColumns: string[]): { missing: string[]; unknown: string[] } {
+  const allowed: readonly string[] = ALL_CSV_COLUMNS;
+  return {
+    missing: ALL_CSV_COLUMNS.filter((c) => !fileColumns.includes(c)),
+    unknown: fileColumns.filter((c) => !allowed.includes(c)),
+  };
+}
+
+// تحليل صف واحد: مسار واحد مشترك للفحص والتنفيذ (نفس القواعد ونفس رسائل الخطأ)
+function parseImportRow(rawRow: Record<string, string>): { row: MedicationImportRow } | { error: string } {
   const parsed = medicationImportRowSchema.safeParse({
     trade_name: rawRow.trade_name ?? '',
     scientific_name: rawRow.scientific_name ?? '',
+    strength: rawRow.strength ?? '',
+    dosage_form: rawRow.dosage_form ?? '',
     default_dosage: rawRow.default_dosage && rawRow.default_dosage !== '' ? rawRow.default_dosage : null,
     instructions: rawRow.instructions && rawRow.instructions !== '' ? rawRow.instructions : null,
   });
-  if (!parsed.success) return null;
+  if (!parsed.success) {
+    return { error: parsed.error.issues.map((i) => i.message).join('؛ ') };
+  }
   return {
-    ...parsed.data,
-    trade_name: csvInjectionSafe(parsed.data.trade_name),
-    scientific_name: csvInjectionSafe(parsed.data.scientific_name),
-    default_dosage: parsed.data.default_dosage ? csvInjectionSafe(parsed.data.default_dosage) : null,
-    instructions: parsed.data.instructions ? csvInjectionSafe(parsed.data.instructions) : null,
+    row: {
+      ...parsed.data,
+      trade_name: csvInjectionSafe(parsed.data.trade_name),
+      scientific_name: csvInjectionSafe(parsed.data.scientific_name),
+      strength: csvInjectionSafe(parsed.data.strength),
+      default_dosage: parsed.data.default_dosage ? csvInjectionSafe(parsed.data.default_dosage) : null,
+      instructions: parsed.data.instructions ? csvInjectionSafe(parsed.data.instructions) : null,
+    },
   };
 }
 
@@ -49,8 +66,9 @@ function parseCsvBuffer(buffer: Buffer): Record<string, string>[] {
 
 export const generateMedicationTemplate = (_req: AuthenticatedRequest, res: Response) => {
   const header = ALL_CSV_COLUMNS.join(',');
+  // مثال صالح بالترتيب الكانوني: trade_name, scientific_name, strength, dosage_form, default_dosage, instructions
   const exampleRow = [
-    'Panadol', 'Paracetamol', '500 mg', 'Take 1-2 tablets every 4-6 hours',
+    'Panadol', 'Paracetamol', '500 mg', 'TABLET', '1-2 tablets every 4-6 hours', 'Take after food',
   ].map((v) => `"${v.replace(/"/g, '""')}"`).join(',');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="medication_template.csv"');
@@ -69,9 +87,8 @@ export const validateMedicationImport = async (req: AuthenticatedRequest, res: R
     if (!records.length) return res.status(400).json({ message: 'الملف لا يحتوي على صفوف' });
 
     const fileColumns = Object.keys(records[0] ?? {});
-    const missing = ALL_CSV_COLUMNS.filter((c) => !fileColumns.includes(c));
+    const { missing, unknown } = checkCsvColumns(fileColumns);
     if (missing.length) return res.status(400).json({ message: `الأعمدة الناقصة: ${missing.join('، ')}`, missingColumns: missing });
-    const unknown = fileColumns.filter((c) => !ALL_CSV_COLUMNS.includes(c as any));
     if (unknown.length) return res.status(400).json({ message: `أعمدة غير معروفة: ${unknown.join('، ')}`, unknownColumns: unknown });
     if (records.length > MAX_ROWS) return res.status(400).json({ message: `عدد الصفوف يتجاوز الحد المسموح (${MAX_ROWS})` });
 
@@ -85,14 +102,9 @@ export const validateMedicationImport = async (req: AuthenticatedRequest, res: R
 
     records.forEach((rawRow, idx) => {
       const rowNumber = idx + 1;
-      const parsed = medicationImportRowSchema.safeParse({
-        trade_name: rawRow.trade_name ?? '', scientific_name: rawRow.scientific_name ?? '',
-        default_dosage: rawRow.default_dosage && rawRow.default_dosage !== '' ? rawRow.default_dosage : null,
-        instructions: rawRow.instructions && rawRow.instructions !== '' ? rawRow.instructions : null,
-      });
-      if (!parsed.success) { invalidRows.push({ rowNumber, raw: rawRow, error: parsed.error.issues.map((i) => i.message).join('؛ ') }); return; }
-      const n = normalizeRow(rawRow);
-      if (!n) { invalidRows.push({ rowNumber, raw: rawRow, error: 'فشل التطبيع' }); return; }
+      const parsedRow = parseImportRow(rawRow);
+      if ('error' in parsedRow) { invalidRows.push({ rowNumber, raw: rawRow, error: parsedRow.error }); return; }
+      const n = parsedRow.row;
       const key = n.trade_name.toLowerCase();
       if (existingNames.has(key)) { existing++; return; }
       if (seenInFile.has(key)) { duplicateInFile++; return; }
@@ -124,8 +136,9 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
     if (!records.length) return res.status(400).json({ message: 'الملف لا يحتوي على صفوف' });
 
     const fileColumns = Object.keys(records[0] ?? {});
-    const missingColumns = ALL_CSV_COLUMNS.filter((c) => !fileColumns.includes(c));
-    if (missingColumns.length) return res.status(400).json({ message: `الأعمدة الناقصة: ${missingColumns.join('، ')}`, missingColumns });
+    const { missing, unknown } = checkCsvColumns(fileColumns);
+    if (missing.length) return res.status(400).json({ message: `الأعمدة الناقصة: ${missing.join('، ')}`, missingColumns: missing });
+    if (unknown.length) return res.status(400).json({ message: `أعمدة غير معروفة: ${unknown.join('، ')}`, unknownColumns: unknown });
 
     const existingRes = await client.query('SELECT lower(trade_name) AS trade_name FROM medications');
     const existingNames = new Set(existingRes.rows.map((r) => r.trade_name));
@@ -138,8 +151,9 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
     // الصفوف غير الصالحة تُعدّ ولا تُسقط بصمت — لتطابق النتيجة مع معاينة /validate وتفادي
     // إيهام المستخدم بأن كل الصفوف استُوردت.
     records.forEach((rawRow) => {
-      const normalized = normalizeRow(rawRow);
-      if (!normalized) { failed++; return; }
+      const parsedRow = parseImportRow(rawRow);
+      if ('error' in parsedRow) { failed++; return; }
+      const normalized = parsedRow.row;
       const key = normalized.trade_name.toLowerCase();
       if (existingNames.has(key)) { skippedExisting++; return; }
       if (seenInFile.has(key)) { skippedDuplicate++; return; }
@@ -165,12 +179,12 @@ export const executeMedicationImport = async (req: AuthenticatedRequest, res: Re
       const chunk = toInsert.slice(i, i + BATCH_SIZE);
       const values: unknown[] = [];
       const placeholders = chunk.map((m, idx) => {
-        const b = idx * 4;
-        values.push(m.trade_name, m.scientific_name, m.default_dosage, m.instructions);
-        return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4})`;
+        const b = idx * 6;
+        values.push(m.trade_name, m.scientific_name, m.strength, m.dosage_form, m.default_dosage, m.instructions);
+        return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6})`;
       });
       const insertRes = await client.query(
-        `INSERT INTO medications (trade_name, scientific_name, default_dosage, instructions)
+        `INSERT INTO medications (trade_name, scientific_name, strength, dosage_form, default_dosage, instructions)
          VALUES ${placeholders.join(', ')} RETURNING medication_id`,
         values,
       );

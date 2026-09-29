@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { t, useT } from '../i18n'
 import { api } from '../lib/api'
+import { dosageFormLabel } from '../lib/dosageForm'
 
 // ============================================================================
 // اختيار بحثي (Combobox) — مربع بحث واحد يُصفّي النتائج أثناء الكتابة
@@ -277,8 +278,14 @@ const patientLabel = (p) => p.full_name || t('search.patient.defaultLabel', { id
 const patientMeta = (p) => [p.phone, p.national_id].filter(Boolean).join(' · ')
 
 const medicationValue = (m) => m.medication_id
-const medicationLabel = (m) => (m.scientific_name ? `${m.trade_name} (${m.scientific_name})` : m.trade_name)
-const medicationMeta = (m) => m.default_dosage || ''
+// Phase 9D — تمييز الأدوية التي تشترك في المادة نفسها باختلاف القوة/الشكل
+// الصيغة: Trade Name — Strength — Dosage Form (fallback آمن للقيم NULL)
+const medicationLabel = (m) =>
+  [m.trade_name, m.strength, m.dosage_form ? dosageFormLabel(m.dosage_form, t) : null]
+    .filter(Boolean)
+    .join(' — ')
+// بيانات مساندة: المادة العلمية ثم الجرعة الافتراضية (بلا تكرار للقوة/الشكل في السطر الثاني)
+const medicationMeta = (m) => [m.scientific_name, m.default_dosage].filter(Boolean).join(' · ')
 
 export function PatientSearchSelect({ value, onChange, required, disabled }) {
   return (

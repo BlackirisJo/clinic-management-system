@@ -6,6 +6,7 @@ import { Modal, Field, Loading, Empty, Notice } from '../components/ui'
 import { PatientSearchSelect, MedicationSearchSelect } from '../components/SearchSelect'
 import { useAuth } from '../auth/AuthContext'
 import ImportMedicationsModal from '../components/ImportMedicationsModal'
+import { DOSAGE_FORM_CODES, dosageFormLabel } from '../lib/dosageForm'
 
 export default function PrescriptionsView() {
   const [tab, setTab] = useState('medications')
@@ -63,12 +64,14 @@ function MedicationsTab() {
       {rows === null ? <Loading /> : rows.length === 0 ? <Empty text={t('prescriptions.medications.empty')} /> : (
         <div className="table-wrap table-cards">
           <table>
-            <thead><tr><th>{t('prescriptions.brand')}</th><th>{t('prescriptions.scientific')}</th><th>{t('prescriptions.dosage')}</th><th>{t('prescriptions.instructions')}</th></tr></thead>
+            <thead><tr><th>{t('prescriptions.brand')}</th><th>{t('prescriptions.scientific')}</th><th>{t('prescriptions.strength')}</th><th>{t('prescriptions.dosageForm')}</th><th>{t('prescriptions.dosage')}</th><th>{t('prescriptions.instructions')}</th></tr></thead>
             <tbody>
               {rows.map((m) => (
                 <tr key={m.medication_id}>
                   <td data-label={t('prescriptions.brand')}>{m.trade_name}</td>
                   <td data-label={t('prescriptions.scientific')}>{m.scientific_name}</td>
+                  <td data-label={t('prescriptions.strength')}>{m.strength || '—'}</td>
+                  <td data-label={t('prescriptions.dosageForm')}>{dosageFormLabel(m.dosage_form, t)}</td>
                   <td data-label={t('prescriptions.dosage')}>{m.default_dosage || '—'}</td>
                   <td data-label={t('prescriptions.instructions')}>{m.instructions || '—'}</td>
                 </tr>
@@ -85,7 +88,7 @@ function MedicationsTab() {
 
 function AddMedicationModal({ onClose, onSaved }) {
   const t = useT()
-  const [form, setForm] = useState({ trade_name: '', scientific_name: '', default_dosage: '', instructions: '' })
+  const [form, setForm] = useState({ trade_name: '', scientific_name: '', default_dosage: '', strength: '', dosage_form: '', instructions: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -94,7 +97,14 @@ function AddMedicationModal({ onClose, onSaved }) {
     setSaving(true)
     setError('')
     try {
-      await api.prescriptions.createMedication({ ...form, default_dosage: form.default_dosage || undefined, instructions: form.instructions || undefined })
+      await api.prescriptions.createMedication({
+        trade_name: form.trade_name,
+        scientific_name: form.scientific_name,
+        default_dosage: form.default_dosage || undefined,
+        strength: form.strength || undefined,
+        dosage_form: form.dosage_form || undefined,
+        instructions: form.instructions || undefined,
+      })
       onSaved()
     } catch (err) {
       setError(err.message || t('prescriptions.modal.error'))
@@ -106,6 +116,13 @@ function AddMedicationModal({ onClose, onSaved }) {
       <form className="patient-form" onSubmit={submit}>
         <Field label={t('prescriptions.brand')} required><input required value={form.trade_name} onChange={(e) => setForm({ ...form, trade_name: e.target.value })} /></Field>
         <Field label={t('prescriptions.scientific')} required><input required value={form.scientific_name} onChange={(e) => setForm({ ...form, scientific_name: e.target.value })} /></Field>
+        <Field label={t('prescriptions.strength')}><input value={form.strength} onChange={(e) => setForm({ ...form, strength: e.target.value })} /></Field>
+        <Field label={t('prescriptions.dosageForm')}>
+          <select value={form.dosage_form} onChange={(e) => setForm({ ...form, dosage_form: e.target.value })}>
+            <option value="">{t('prescriptions.dosageForm.none')}</option>
+            {DOSAGE_FORM_CODES.map((code) => <option key={code} value={code}>{t(`dosageForm.${code}`)}</option>)}
+          </select>
+        </Field>
         <Field label={t('prescriptions.dosage')}><input value={form.default_dosage} onChange={(e) => setForm({ ...form, default_dosage: e.target.value })} /></Field>
         <Field label={t('prescriptions.instructions')}><textarea rows="2" value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} /></Field>
         <Notice kind="error">{error}</Notice>
@@ -253,11 +270,11 @@ function PrescriptionDetailModal({ prescription, onClose }) {
         </div>
         {data.notes ? <div className="paper-notes"><b>{t('patients.prescriptionItems.notesLabel')}</b> {data.notes}</div> : null}
         <table>
-          <thead><tr><th>#</th><th>{t('prescriptions.detail.medication')}</th><th>{t('prescriptions.detail.dosage')}</th><th>{t('prescriptions.detail.frequency')}</th><th>{t('prescriptions.detail.duration')}</th><th>{t('prescriptions.detail.repeat')}</th></tr></thead>
+          <thead><tr><th>#</th><th>{t('prescriptions.detail.medication')}</th><th>{t('prescriptions.detail.dosage')}</th><th>{t('prescriptions.detail.strength')}</th><th>{t('prescriptions.detail.dosageForm')}</th><th>{t('prescriptions.detail.frequency')}</th><th>{t('prescriptions.detail.duration')}</th><th>{t('prescriptions.detail.repeat')}</th></tr></thead>
           <tbody>
             {items.map((it, i) => (
               <tr key={it.item_id}>
-                <td>{i + 1}</td><td>{it.trade_name} ({it.scientific_name})</td><td>{it.dosage}</td><td>{it.frequency}</td><td>{it.duration}</td><td>{it.repeats_count}</td>
+                <td>{i + 1}</td><td>{it.trade_name} ({it.scientific_name})</td><td>{it.dosage}</td><td>{it.strength || '—'}</td><td>{dosageFormLabel(it.dosage_form, t)}</td><td>{it.frequency}</td><td>{it.duration}</td><td>{it.repeats_count}</td>
               </tr>
             ))}
           </tbody>

@@ -2,13 +2,24 @@ import { Response } from 'express';
 import { pool } from '../../config/database';
 import { ApiErrorCode } from '../../utils/apiErrors';
 import { AuthenticatedRequest, accessibleClinicIds, canManageAllClinics } from '../../middlewares/auth.middleware';
+import { isDosageForm, type DosageFormCode } from '../../lib/dosageForm';
 
 // 1. إضافة دواء جديد إلى الدليل الشامل للأدوية
 export const createMedication = async (req: AuthenticatedRequest, res: Response) => {
-  const { trade_name, scientific_name, default_dosage, instructions } = req.body;
+  const { trade_name, scientific_name, default_dosage, instructions, strength, dosage_form } = req.body;
 
   if (!trade_name || !scientific_name) {
     return res.status(400).json({ message: 'الاسم التجاري والاسم العلمي مطلوبان لإضافة الدواء' });
+  }
+
+  // Phase 9A: dosage_form must be a coded value when supplied.
+  if (dosage_form !== undefined && dosage_form !== null && dosage_form !== '') {
+    if (!isDosageForm(String(dosage_form).trim().toUpperCase())) {
+      return res.status(400).json({
+        message: 'شكل الدواء غير صحيح. القيم المسموحة: TABLET, CAPSULE, INJECTION, SUPPOSITORY, SYRUP, CREAM, OINTMENT, DROPS, INHALER, POWDER, AMPULE, VIAL',
+        code: ApiErrorCode.VALIDATION_ERROR,
+      });
+    }
   }
 
   try {
@@ -21,11 +32,16 @@ export const createMedication = async (req: AuthenticatedRequest, res: Response)
       return res.status(409).json({ message: 'يوجد دواء مكرر بنفس الاسم التجاري في الدليل' });
     }
 
+    const normalizedDosageForm: DosageFormCode | null =
+      dosage_form && dosage_form !== ''
+        ? (String(dosage_form).trim().toUpperCase() as DosageFormCode)
+        : null;
+
     const result = await pool.query(
-      `INSERT INTO medications (trade_name, scientific_name, default_dosage, instructions)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO medications (trade_name, scientific_name, default_dosage, instructions, strength, dosage_form)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [trade_name, scientific_name, default_dosage || null, instructions || null]
+      [trade_name, scientific_name, default_dosage || null, instructions || null, strength || null, normalizedDosageForm]
     );
 
     return res.status(201).json({
@@ -35,6 +51,102 @@ export const createMedication = async (req: AuthenticatedRequest, res: Response)
   } catch (error) {
     console.error('Create Medication Error:', error);
     return res.status(500).json({ message: 'حدث خطأ في الخادم أثناء إضافة الدواء' });
+  }
+};
+
+// 5. Phase 9B: update an individual medication in the directory
+export const updateMedication = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { trade_name, scientific_name, default_dosage, instructions, strength, dosage_form } = req.body;
+
+  if (trade_name === undefined && scientific_name === undefined && default_dosage === undefined && instructions === undefined && strength === undefined && dosage_form === undefined) {
+    return res.status(400).json({
+      message: 'No fields provided for update',
+      code: ApiErrorCode.VALIDATION_ERROR,
+    });
+  }
+
+  if (trade_name !== undefined && (!trade_name || typeof trade_name !== 'string')) {
+    return res.status(400).json({ message: 'Invalid trade_name', code: ApiErrorCode.VALIDATION_ERROR });
+  }
+  if (scientific_name !== undefined && (!scientific_name || typeof scientific_name !== 'string')) {
+    return res.status(400).json({ message: 'Invalid scientific_name', code: ApiErrorCode.VALIDATION_ERROR });
+  }
+
+  if (dosage_form !== undefined && dosage_form !== null && dosage_form !== '') {
+    if (!isDosageForm(String(dosage_form).trim().toUpperCase())) {
+      return res.status(400).json({
+        message: 'Invalid dosage form. Allowed: TABLET, CAPSULE, INJECTION, SUPPOSITORY, SYRUP, CREAM, OINTMENT, DROPS, INHALER, POWDER, AMPULE, VIAL',
+        code: ApiErrorCode.VALIDATION_ERROR,
+      });
+    }
+  }
+
+  try {
+    const existing = await pool.query('SELECT medication_id FROM medications WHERE medication_id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Medication not found' });
+    }
+
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    if (trade_name !== undefined) { sets.push(`trade_name = $${values.length + 1}`); values.push(trade_name); }
+    if (scientific_name !== undefined) { sets.push(`scientific_name = $${values.length + 1}`); values.push(scientific_name); }
+    if (default_dosage !== undefined) { sets.push(`default_dosage = $${values.length + 1}`); values.push(default_dosage || null); }
+    if (instructions !== undefined) { sets.push(`instructions = $${values.length + 1}`); values.push(instructions || null); }
+    if (strength !== undefined) { sets.push(`strength = $${values.length + 1}`); values.push(strength || null); }
+    if (dosage_form !== undefined) {
+      sets.push(`dosage_form = $${values.length + 1}`);
+      values.push(dosage_form && dosage_form !== '' ? String(dosage_form).trim().toUpperCase() : null);
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ message: 'No fields to update', code: ApiErrorCode.VALIDATION_ERROR });
+    }
+
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE medications SET ${sets.join(', ')} WHERE medication_id = $${values.length} RETURNING *`,
+      values,
+    );
+
+    return res.status(200).json({
+      message: 'Medication updated successfully',
+      medication: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Update Medication Error:', error);
+    return res.status(500).json({ message: 'Server error while updating medication' });
+  }
+};
+
+// 6. Phase 9B: delete an individual medication from the directory
+export const deleteMedication = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const existing = await pool.query('SELECT medication_id FROM medications WHERE medication_id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Medication not found' });
+    }
+
+    const result = await pool.query('DELETE FROM medications WHERE medication_id = $1', [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Medication not found' });
+    }
+
+    return res.status(200).json({ message: 'Medication deleted successfully' });
+  } catch (error: any) {
+    // PostgreSQL FK violation - medication is referenced by prescription_items
+    if (error.code === '23503') {
+      return res.status(409).json({
+        message: 'Cannot delete this medication because it is already used in existing prescriptions',
+        code: ApiErrorCode.FORBIDDEN,
+      });
+    }
+    console.error('Delete Medication Error:', error);
+    return res.status(500).json({ message: 'Server error while deleting medication' });
   }
 };
 

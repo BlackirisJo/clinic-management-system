@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { api } from '../lib/api'
 import { Modal, Notice } from './ui'
+import { dosageFormLabel } from '../lib/dosageForm'
 import { useT } from '../i18n'
 
 export default function ImportMedicationsModal({ onClose, onImported }) {
@@ -114,6 +115,28 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
               <div className="stat warn"><span>{t('import.duplicateInFile')}</span><strong>{p.duplicateInFile}</strong></div>
               <div className="stat err"><span>{t('import.errors')}</span><strong>{p.invalid}</strong></div>
             </div>
+            {p.validRows?.length > 0 && (
+              <div className="import-preview">
+                <h4>{t('import.newDrugs')} ({p.validRows.length})</h4>
+                <div className="table-wrap" style={{ maxHeight: 200 }}>
+                  <table>
+                    <thead><tr><th>{t('prescriptions.brand')}</th><th>{t('prescriptions.scientific')}</th><th>{t('prescriptions.strength')}</th><th>{t('prescriptions.dosageForm')}</th><th>{t('prescriptions.dosage')}</th><th>{t('prescriptions.instructions')}</th></tr></thead>
+                    <tbody>
+                      {p.validRows.slice(0, 10).map((row, i) => (
+                        <tr key={i}>
+                          <td data-label={t('prescriptions.brand')}>{row.trade_name}</td>
+                          <td data-label={t('prescriptions.scientific')}>{row.scientific_name}</td>
+                          <td data-label={t('prescriptions.strength')}>{row.strength || '—'}</td>
+                          <td data-label={t('prescriptions.dosageForm')}>{dosageFormLabel(row.dosage_form, t)}</td>
+                          <td data-label={t('prescriptions.dosage')}>{row.default_dosage || '—'}</td>
+                          <td data-label={t('prescriptions.instructions')}>{row.instructions || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             {p.invalidRows?.length > 0 && (
               <div className="import-errors">
                 <h4>{t('import.invalidRows')} ({p.invalidRows.length})</h4>
@@ -124,7 +147,7 @@ export default function ImportMedicationsModal({ onClose, onImported }) {
                       {p.invalidRows.slice(0, 50).map((row, i) => (
                         <tr key={i}>
                           <td>{row.rowNumber}</td>
-                          <td>{row.raw?.trade_name || '—'}</td>
+                          <td>{row.raw?.trade_name || '—'}{row.raw?.strength ? ` · ${row.raw.strength}` : ''}{row.raw?.dosage_form ? ` · ${dosageFormLabel(row.raw.dosage_form, t)}` : ''}</td>
                           <td>{row.error}</td>
                         </tr>
                       ))}
