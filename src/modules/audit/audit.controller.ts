@@ -8,7 +8,11 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const EXPORT_SAFETY_LIMIT = 100000;
 
-function canAccessLogs(req: AuthenticatedRequest): boolean {
+/**
+ * سجلات النظام مقصورة عمداً على SUPER_ADMIN أو SYSTEM_ADMIN الحامل لـ VIEW_SYSTEM_LOGS.
+ * مُصدَّرة لإعادة الاستخدام في مسارات التدقيق الأخرى حتى لا تتكرر القاعدة.
+ */
+export function canAccessLogs(req: AuthenticatedRequest): boolean {
   if (req.user?.roleName === 'SUPER_ADMIN') return true;
   if (req.user?.roleName === 'SYSTEM_ADMIN' && (req.user.permissions?.includes('VIEW_SYSTEM_LOGS') ?? false)) return true;
   return false;

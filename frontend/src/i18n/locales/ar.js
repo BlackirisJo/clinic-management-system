@@ -100,6 +100,11 @@ export default {
   'prescriptions.timing': 'تعليمات التوقيت',
   'prescriptions.timing.placeholder': 'مثال: بعد الأكل',
   'prescriptions.repeats': 'عدد التكرارات',
+  'prescriptions.prescribedQuantity': 'الكمية الموصوفة',
+  'prescriptions.prescribedQuantity.placeholder': 'مثال: ٣٠',
+  'prescriptions.prescribedQuantity.hint': 'الكمية التي ستُصرَف بالضبط. لا تُشتق من الجرعة ولا من عدد التكرارات.',
+  'prescriptions.uom': 'وحدة القياس',
+  'prescriptions.uom.placeholder': 'اختر وحدة القياس',
   'prescriptions.remove': 'حذف العنصر',
 
   // ===== pharmacy (Phase 10A) =====
@@ -457,6 +462,17 @@ export default {
   'dosageForm.POWDER': 'مسحوق',
   'dosageForm.AMPULE': 'أنبوب',
   'dosageForm.VIAL': 'فيال',
+  'uom.TABLET': 'قرص',
+  'uom.CAPSULE': 'كبسولة',
+  'uom.ML': 'ملليلتر',
+  'uom.AMPULE': 'امبولة',
+  'uom.VIAL': 'فيال',
+  'uom.BOTTLE': 'زجاجة',
+  'uom.TUBE': 'أنبوب',
+  'uom.GRAM': 'جرام',
+  'uom.PUFF': 'بخة',
+  'uom.DROP': 'قطرة',
+  'uom.SUPPOSITORY': 'شرطة',
 
   // ===== تثبيت التطبيق (PWA — نافذة/شريط عامّة) =====
   'install.promptTitle': 'ثبّت تطبيق نبض',

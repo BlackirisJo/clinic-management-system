@@ -11,6 +11,12 @@ import {
 import { authenticateJWT, requirePermission } from '../../middlewares/auth.middleware';
 import { validateBody } from '../../middlewares/validate.middleware';
 import { prescriptionSchema } from '../../validations/business.validation';
+import {
+  getRepeatAuthorization,
+  createRepeatAuthorization,
+  updateRepeatAuthorization,
+  cancelRepeatAuthorization,
+} from './repeatAuthorizations.controller';
 
 const router = Router();
 
@@ -28,6 +34,15 @@ router.get('/pharmacy/queue', requirePermission('VIEW_PHARMACY_QUEUE'), getPharm
 
 // مسارات الروشتة الطبية
 router.post('/', requirePermission('CREATE_PRESCRIPTION'), validateBody(prescriptionSchema), createPrescription);
+
+// --- تفويض صرف متكرر (Phase 10C.4C) ---
+// قرار سريري → CREATE_PRESCRIPTION (لا صلاحية جديدة). لا يُشتق من repeats_count.
+// تسبق /:id بالضرورة: Express يطابق بالترتيب، و/:id كان يلتقط هذا المسار أولاً.
+router.get('/items/:itemId/repeat-authorization', requirePermission('VIEW_PRESCRIPTIONS'), getRepeatAuthorization);
+router.post('/items/:itemId/repeat-authorization', requirePermission('CREATE_PRESCRIPTION'), createRepeatAuthorization);
+router.put('/items/:itemId/repeat-authorization', requirePermission('CREATE_PRESCRIPTION'), updateRepeatAuthorization);
+router.delete('/items/:itemId/repeat-authorization', requirePermission('CREATE_PRESCRIPTION'), cancelRepeatAuthorization);
+
 // العرض من داخل ملف المريض متاح لأي دور يملك عرض المرضى (طبيب/ممرض/استقبال)، مع فحص العيادة داخل الكنترولر
 router.get('/:id', requirePermission('VIEW_PATIENTS'), getPrescriptionById);
 

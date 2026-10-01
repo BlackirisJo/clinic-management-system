@@ -5,12 +5,12 @@ import { useT } from '../i18n'
 import { Loading, Empty, Notice } from '../components/ui'
 import { dosageFormLabel } from '../lib/dosageForm'
 
-export default function PharmacyView() {
+export default function PharmacyView({ onNavigate }) {
   const t = useT()
-  return <PharmacyQueueTab />
+  return <PharmacyQueueTab onNavigate={onNavigate} />
 }
 
-function PharmacyQueueTab() {
+function PharmacyQueueTab({ onNavigate }) {
   const t = useT()
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
@@ -63,7 +63,7 @@ function PharmacyQueueTab() {
                     ))}
                   </td>
                   <td data-label={t('pharmacy.queue.col.actions')}>
-                    <button className="text-button" onClick={() => viewPrescription(p.prescription_id)}>
+                    <button className="text-button" onClick={() => viewPrescription(onNavigate)}>
                       {t('pharmacy.queue.view')}
                     </button>
                   </td>
@@ -77,9 +77,11 @@ function PharmacyQueueTab() {
   )
 }
 
-function viewPrescription(id) {
-  // Could open a modal or navigate to detail
-  window.open(`/prescriptions/${id}`, '_blank')
+function viewPrescription(onNavigate) {
+  // لا يوجد موجّه (router) في الواجهة: الأقسام تُبدَّل بحالة داخل App.jsx عبر onNavigate.
+  // فتح مسار نصي مثل /prescriptions/:id يترك التطبيق ويصل إلى معالج 404 العام في الخادم
+  // (المسار المطلوب غير موجود على الخادم)، لأن ذلك المسار ليس مسار API ولا واجهة له.
+  onNavigate?.('prescriptions')
 }
 
 export function getPharmacyQueue() {

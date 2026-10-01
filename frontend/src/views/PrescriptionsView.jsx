@@ -7,6 +7,7 @@ import { PatientSearchSelect, MedicationSearchSelect } from '../components/Searc
 import { useAuth } from '../auth/AuthContext'
 import ImportMedicationsModal from '../components/ImportMedicationsModal'
 import { DOSAGE_FORM_CODES, dosageFormLabel } from '../lib/dosageForm'
+import { UOM_CODES, uomLabel } from '../lib/uom'
 
 export default function PrescriptionsView() {
   const [tab, setTab] = useState('medications')
@@ -226,7 +227,7 @@ function PrescriptionsTab() {
   }
 
   function addItem() {
-    setItems((prev) => [...prev, { medication_id: '', dosage: '', frequency: '', duration: '', timing_instructions: '', repeats_count: 1 }])
+    setItems((prev) => [...prev, { medication_id: '', dosage: '', frequency: '', duration: '', timing_instructions: '', repeats_count: 1, prescribed_quantity: '', uom: '' }])
   }
 
   function updateItem(index, key, value) {
@@ -253,6 +254,9 @@ function PrescriptionsTab() {
           duration: it.duration,
           timing_instructions: it.timing_instructions || undefined,
           repeats_count: Number(it.repeats_count) || 1,
+          // Phase 10C.1: صريحة فقط — لا تُشتق من dosage ولا من repeats_count
+          prescribed_quantity: Number(it.prescribed_quantity),
+          uom: it.uom,
         })),
       })
       const detail = await api.prescriptions.get(result.prescription_id)
@@ -298,6 +302,17 @@ function PrescriptionsTab() {
                   <Field label={t('prescriptions.duration')} required><input required placeholder={t('prescriptions.duration.placeholder')} value={it.duration} onChange={(e) => updateItem(i, 'duration', e.target.value)} /></Field>
                 </div>
                 <div className="form-row">
+                  <Field label={t('prescriptions.prescribedQuantity')} required hint={t('prescriptions.prescribedQuantity.hint')}>
+                    <input required type="number" min="0.001" step="0.001" placeholder={t('prescriptions.prescribedQuantity.placeholder')} value={it.prescribed_quantity} onChange={(e) => updateItem(i, 'prescribed_quantity', e.target.value)} />
+                  </Field>
+                  <Field label={t('prescriptions.uom')} required>
+                    <select required value={it.uom} onChange={(e) => updateItem(i, 'uom', e.target.value)}>
+                      <option value="">{t('prescriptions.uom.placeholder')}</option>
+                      {UOM_CODES.map((code) => <option key={code} value={code}>{uomLabel(code, t)}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                <div className="form-row">
                   <Field label={t('prescriptions.timing')}><input placeholder={t('prescriptions.timing.placeholder')} value={it.timing_instructions} onChange={(e) => updateItem(i, 'timing_instructions', e.target.value)} /></Field>
                   <Field label={t('prescriptions.repeats')}><input type="number" min="1" value={it.repeats_count} onChange={(e) => updateItem(i, 'repeats_count', e.target.value)} /></Field>
                 </div>
@@ -335,11 +350,11 @@ function PrescriptionDetailModal({ prescription, onClose }) {
         </div>
         {data.notes ? <div className="paper-notes"><b>{t('patients.prescriptionItems.notesLabel')}</b> {data.notes}</div> : null}
         <table>
-          <thead><tr><th>#</th><th>{t('prescriptions.detail.medication')}</th><th>{t('prescriptions.detail.dosage')}</th><th>{t('prescriptions.detail.strength')}</th><th>{t('prescriptions.detail.dosageForm')}</th><th>{t('prescriptions.detail.frequency')}</th><th>{t('prescriptions.detail.duration')}</th><th>{t('prescriptions.detail.repeat')}</th></tr></thead>
+              <thead><tr><th>#</th><th>{t('prescriptions.detail.medication')}</th><th>{t('prescriptions.detail.dosage')}</th><th>{t('prescriptions.detail.strength')}</th><th>{t('prescriptions.detail.dosageForm')}</th><th>{t('prescriptions.prescribedQuantity')}</th><th>{t('prescriptions.uom')}</th><th>{t('prescriptions.detail.frequency')}</th><th>{t('prescriptions.detail.duration')}</th><th>{t('prescriptions.detail.repeat')}</th></tr></thead>
           <tbody>
             {items.map((it, i) => (
               <tr key={it.item_id}>
-                <td>{i + 1}</td><td>{it.trade_name} ({it.scientific_name})</td><td>{it.dosage}</td><td>{it.strength || '—'}</td><td>{dosageFormLabel(it.dosage_form, t)}</td><td>{it.frequency}</td><td>{it.duration}</td><td>{it.repeats_count}</td>
+                <td>{i + 1}</td><td>{it.trade_name} ({it.scientific_name})</td><td>{it.dosage}</td><td>{it.strength || '—'}</td><td>{dosageFormLabel(it.dosage_form, t)}</td><td>{it.prescribed_quantity ?? '—'}</td><td>{uomLabel(it.uom, t)}</td><td>{it.frequency}</td><td>{it.duration}</td><td>{it.repeats_count}</td>
               </tr>
             ))}
           </tbody>

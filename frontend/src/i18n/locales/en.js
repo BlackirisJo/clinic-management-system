@@ -96,6 +96,11 @@ export default {
   'prescriptions.timing': 'Timing Instructions',
   'prescriptions.timing.placeholder': 'e.g. after food',
   'prescriptions.repeats': 'Number of Refills',
+  'prescriptions.prescribedQuantity': 'Prescribed quantity',
+  'prescriptions.prescribedQuantity.placeholder': 'e.g. 30',
+  'prescriptions.prescribedQuantity.hint': 'Exact amount to dispense. Never derived from dosage or refills.',
+  'prescriptions.uom': 'Unit of measure',
+  'prescriptions.uom.placeholder': 'Select a unit',
   'prescriptions.remove': 'Remove Item',
 
   // ===== pharmacy (Phase 10A) =====
@@ -453,6 +458,17 @@ export default {
   'dosageForm.POWDER': 'Powder',
   'dosageForm.AMPULE': 'Ampoule',
   'dosageForm.VIAL': 'Vial',
+  'uom.TABLET': 'Tablet',
+  'uom.CAPSULE': 'Capsule',
+  'uom.ML': 'Milliliter',
+  'uom.AMPULE': 'Ampule',
+  'uom.VIAL': 'Vial',
+  'uom.BOTTLE': 'Bottle',
+  'uom.TUBE': 'Tube',
+  'uom.GRAM': 'Gram',
+  'uom.PUFF': 'Puff',
+  'uom.DROP': 'Drop',
+  'uom.SUPPOSITORY': 'Suppository',
 
   // ===== PWA install (shared prompt/banner) =====
   'install.promptTitle': 'Install Nabd app',

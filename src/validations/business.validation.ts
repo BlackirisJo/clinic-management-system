@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { INVENTORY_UOM_CODES, isInventoryUom } from '../lib/inventoryUom';
 
 const id = z.coerce.number().int().positive();
 const money = z.coerce.number().finite().nonnegative();
@@ -20,9 +21,31 @@ export const patientSchema = z.object({
   clinic_id: z.coerce.number().int().positive().optional(),
 });
 export const visitSchema = z.object({ patient_id: id, clinic_id: id, doctor_id: id, notes: z.string().max(5000).optional() });
+
+// Phase 10C.1 — كمية الصرف الآمنة.
+// تُشتق من مُدخل صريح فقط: لا تُستنتج من dosage الحر ولا من repeats_count.
+// مطابقة لـ NUMERIC(12,3) ولمفردات uom في inventory_items (بلا تحويل بين الوحدات).
+export const prescribedQuantitySchema = z.coerce
+  .number()
+  .finite('prescribed_quantity must be a number')
+  .positive('prescribed_quantity must be greater than 0')
+  .max(999_999_999.999, 'prescribed_quantity exceeds the supported range')
+  .refine((value) => Math.abs(value * 1000 - Math.round(value * 1000)) < 1e-6, {
+    message: 'prescribed_quantity supports at most 3 decimal places',
+  });
+
+export const uomSchema = z
+  .string()
+  .trim()
+  .min(1, 'uom is required')
+  .transform((value) => value.toUpperCase())
+  .refine((value) => isInventoryUom(value), {
+    message: `Unsupported uom. Allowed: ${INVENTORY_UOM_CODES.join(', ')}`,
+  });
+
 export const prescriptionSchema = z.object({
   visit_id: id, patient_id: id, notes: z.string().max(5000).optional(),
-  items: z.array(z.object({ medication_id: id, dosage: z.string().min(1).max(100), frequency: z.string().min(1).max(100), duration: z.string().min(1).max(50), timing_instructions: z.string().max(150).optional(), repeats_count: z.coerce.number().int().positive().default(1) })).min(1).max(100),
+  items: z.array(z.object({ medication_id: id, dosage: z.string().min(1).max(100), frequency: z.string().min(1).max(100), duration: z.string().min(1).max(50), timing_instructions: z.string().max(150).optional(), repeats_count: z.coerce.number().int().positive().default(1), prescribed_quantity: prescribedQuantitySchema, uom: uomSchema })).min(1).max(100),
 });
 export const serviceSchema = z.object({ clinic_id: id, service_name: z.string().trim().min(2).max(150), price: money, doctor_percentage: z.coerce.number().finite().min(0).max(100).default(0) });
 export const invoiceSchema = z.object({

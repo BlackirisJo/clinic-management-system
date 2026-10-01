@@ -211,7 +211,9 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
 
     // إضافة أدوية الروشتة
     for (const item of items) {
-      const { medication_id, dosage, frequency, duration, timing_instructions, repeats_count } = item;
+      // Phase 10C.1: prescribed_quantity/uom مطلوبان — validateBody يضمن وجودهما.
+      // لا يُشتق أي منهما من dosage (نص حر) ولا من repeats_count.
+      const { medication_id, dosage, frequency, duration, timing_instructions, repeats_count, prescribed_quantity, uom } = item;
 
       if (!medication_id || !dosage || !frequency || !duration) {
         throw new Error('بيانات الدواء في الروشتة غير مكتملة');
@@ -219,8 +221,8 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
 
       await client.query(
         `INSERT INTO prescription_items 
-         (prescription_id, medication_id, dosage, frequency, duration, timing_instructions, repeats_count)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (prescription_id, medication_id, dosage, frequency, duration, timing_instructions, repeats_count, prescribed_quantity, uom)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           prescriptionId,
           medication_id,
@@ -229,6 +231,8 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
           duration,
           timing_instructions || null,
           repeats_count || 1,
+          prescribed_quantity,
+          uom,
         ]
       );
     }
@@ -294,6 +298,7 @@ export const getPrescriptionById = async (req: AuthenticatedRequest, res: Respon
 
     const itemsQuery = await pool.query(
       `SELECT pi.item_id, pi.dosage, pi.frequency, pi.duration, pi.timing_instructions, pi.repeats_count,
+              pi.prescribed_quantity, pi.uom,
               m.trade_name, m.scientific_name, m.strength, m.dosage_form
        FROM prescription_items pi
        JOIN medications m ON pi.medication_id = m.medication_id
@@ -343,6 +348,8 @@ export const getPharmacyQueue = async (req: AuthenticatedRequest, res: Response)
             'duration', pi.duration,
             'timing_instructions', pi.timing_instructions,
             'repeats_count', pi.repeats_count,
+            'prescribed_quantity', pi.prescribed_quantity,
+            'uom', pi.uom,
             'trade_name', m.trade_name,
             'scientific_name', m.scientific_name,
             'strength', m.strength,
