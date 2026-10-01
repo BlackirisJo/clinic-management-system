@@ -23,6 +23,11 @@
 .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:18px}.tab{border:0;background:none;padding:10px 15px;font-size:12px;color:var(--muted);border-bottom:2px solid transparent;font-weight:600}.tab.active{color:var(--teal);border-bottom-color:var(--teal)}
 .tab-content{padding-top:4px}.tab-inner{display:grid;gap:16px}.tab-stack{display:grid;gap:18px}
 .tab-grid.two{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+/* المؤشرات المالية الشهرية: حاوية مستقلة بعرض كامل (عمود واحد في كل المقاسات).
+   min-width:0 يمنع تمدد مسار الشبكة فيصير الجدول العريض قابلاً للتمرير داخلياً
+   بدل أن يدفع اللوحة وتسبّب تمريراً أفقياً على مستوى الصفحة. */
+.financial-indicators{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;min-width:0}
+.financial-indicators>*{min-width:0}
 .detail-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.detail-summary span{background:#eef5f3;border-radius:8px;padding:6px 11px;font-size:11px;color:#376864}
 .record-block{background:#f8fbfa;border:1px solid var(--line);border-radius:12px;padding:18px}.record-block h4{margin:0 0 14px;font-size:13px;color:var(--ink)}.record-grid{display:grid;gap:16px}
 .items-head{display:flex;justify-content:space-between;align-items:center;margin:6px 0}.items-head h4{margin:0;font-size:13px}.items-list{display:grid;gap:14px}.item-card{border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:10px;background:#fff}

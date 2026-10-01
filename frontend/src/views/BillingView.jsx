@@ -38,11 +38,18 @@ export default function BillingView() {
         {canViewExpenses && (
           <button className={tab === 'expenses' ? 'tab active' : 'tab'} onClick={() => setTab('expenses')}>{t('billing.tab.expenses')}</button>
         )}
+        {/* المؤشرات المالية الشهرية: قسم مستقل بعرض كامل بعد المصاريف.
+            كانت داخل صف tab-grid two بجانب نموذج الفاتورة، فضغط جدول المؤشرات
+            السبعة أعمدة في نصف اللوحة وانقطع عرضه. */}
+        {canViewInvoices && (
+          <button className={tab === 'indicators' ? 'tab active' : 'tab'} onClick={() => setTab('indicators')}>{t('billing.invoices.kpis')}</button>
+        )}
       </div>
       <div className="tab-content">
         {tab === 'invoices' && canViewInvoices && <InvoicesTab canCreateInvoice={canCreateInvoice} />}
         {tab === 'services' && canManageServices && <ServicesTab canManageServices={canManageServices} />}
         {tab === 'expenses' && canViewExpenses && <ExpensesTab canCreateExpense={hasPerm(perms, 'CREATE_EXPENSE')} />}
+        {tab === 'indicators' && canViewInvoices && <IndicatorsTab />}
       </div>
     </section>
   )
@@ -56,6 +63,18 @@ function InvoicesTab({ canCreateInvoice }) {
         {canCreateInvoice && (
           <div className="record-block"><h4>{t('billing.invoices.create')}</h4><InvoiceForm /></div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// المؤشرات المالية الشهرية: حاوية عرض كامل مستقلة، بعد المصاريف.
+// min-width:0 على الحاوية والابن يمنع تمدد الشبكة عند عرض جدول عريض.
+function IndicatorsTab() {
+  const t = useT()
+  return (
+    <div className="tab-inner">
+      <div className="financial-indicators">
         <div className="record-block"><h4>{t('billing.invoices.kpis')}</h4><KpisTable /></div>
       </div>
     </div>
