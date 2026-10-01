@@ -61,7 +61,7 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   position: fixed;
   top: 0;
   bottom: 0;
-  inset-inline-start: 0;            /* RTL:journal de debut (droite) — le menu glisse d'ici */
+  inset-inline-start: 0;            /* RTL: حافة البداية (اليمين) — القائمة تنزلق من هنا */
   width: min(86vw, 300px);
   max-width: calc(100vw - 8px);
   z-index: 120;
@@ -69,7 +69,7 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  transform: translateX(100%);       /* RTL: masqué hors de l'écran (droite) */
+  transform: translateX(100%);       /* RTL: مخفية خارج الشاشة (اليمين) */
   transition: transform .26s ease;
   box-shadow: -18px 0 44px #0b26264d;
 }
