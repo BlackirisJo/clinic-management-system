@@ -132,6 +132,16 @@ const seed = async (allocated: number, onHand: number, tag: string): Promise<Fix
 
 const drop = async (f: Fixture) => {
   // RESTRICT يتطلّب الترتيب: سجلات الإرجاع تشير إلى التخصيص، والتخصيص يشير إلى بند الصرف
+  // Phase 10E.7/10E.8: الاعكاسات والائتمانات تشير إلى سطر الإرجاع، فحُذفَت أولاً —
+  // حذف medication_return_items قبلها كان يفشل بـ 23503 ويترك البيانات خلفه.
+  await pool.query(
+    'DELETE FROM medication_return_credits WHERE dispensing_item_id = $1',
+    [f.dispensingItem],
+  );
+  await pool.query(
+    'DELETE FROM medication_return_reversals WHERE dispensing_item_batch_id = $1',
+    [f.allocation],
+  );
   await pool.query('DELETE FROM medication_return_items WHERE dispensing_item_batch_id = $1', [f.allocation]);
   await pool.query(
     `DELETE FROM audit_logs WHERE resource_type = 'MEDICATION_RETURN'

@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { pool } from '../../config/database';
 import { AuthenticatedRequest, accessibleClinicIds, canManageAllClinics } from '../../middlewares/auth.middleware';
+import { ApiErrorCode } from '../../utils/apiErrors';
+import { calendarGate, calendarGateMessage, isCalendarGateError } from '../calendar/calendar.gate';
 
 // ===== أدوات مساعدة مشتركة =====
 
@@ -130,7 +132,14 @@ export const updateVisitClinical = async (req: AuthenticatedRequest, res: Respon
   const visit = await requireVisitAccess(req, res, req.params.visitId);
   if (!visit) return;
   const { chief_complaint, clinical_examination, assessment, treatment_plan, follow_up_plan, next_visit_date, disposition, triage_level, visit_status } = req.body;
+
+  // Detect if visit is being completed with a follow-up date
+  const isCompletingWithFollowUp = visit_status === 'COMPLETED' && next_visit_date !== undefined && next_visit_date !== null;
+
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     const params: unknown[] = [];
     const sets: string[] = [];
     const push = (value: unknown, column: string) => { params.push(value); sets.push(`${column} = $${params.length}`); };
@@ -143,17 +152,128 @@ export const updateVisitClinical = async (req: AuthenticatedRequest, res: Respon
     if (disposition !== undefined) push(disposition, 'disposition');
     if (triage_level !== undefined) push(triage_level, 'triage_level');
     if (visit_status !== undefined) push(visit_status, 'visit_status');
-    if (!sets.length) return res.status(400).json({ message: 'لا توجد بيانات للتحديث' });
+    if (!sets.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'لا توجد بيانات للتحديث' });
+    }
     params.push(visit.visit_id);
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE visits SET ${sets.join(', ')} WHERE visit_id = $${params.length} RETURNING *`,
       params
     );
-    await audit(req.user?.userId, visit.clinic_id, 'VISIT_CLINICAL_UPDATED', 'VISIT', visit.visit_id);
-    return res.status(200).json({ message: 'تم حفظ البيانات السريرية', visit: result.rows[0] });
-  } catch (error) {
+
+    let followUpAppointment = null;
+    if (isCompletingWithFollowUp) {
+      // Extract date portion of next_visit_date (TIMESTAMPTZ -> DATE)
+      const followUpDate = new Date(next_visit_date);
+      const appointmentDate = followUpDate.toISOString().slice(0, 10); // YYYY-MM-DD
+
+      // موعد المتابعة موعدٌ عادي، فتسري عليه قواعد التقويم: العطل الرسمية
+      // والإجازات المعتمدة تمنعه. الرفض هنا يُلغي تحديث الزيارة بالكامل
+      // (ROLLBACK) ولا يترك حالة جزئية.
+      //
+      // قفل التقويم: نفس قفل (العيادة، اليوم) الذي يستخدمه مسار الحجز في
+      // appointments.controller.ts — نفس المفتاح ونفس الترتيب. يُلتقط قبل
+      // فحص البوابة ويُحفظ حتى COMMIT/ROLLBACK (قفل xact-scoped)، فلا تمرّ
+      // عملية متابعة بين الفحص والإدراج فيتغيّر التاريخ إلى محجوب بعد الفحص.
+      // لا BEGIN/COMMIT إضافي: القفل داخل معاملة الزيارة نفسها.
+      await client.query(
+        'SELECT pg_advisory_xact_lock($1::int, (EXTRACT(EPOCH FROM $2::date) / 86400)::int)',
+        [Number(visit.clinic_id), appointmentDate]
+      );
+
+      const gate = await calendarGate(client, Number(visit.clinic_id), Number(visit.doctor_id), appointmentDate);
+      if (gate.is_blocked) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          message: calendarGateMessage(gate.code),
+          code: gate.code === 'LEAVE' ? ApiErrorCode.DOCTOR_LEAVE : ApiErrorCode.HOLIDAY_CLOSED,
+          calendar_gate: gate,
+        });
+      }
+
+      // نافذة المتابعة تُشتق من جدول عمل الطبيب في ذلك اليوم إن وُجد، وإلا
+      // تبقى النافذة الافتراضية 09:00-09:30 كما كان سلوك هذا المسار سابقاً.
+      const followUpDay = await client.query('SELECT EXTRACT(DOW FROM $1::date)::int AS dow', [appointmentDate]);
+      const workingPeriod = await client.query(
+        `SELECT start_time, end_time FROM doctor_schedules
+         WHERE doctor_id = $1 AND clinic_id = $2 AND day_of_week = $3 AND is_working_day = TRUE
+         ORDER BY start_time LIMIT 1`,
+        [visit.doctor_id, visit.clinic_id, followUpDay.rows[0]?.dow ?? 0]
+      );
+      let followUpStart = '09:00';
+      let followUpEnd = '09:30';
+      if (workingPeriod.rows[0]) {
+        const toMinutes = (value: unknown): number => {
+          const [h, m] = String(value).split(':').map(Number);
+          return (h || 0) * 60 + (m || 0);
+        };
+        const startTotal = toMinutes(workingPeriod.rows[0].start_time);
+        const endTotal = toMinutes(workingPeriod.rows[0].end_time);
+        const slotEnd = Math.min(startTotal + 30, endTotal);
+        followUpStart = `${String(Math.floor(startTotal / 60)).padStart(2, '0')}:${String(startTotal % 60).padStart(2, '0')}`;
+        followUpEnd = `${String(Math.floor(slotEnd / 60)).padStart(2, '0')}:${String(slotEnd % 60).padStart(2, '0')}`;
+      }
+
+      // The unique partial index on visit_id (WHERE visit_id IS NOT NULL) ensures idempotency
+      // If appointment exists, update its date and reason
+      const apptResult = await client.query(
+        `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, reason, status, visit_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'SCHEDULED', $8)
+         ON CONFLICT (visit_id) WHERE visit_id IS NOT NULL DO UPDATE SET
+           appointment_date = EXCLUDED.appointment_date,
+           start_time = EXCLUDED.start_time,
+           end_time = EXCLUDED.end_time,
+           reason = EXCLUDED.reason,
+           updated_at = NOW()
+         RETURNING *`,
+        [visit.clinic_id, visit.patient_id, visit.doctor_id, appointmentDate, followUpStart, followUpEnd, follow_up_plan || 'متابعة', visit.visit_id]
+      );
+      if (apptResult.rowCount && apptResult.rowCount > 0) {
+        followUpAppointment = apptResult.rows[0];
+      }
+    }
+
+    await client.query('COMMIT');
+    await audit(req.user?.userId, visit.clinic_id, 'VISIT_CLINICAL_UPDATED', 'VISIT', visit.visit_id, { follow_up_created: !!followUpAppointment });
+
+    return res.status(200).json({
+      message: 'تم حفظ البيانات السريرية',
+      visit: result.rows[0],
+      follow_up_appointment: followUpAppointment
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    // رفض بوابة التقويم (عطلة/إجازة) عند الإدراج أو التحديث = رفض تشغيلي 409
+    // لا خطأ خادم 500: الموعد لم يُحجز أصلاً.
+    if (isCalendarGateError(error)) {
+      // DETAIL بصيغة "HOLIDAY: official holiday covers this date"
+      const detail = (error as { detail?: string }).detail ?? '';
+      const gateCode = detail.split(':')[0]?.trim() || null;
+      return res.status(409).json({
+        message: calendarGateMessage(gateCode),
+        code: gateCode === 'LEAVE' ? ApiErrorCode.DOCTOR_LEAVE : ApiErrorCode.HOLIDAY_CLOSED,
+      });
+    }
+    // استثناء عمل يتعارض مع إجازة معتمدة (CL002) = رفض تشغيلي 409 لا 500.
+    if (error?.code === 'CL002') {
+      return res.status(409).json({
+        message: 'لا يمكن اعتماد استثناء عمل يتعارض مع إجازة معتمدة',
+        code: ApiErrorCode.LEAVE_CONFLICT,
+      });
+    }
+    // تعارض زمني مع موعد قائم للطبيب (القيد الحصري 23P01) = رفض تشغيلي 409
+    // لا 500: الموعد لم يُحجز، لا أن الخادم تعطّل.
+    if (error?.code === '23P01') {
+      return res.status(409).json({
+        message: 'الطبيب لديه موعد آخر محجوز يتداخل مع وقت المتابعة',
+        code: ApiErrorCode.CALENDAR_CONFLICT,
+      });
+    }
     console.error('Update Visit Clinical Error:', error);
     return res.status(500).json({ message: 'حدث خطأ في الخادم عند حفظ البيانات السريرية' });
+  } finally {
+    client.release();
   }
 };
 

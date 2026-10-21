@@ -49,9 +49,19 @@ async function request(path, { method = 'GET', body, params, isForm } = {}) {
   // معالجة مركزية لإنهاء الجلسة من قبل مدير — إشارة الخادم الصريحة SESSION_REVOKED
   // (لا تُطلق مع رفض الصلاحيات 403 العادي)
   if (token && data && data.code === 'SESSION_REVOKED') unauthorizedHandler?.(data.message)
-  if (!res.ok) {
-    const message = data.message || data.error || `خطأ في الطلب (${res.status})`
-    throw new Error(message)
+if (!res.ok) {
+    // Phase 10G.6: the backend now returns a stable `code` for operational
+    // rejections (PRESCRIPTION_VISIT_OWNERSHIP, PRESCRIPTION_INVALID_ITEM, ...).
+    // Carry it onto the thrown error so callers can localize by code instead of
+    // parsing a raw message string. The `message` is still the primary display
+    // text and is already localized Arabic.
+    const err = new Error(data.message || data.error || `خطأ في الطلب (${res.status})`)
+    if (data && typeof data.code === 'string') err.code = data.code
+    // تقرير الأثر يُنقل مع الخطأ: تغيير تقويمي يصطدم بمواعيد قائمة يُرفض
+    // بـ409، والواجهة تعرض التقرير قبل أن يسمح المستخدم بالتأكيد.
+    if (data && data.impact) err.impact = data.impact
+    if (data && data.calendar_gate) err.calendar_gate = data.calendar_gate
+    throw err
   }
   return data
 }
@@ -137,6 +147,8 @@ export const api = {
     create: (body) => request('/api/prescriptions', { method: 'POST', body }),
     get: (id) => request(`/api/prescriptions/${id}`),
     getPharmacyQueue: () => request('/api/prescriptions/pharmacy/queue'),
+    // Phase 10F.1: يسجّل قرار المريض فقط. لا صرف ولا خصم ولا فاتورة من هذا المسار.
+    setItemFulfilment: (itemId, body) => request(`/api/prescriptions/items/${itemId}/fulfilment`, { method: 'PATCH', body }),
     importTemplate: () => downloadMedicationTemplate(),
     validateImport: (formData) => request('/api/medications/import/validate', { method: 'POST', body: formData, isForm: true }),
     executeImport: (formData) => request('/api/medications/import', { method: 'POST', body: formData, isForm: true }),
@@ -235,6 +247,40 @@ export const api = {
     revokeAllSessions: (userId) => request(`/api/users/${userId}/sessions/revoke-all`, { method: 'POST' }),
     remove: (id) => request(`/api/users/${id}`, { method: 'DELETE' }),
   },
+  doctorSchedules: {
+    list: (params) => request('/api/doctor-schedules', { params }),
+    create: (body) => request('/api/doctor-schedules', { method: 'POST', body }),
+    get: (id) => request(`/api/doctor-schedules/${id}`),
+    update: (id, body) => request(`/api/doctor-schedules/${id}`, { method: 'PATCH', body }),
+    delete: (id) => request(`/api/doctor-schedules/${id}`, { method: 'DELETE' }),
+    availability: (params) => request('/api/doctor-schedules/availability', { params }),
+    weekly: (params) => request('/api/doctor-schedules/weekly', { params }),
+  },
+  // تقويم العطل الرسمية وإجازات الأطباء واستثناءات العمل.
+  // ملاحظة: تغيير التاريخ يحتاج confirm_impact بعد معاينة الأثر (409).
+  holidays: {
+    list: (params) => request('/api/calendar/holidays', { params }),
+    create: (body) => request('/api/calendar/holidays', { method: 'POST', body }),
+    update: (id, body) => request(`/api/calendar/holidays/${id}`, { method: 'PATCH', body }),
+    cancel: (id, body) => request(`/api/calendar/holidays/${id}/cancel`, { method: 'POST', body }),
+    impact: (id, params) => request(`/api/calendar/holidays/${id}/impact`, { params }),
+  },
+  doctorLeave: {
+    list: (params) => request('/api/calendar/leave', { params }),
+    create: (body) => request('/api/calendar/leave', { method: 'POST', body }),
+    decide: (id, body) => request(`/api/calendar/leave/${id}`, { method: 'PATCH', body }),
+  },
+  workExceptions: {
+    list: (params) => request('/api/calendar/exceptions', { params }),
+    create: (body) => request('/api/calendar/exceptions', { method: 'POST', body }),
+    decide: (id, body) => request(`/api/calendar/exceptions/${id}`, { method: 'PATCH', body }),
+  },
+  calendar: {
+    impact: (params) => request('/api/calendar/impact', { params }),
+    notifications: (params) => request('/api/calendar/notifications', { params }),
+    changes: (params) => request('/api/calendar/changes', { params }),
+    gate: (params) => request('/api/calendar/gate', { params }),
+  },
   permissions: {
     options: () => request('/api/permissions/options'),
     roles: () => request('/api/permissions/roles'),
@@ -287,6 +333,26 @@ export const api = {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
     },
+  },
+  inventory: {
+    list: (params) => request('/api/inventory', { params }),
+    get: (id) => request(`/api/inventory/${id}`),
+    batches: (params) => request('/api/inventory-batches', { params }),
+    medicationPrices: (params) => request('/api/inventory/medication-prices', { params }),
+    batchAvailability: (batchId) => request(`/api/inventory-batches/${batchId}/availability`),
+    batchCreate: (body) => request('/api/inventory-batches', { method: 'POST', body }),
+    batchReceive: (body) => request('/api/inventory-batches/receive', { method: 'POST', body }),
+    batchUpdate: (id, body) => request(`/api/inventory-batches/${id}`, { method: 'PUT', body }),
+    batchDeactivate: (id) => request(`/api/inventory-batches/${id}`, { method: 'DELETE' }),
+    batchGet: (id) => request(`/api/inventory-batches/${id}`),
+    expiry: (params) => request('/api/inventory-batches/expiry', { params }),
+  },
+  suppliers: {
+    list: (params) => request('/api/suppliers', { params }),
+  },
+  stockMovements: {
+    create: (body) => request('/api/stock-movements', { method: 'POST', body }),
+    list: (params) => request('/api/stock-movements', { params }),
   },
 }
 

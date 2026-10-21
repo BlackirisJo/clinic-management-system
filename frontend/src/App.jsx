@@ -9,6 +9,7 @@ import ChangePasswordModal from './components/ChangePasswordModal'
 import InstallPrompt from './components/InstallPrompt'
 import UpdateNotice from './components/UpdateNotice'
 import OverviewView from './views/OverviewView'
+import PermissionsView from './views/PermissionsView'
 import PatientsView from './views/PatientsView'
 import AppointmentsView from './views/AppointmentsView'
 import PrescriptionsView from './views/PrescriptionsView'
@@ -18,8 +19,11 @@ import SystemLogsView from './views/SystemLogsView'
 import UsersView from './views/UsersView'
 import BackupsView from './views/BackupsView'
 import ClinicsView from './views/ClinicsView'
-import PermissionsView from './views/PermissionsView'
+import DoctorSchedulesView from './views/DoctorSchedulesView'
+import HolidayCalendarView from './views/HolidayCalendarView'
+import DoctorLeaveView from './views/DoctorLeaveView'
 import PharmacyView from './views/PharmacyView'
+import InventoryView from './views/InventoryView'
 
 const VIEWS = {
   overview: OverviewView,
@@ -34,6 +38,10 @@ const VIEWS = {
   backups: BackupsView,
   permissions: PermissionsView,
   pharmacy: PharmacyView,
+  inventory: InventoryView,
+  doctorSchedules: DoctorSchedulesView,
+  calendar: HolidayCalendarView,
+  doctorLeave: DoctorLeaveView,
 }
 
 function Shell() {

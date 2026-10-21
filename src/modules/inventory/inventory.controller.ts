@@ -9,7 +9,10 @@ import {
 import {
   inventoryItemCreateSchema,
   inventoryItemUpdateSchema,
+  inventoryListQuerySchema,
   isMaxStockWithinReorderPoint,
+  DEFAULT_INVENTORY_LIMIT,
+  MAX_INVENTORY_LIMIT,
 } from '../../validations/inventory.validation';
 import { buildClinicScope, isClinicAccessible, parsePositiveId } from './clinicScope';
 
@@ -66,7 +69,12 @@ const hasActiveItemForMedication = async (
 
 // 1. قائمة أصناف المخزون النشطة ضمن عيادات المستخدم فقط
 export const listInventoryItems = async (req: AuthenticatedRequest, res: Response) => {
-  const requestedClinicId = req.query.clinic_id;
+  const parsed = inventoryListQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) return validationError(res, 'معايير تصفية المخزون غير صالحة');
+  const query = parsed.data;
+
+  const requestedClinicId = query.clinic_id;
+  const searchTerm = query.q;
   let baseParams: unknown[] = [];
   let requestedClause = '';
 
@@ -80,16 +88,43 @@ export const listInventoryItems = async (req: AuthenticatedRequest, res: Respons
     requestedClause = ' AND i.clinic_id = $1';
   }
 
+  const limit = query.limit ?? DEFAULT_INVENTORY_LIMIT;
+  const offset = query.offset ?? 0;
+
   try {
     const scope = buildClinicScope(req, baseParams);
-    const result = await pool.query(
-      `SELECT ${ITEM_COLUMNS} ${ITEM_FROM}
-       WHERE i.deleted_at IS NULL${requestedClause}${scope.clause}
-       ORDER BY m.trade_name ASC, i.inventory_id ASC`,
+
+    // Build search clause
+    let searchClause = '';
+    const scopeParamCount = scope.params.length;
+    if (searchTerm !== undefined && searchTerm.trim() !== '') {
+      const searchPattern = `%${searchTerm.trim()}%`;
+      searchClause = ` AND (m.trade_name ILIKE $${scopeParamCount + 1} OR m.scientific_name ILIKE $${scopeParamCount + 1})`;
+      scope.params.push(searchPattern);
+    }
+
+    // Count total matching rows (clinic-scoped, deleted_at IS NULL)
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total ${ITEM_FROM}
+       WHERE i.deleted_at IS NULL${requestedClause}${scope.clause}${searchClause}`,
       scope.params,
     );
+    const total = countResult.rows[0]?.total ?? 0;
 
-    return res.status(200).json({ inventoryItems: result.rows });
+    // Fetch paginated page
+    const nextPlaceholder = scope.params.length + 1;
+    const result = await pool.query(
+      `SELECT ${ITEM_COLUMNS} ${ITEM_FROM}
+       WHERE i.deleted_at IS NULL${requestedClause}${scope.clause}${searchClause}
+       ORDER BY m.trade_name ASC, i.inventory_id ASC
+       LIMIT $${nextPlaceholder} OFFSET $${nextPlaceholder + 1}`,
+      [...scope.params, limit, offset],
+    );
+
+    return res.status(200).json({
+      inventoryItems: result.rows,
+      pagination: { limit, offset, returned: result.rows.length, total },
+    });
   } catch (error) {
     console.error('List Inventory Items Error:', error);
     return res.status(500).json({

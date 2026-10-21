@@ -31,6 +31,9 @@ interface Allocation {
   unit_cost_snapshot: string | null;
   medication_id?: number;
   inventory_item_id?: number;
+  /** Phase 10E.7/10E.8 — the reversal and credit key off these */
+  dispensing_id?: number;
+  dispensing_item_id?: number;
 }
 
 interface Batch {
@@ -54,6 +57,22 @@ interface Scenario {
   updateRowCount?: number;
   failOn?: string;
   noUser?: boolean;
+  /** Phase 10E.8 — the charged invoice line per dispensing item */
+  chargeLines?: ChargeLine[];
+  /** Phase 10E.8 — already credited quantity per dispensing item */
+  credited?: Array<{ dispensing_item_id: number; quantity: number }>;
+}
+
+interface ChargeLine {
+  dispensing_item_id: number;
+  charged_quantity: string;
+  unit_price_snapshot: string;
+  /** null = a pre-10E.8 line with no medication discount snapshot */
+  medication_discount_value: string | null;
+  net_amount: string;
+  paid_amount: string;
+  payment_type?: string;
+  currency_code?: string;
 }
 
 const DEFAULT_ALLOCATION: Allocation = {
@@ -89,6 +108,9 @@ const makeHandler = (s: Scenario) => (text: string, params: unknown[] = []): Moc
         unit_cost_snapshot: a.unit_cost_snapshot,
         medication_id: a.medication_id ?? 11,
         inventory_item_id: a.inventory_item_id ?? 5,
+        // Phase 10E.7/10E.8: the reversal and the credit both key off these.
+        dispensing_id: a.dispensing_id ?? 100,
+        dispensing_item_id: a.dispensing_item_id ?? 501,
       }));
     return { rows, rowCount: rows.length };
   }
@@ -143,6 +165,79 @@ const makeHandler = (s: Scenario) => (text: string, params: unknown[] = []): Moc
     };
   }
 
+  // 7b) Phase 10E.7 — financial reversal. The production statement computes the
+  // amount in SQL, so the stub mirrors that: params are
+  // [return_item_id, allocation, dispensing, item, clinic, qty, cost, decision].
+  if (t.startsWith('INSERT INTO medication_return_reversals')) {
+    const quantity = Number(params[5]);
+    const cost = Number(params[6]);
+    const decision = String(params[7]);
+    const amount = quantity * cost;
+    return {
+      rows: [{
+        reversal_id: 7500 + reversals, return_item_id: params[0],
+        dispensing_item_batch_id: params[1], dispensing_id: params[2], dispensing_item_id: params[3],
+        clinic_id: params[4], returned_quantity: params[5], unit_cost_snapshot: params[6],
+        cogs_reversal_amount: String(amount),
+        loss_amount: decision === 'WASTE' ? String(amount) : '0',
+        restock_decision: decision, created_at: '2026-03-01T10:00:00.000Z',
+      }],
+      rowCount: 1,
+    };
+  }
+
+  // 3a) Phase 10E.8 — the charged invoice line per dispensing item. Absent by
+  // default, which is the "not invoiced yet" case: no revenue, so no credit.
+  if (t.includes('FROM invoice_items ii')) {
+    const rows = (s.chargeLines ?? []).map((line) => ({
+      dispensing_item_id: line.dispensing_item_id,
+      item_id: 7100 + line.dispensing_item_id, invoice_id: 7200 + line.dispensing_item_id,
+      dispensed_quantity: line.charged_quantity, unit_price_snapshot: line.unit_price_snapshot,
+      medication_discount_value: line.medication_discount_value,
+      net_amount: line.net_amount, paid_amount: line.paid_amount,
+      payment_type: line.payment_type ?? 'CASH', currency_code: line.currency_code ?? 'JOD',
+    }));
+    return { rows, rowCount: rows.length };
+  }
+
+  if (t.includes('FROM medication_return_credits')) {
+    const ids = (params[0] as number[]) ?? [];
+    const rows = (s.credited ?? [])
+      .filter((c) => ids.includes(c.dispensing_item_id))
+      .map((c) => ({ dispensing_item_id: c.dispensing_item_id, credited_quantity: c.quantity }));
+    return { rows, rowCount: rows.length };
+  }
+
+  if (t.includes('INSERT INTO medication_return_credits')) {
+    // Params follow the query: $4 quantity, $5 price, $6 discount,
+    // $11 invoice net, $12 invoice paid, $13 payment type, $14 currency.
+    const quantity = Number(params[3]);
+    const price = Number(params[4]);
+    const discount = Number(params[5]);
+    const invoiceNet = Number(params[10]);
+    const invoicePaid = Number(params[11]);
+    const paymentType = String(params[12]);
+    const gross = quantity * price;
+    const net = gross - Math.round(gross * discount) / 100;
+    const applied = Math.min(net, Math.max(invoiceNet - invoicePaid, 0));
+    const refundDue =
+      paymentType === 'CASH' || paymentType === 'CARD' ? net - applied : 0;
+    return {
+      rows: [{
+        credit_id: 7800 + credits, return_item_id: params[0], reversal_id: params[1],
+        dispensing_id: params[2], dispensing_item_id: params[6],
+        invoice_id: params[7], invoice_item_id: params[8], clinic_id: params[9],
+        returned_quantity: params[3], unit_price_snapshot: params[4],
+        medication_discount_value: params[5], gross_amount: String(gross),
+        net_amount: String(net), credit_amount: String(net),
+        applied_to_outstanding: String(applied), refund_due_amount: String(refundDue),
+        invoice_net_amount: params[10], invoice_paid_amount: params[11],
+        currency_code: params[13], created_at: '2026-03-01T10:00:00.000Z',
+      }],
+      rowCount: 1,
+    };
+  }
+
   // 7) guarded batch update
   if (t.startsWith('UPDATE inventory_batches')) {
     return {
@@ -179,6 +274,8 @@ const makeHandler = (s: Scenario) => (text: string, params: unknown[] = []): Moc
 };
 
 let movements = 0;
+let reversals = 0;
+let credits = 0;
 
 const PHARMACIST = {
   userId: 42, roleId: 4, clinicId: 1, roleName: 'PHARMACIST',
@@ -257,6 +354,8 @@ const findAudit = (calls: QueryCall[]) => calls.filter((c) => c.text.includes('I
 const findDispensingLock = (calls: QueryCall[]) => find(calls, 'SELECT d.dispensing_id');
 const findAllocationLock = (calls: QueryCall[]) => find(calls, 'FOR UPDATE OF dib');
 const findPrior = (calls: QueryCall[]) => find(calls, 'mr.status');
+const findReversal = (calls: QueryCall[]) =>
+  calls.filter((c) => c.text.includes('INSERT INTO medication_return_reversals'));
 const findBatchLock = (calls: QueryCall[]) => find(calls, 'FOR UPDATE OF b');
 
 const writes = (calls: QueryCall[]) => calls.filter((c) => /^\s*(INSERT|UPDATE|DELETE)\b/i.test(c.text.trim()));
@@ -978,19 +1077,38 @@ test('TRANSACTION: no write is issued before validation completes', async () => 
 });
 
 test('TRANSACTION: the documented order is preserved', async () => {
-  const r = await run({}, VALID_BODY);
+  // A charged line is supplied so the full order, including the 10E.8 revenue
+  // credit, is exercised. Without one the credit step is legitimately absent.
+  const r = await run(
+    {
+      chargeLines: [{
+        dispensing_item_id: 501, charged_quantity: '10.000', unit_price_snapshot: '5.00',
+        medication_discount_value: '0', net_amount: '50.00', paid_amount: '0.00',
+      }],
+    },
+    { ...VALID_BODY, items: [{ dispensing_item_batch_id: 500, quantity: 10, restock_decision: 'RESTOCK' }] },
+  );
 
   assert.equal(r.captured.status, 201);
   const order = r.calls.filter((c) => !['BEGIN', 'COMMIT', 'ROLLBACK'].includes(c.text.trim()));
   assert.match(order[0]!.text, /SELECT d\.dispensing_id/, '1) lock the dispensing');
   assert.match(order[1]!.text, /FOR UPDATE OF dib/, '2) lock the allocations');
   assert.match(order[2]!.text, /mr\.status = 'COMPLETED'/, '3) validate against return history');
-  assert.match(order[3]!.text, /FOR UPDATE OF b/, '4) lock the batches, ordered');
-  assert.match(order[4]!.text, /INSERT INTO medication_returns/, '5) header');
-  assert.match(order[5]!.text, /INSERT INTO medication_return_items/, '6) items');
-  assert.match(order[6]!.text, /UPDATE inventory_batches/, '7) guarded stock update');
-  assert.match(order[7]!.text, /INSERT INTO stock_movements/, '8) movement');
-  assert.match(order[8]!.text, /INSERT INTO audit_logs/, '9) audit');
+  // Phase 10E.8: the invoice line is locked after the allocations and before the
+  // batches, keeping one global order: dispensing → allocations → invoice → batches.
+  assert.match(order[3]!.text, /FOR UPDATE OF ii/, '4) lock the charged invoice lines');
+  assert.match(order[4]!.text, /FROM medication_return_credits/, '5) validate credited quantity');
+  assert.match(order[5]!.text, /FOR UPDATE OF b/, '6) lock the batches, ordered');
+  assert.match(order[6]!.text, /INSERT INTO medication_returns/, '7) header');
+  assert.match(order[7]!.text, /INSERT INTO medication_return_items/, '8) items');
+  // Phase 10E.7: the reversal is written inside the same item loop, so it lands
+  // immediately after the return line it reverses — never in a second transaction.
+  assert.match(order[8]!.text, /INSERT INTO medication_return_reversals/, '9) financial reversal');
+  // Phase 10E.8: the revenue credit follows it, in the same transaction.
+  assert.match(order[9]!.text, /INSERT INTO medication_return_credits/, '10) revenue credit');
+  assert.match(order[10]!.text, /UPDATE inventory_batches/, '11) guarded stock update');
+  assert.match(order[11]!.text, /INSERT INTO stock_movements/, '12) movement');
+  assert.match(order[12]!.text, /INSERT INTO audit_logs/, '13) audit');
 });
 
 test('TRANSACTION: the response never echoes a client-supplied identity', async () => {
@@ -1002,4 +1120,189 @@ test('TRANSACTION: the response never echoes a client-supplied identity', async 
   assert.equal(r.captured.body.return.returned_by_user_id, PHARMACIST.userId);
   assert.equal(r.captured.body.return.dispensed_to_patient_id, 200);
   assert.doesNotMatch(body, /password_hash|username|email|national_id/);
+});
+
+/* ==========================================================================
+ * 10E.8 — REVENUE CREDIT ON A MEDICATION RETURN
+ * ========================================================================== */
+
+const CHARGED: ChargeLine = {
+  dispensing_item_id: 501, charged_quantity: '30.000', unit_price_snapshot: '5.00',
+  medication_discount_value: '0', net_amount: '150.00', paid_amount: '0.00',
+};
+
+const ONE_RESTOCK = { dispensing_item_batch_id: 500, quantity: 10, restock_decision: 'RESTOCK' };
+
+const findCredits = (calls: QueryCall[]) =>
+  calls.filter((c) => c.text.includes('INSERT INTO medication_return_credits'));
+
+test('CREDIT: an invoiced line yields a credit derived only from invoice snapshots', async () => {
+  const r = await run({ chargeLines: [CHARGED] }, { ...VALID_BODY, items: [ONE_RESTOCK] });
+
+  assert.equal(r.captured.status, 201);
+  const credit = findCredits(r.calls)[0]!;
+  const params = credit.params;
+  assert.equal(params[3], 10, 'the returned quantity');
+  assert.equal(params[4], '5.00', 'the price is copied from the invoice line, never the current price');
+  assert.equal(params[5], '0', 'the discount is copied from the invoice line');
+  assert.equal(params[10], '150.00', 'the invoice net is snapshotted on the credit');
+  assert.equal(params[11], '0.00', 'the invoice paid is snapshotted on the credit');
+  assert.deepEqual(r.captured.body.return.revenue_credits_skipped, [], 'nothing skipped');
+const credited = r.captured.body.return.revenue_credits[0];
+  assert.equal(Number(credited.credit_amount), 50, '10 x 5.00 with no discount');
+  assert.equal(credited.dispensing_item_id, 501, 'keyed to the dispensing item, not the batch');
+});
+
+test('CREDIT: the medication discount is taken off the gross, rounded once', async () => {
+  // 3 x 9.99 at 10% = gross 29.97, discount 2.997 -> 3.00, net 26.97.
+  const r = await run(
+    {
+      chargeLines: [{
+        dispensing_item_id: 501, charged_quantity: '30.000', unit_price_snapshot: '9.99',
+        medication_discount_value: '10', net_amount: '300.00', paid_amount: '0.00',
+      }],
+    },
+    { ...VALID_BODY, items: [{ dispensing_item_batch_id: 500, quantity: 3, restock_decision: 'RESTOCK' }] },
+  );
+
+  assert.equal(r.captured.status, 201);
+  const credited = r.captured.body.return.revenue_credits[0];
+  assert.equal(Number(credited.gross_amount), 29.97);
+  assert.equal(Number(credited.net_amount), 26.97);
+  assert.equal(credited.net_amount, credited.credit_amount, 'the credit IS the net');
+});
+
+test('CREDIT: a line with no invoice earns no credit and is reported, not guessed', async () => {
+  const r = await run({}, { ...VALID_BODY, items: [ONE_RESTOCK] });
+
+  assert.equal(r.captured.status, 201);
+  assert.equal(findCredits(r.calls).length, 0, 'no revenue was recorded, so none is reversed');
+assert.deepEqual(r.captured.body.return.revenue_credits, []);
+  assert.equal(r.captured.body.return.revenue_credits_skipped[0].reason, 'NOT_INVOICED');
+  // 10E.7 is unaffected: the cost reversal still happens.
+  assert.equal(findReversal(r.calls).length, 1, 'the cost reversal is independent of the charge');
+});
+
+test('CREDIT: a pre-10E.8 line with no discount snapshot is skipped, never zeroed', async () => {
+  const r = await run(
+    { chargeLines: [{ ...CHARGED, medication_discount_value: null }] },
+    { ...VALID_BODY, items: [ONE_RESTOCK] },
+  );
+
+  assert.equal(r.captured.status, 201);
+  assert.equal(findCredits(r.calls).length, 0);
+  assert.equal(
+    r.captured.body.return.revenue_credits_skipped[0].reason,
+    'MISSING_MEDICATION_DISCOUNT_SNAPSHOT',
+  );
+});
+
+test('CREDIT: an insurance invoice books the full credit and owes no refund', async () => {
+  const r = await run(
+    {
+      chargeLines: [{ ...CHARGED, payment_type: 'INSURANCE', net_amount: '150.00', paid_amount: '150.00' }],
+    },
+    { ...VALID_BODY, items: [ONE_RESTOCK] },
+  );
+
+  assert.equal(r.captured.status, 201);
+  const credited = r.captured.body.return.revenue_credits[0];
+  assert.equal(Number(credited.credit_amount), 50, 'the revenue is reversed in full');
+  assert.equal(Number(credited.applied_to_outstanding), 0, 'nothing is outstanding');
+  assert.equal(Number(credited.refund_due_amount), 0, 'the payer is not the patient');
+});
+
+test('CREDIT: a cash invoice splits the credit between the balance and the refund', async () => {
+  // 10 returned at 5.00 = 50.00 credit. The invoice already has 120.00 against a
+  // 150.00 net, so only 30.00 is outstanding: 30 cancels it, 20 is owed back.
+  const r = await run(
+    { chargeLines: [{ ...CHARGED, payment_type: 'CASH', net_amount: '150.00', paid_amount: '120.00' }] },
+    { ...VALID_BODY, items: [ONE_RESTOCK] },
+  );
+
+  assert.equal(r.captured.status, 201);
+  const credited = r.captured.body.return.revenue_credits[0];
+  assert.equal(Number(credited.applied_to_outstanding), 30);
+  assert.equal(Number(credited.refund_due_amount), 20);
+  assert.equal(
+    Number(credited.applied_to_outstanding) + Number(credited.refund_due_amount),
+    Number(credited.credit_amount),
+    'the credit is split, never lost and never duplicated',
+  );
+});
+
+test('CREDIT: the refund is capped by what was actually paid, not by the net', async () => {
+  // Paid 20.00 against a 150.00 net: the patient already owes 130.00, so the
+  // whole 50.00 credit cancels the balance and nothing is refunded.
+  const r = await run(
+    { chargeLines: [{ ...CHARGED, payment_type: 'CASH', net_amount: '150.00', paid_amount: '20.00' }] },
+    { ...VALID_BODY, items: [ONE_RESTOCK] },
+  );
+
+  const credited = r.captured.body.return.revenue_credits[0];
+  assert.equal(Number(credited.applied_to_outstanding), 50);
+  assert.equal(Number(credited.refund_due_amount), 0);
+});
+
+test('CREDIT: returning more than the charged quantity is refused', async () => {
+  const r = await run(
+    { chargeLines: [{ ...CHARGED, charged_quantity: '5.000' }] },
+    { ...VALID_BODY, items: [ONE_RESTOCK] },
+  );
+
+  assert.equal(r.captured.status, 409);
+  assert.equal(findCredits(r.calls).length, 0);
+  assert.equal(r.wasRolledBack, true);
+  assert.equal(r.wasCommitted, false);
+});
+
+test('CREDIT: a second return can only credit what the first one did not', async () => {
+  // 30 charged, 25 already credited, so 5 remain. 10 is still too many.
+  const r = await run(
+    {
+      chargeLines: [CHARGED],
+      credited: [{ dispensing_item_id: 501, quantity: 25 }],
+    },
+    { ...VALID_BODY, items: [{ dispensing_item_batch_id: 500, quantity: 5, restock_decision: 'RESTOCK' }] },
+  );
+
+  assert.equal(r.captured.status, 201, '30 charged - 25 credited = 5 still creditable');
+  assert.equal(Number(r.captured.body.return.revenue_credits[0].credit_amount), 25);
+});
+
+test('CREDIT: the over-credit guard reports what is still creditable', async () => {
+  const r = await run(
+    {
+      chargeLines: [CHARGED],
+      credited: [{ dispensing_item_id: 501, quantity: 25 }],
+    },
+    { ...VALID_BODY, items: [{ dispensing_item_batch_id: 500, quantity: 6, restock_decision: 'RESTOCK' }] },
+  );
+
+assert.equal(r.captured.status, 409);
+  // The error carries the arithmetic so a client can retry without guessing.
+  assert.equal(Number(r.captured.body.creditable_quantity), 5);
+  assert.equal(Number(r.captured.body.previously_credited_quantity), 25);
+  assert.equal(Number(r.captured.body.charged_quantity), 30);
+});
+
+test('CREDIT: the client never supplies the money', async () => {
+  const r = await run(
+    { chargeLines: [CHARGED] },
+    {
+      ...VALID_BODY,
+items: [{
+        ...ONE_RESTOCK,
+        unit_price_snapshot: '0.01',
+        credit_amount: '999999',
+        medication_discount_value: '100',
+      }],
+    },
+  );
+
+  assert.equal(r.captured.status, 201);
+  const credit = findCredits(r.calls)[0]!;
+  assert.equal(credit.params[4], '5.00', 'the invoice price, not the client value');
+  assert.equal(credit.params[5], '0', 'the invoice discount, not the client value');
+  assert.equal(Number(r.captured.body.return.revenue_credits[0].credit_amount), 50);
 });

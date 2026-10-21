@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { t, useT } from '../i18n'
 import { api } from '../lib/api'
 import { dosageFormLabel } from '../lib/dosageForm'
@@ -20,6 +20,7 @@ export function SearchSelect({
   value,
   onChange,
   fetchOptions,
+  options,
   getOptionValue,
   getOptionLabel,
   getOptionMeta,
@@ -34,7 +35,7 @@ export function SearchSelect({
   const t = useT()
   const listId = useId()
   const [query, setQuery] = useState('')
-  const [options, setOptions] = useState([])
+  const [fetchedOptions, setFetchedOptions] = useState([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -43,12 +44,34 @@ export function SearchSelect({
 
   const wrapRef = useRef(null)
   const inputRef = useRef(null)
-  const seqRef = useRef(0)                // رقم الطلب الأخير — لتجاهل الردود القديمة
-  const emittedRef = useRef('')           // آخر قيمة أرسلناها للأب (لتمييز التغيير الخارجي)
-  const immediateRef = useRef(false)      // أول جلب بعد الفتح فوري (بلا تأجيل)
+  const seqRef = useRef(0)
+  const emittedRef = useRef('')
+  const immediateRef = useRef(false)
 
-  const idOf = (option) => (option ? String(getOptionValue(option)) : '')
-  const labelOf = (option) => (option ? getOptionLabel(option) || '' : '')
+  // Determine if using static options (no fetchOptions needed).
+  // An empty array is still static — no fetchOptions call is made.
+  const isStatic = Array.isArray(options)
+
+  // Default accessors: support objects with {value, label, data} format, or use provided functions
+  const defaultGetOptionValue = (opt) => (opt?.value ?? opt?.id ?? opt?.medication_id ?? opt?.patient_id ?? opt?.supplier_id ?? opt)
+  const defaultGetOptionLabel = (opt) => (opt?.label ?? opt?.name ?? opt?.full_name ?? opt?.trade_name ?? String(opt))
+  const defaultGetOptionMeta = (opt) => (opt?.data ? JSON.stringify(opt.data) : '')
+
+  const resolveValue = useCallback(
+    (opt) => (getOptionValue || defaultGetOptionValue)(opt),
+    [getOptionValue]
+  )
+  const resolveLabel = useCallback(
+    (opt) => (getOptionLabel || defaultGetOptionLabel)(opt),
+    [getOptionLabel]
+  )
+  const resolveMeta = useCallback(
+    (opt) => (getOptionMeta || defaultGetOptionMeta)(opt),
+    [getOptionMeta]
+  )
+
+  const idOf = (option) => (option ? String(resolveValue(option)) : '')
+  const labelOf = (option) => (option ? resolveLabel(option) || '' : '')
 
   // مزامنة التغيير الخارجي (إعادة تعيين النموذج بعد الحفظ) مع حالة البحث المحلية
   useEffect(() => {
@@ -63,32 +86,61 @@ export function SearchSelect({
   // نص الجلب: إن كان النص هو نفسه اسم العنصر المختار (فتح القائمة بعد اختيار) نطلب القائمة الافتراضية
   const term = selected && query === labelOf(selected) ? '' : query.trim()
 
+  // Filter static options locally when in static mode.
+  // An empty options array is still static — no fetchOptions call is made.
+  const filteredStaticOptions = useMemo(() => {
+    if (!isStatic) return []
+    const opts = options
+    if (!term) return opts
+    const lowerTerm = term.toLowerCase()
+    return opts.filter((opt) => {
+      const label = resolveLabel(opt)
+      const meta = resolveMeta(opt)
+      return (
+        (label ? String(label).toLowerCase().includes(lowerTerm) : false) ||
+        (meta ? String(meta).toLowerCase().includes(lowerTerm) : false)
+      )
+    })
+  }, [isStatic, options, term, resolveLabel, resolveMeta])
+
   const fetchNow = useCallback(async (searchTerm) => {
+    // Skip async fetch when using static options
+    if (isStatic) return
+
     const seq = ++seqRef.current
     setLoading(true)
     setError('')
     try {
       const rows = await fetchOptions(searchTerm)
-      if (seq !== seqRef.current) return     // رد قديم: استُبدل بطلب أحدث
-      setOptions(Array.isArray(rows) ? rows : [])
+      if (seq !== seqRef.current) return
+      setFetchedOptions(Array.isArray(rows) ? rows : [])
       setActiveIndex(-1)
     } catch (err) {
       if (seq !== seqRef.current) return
-      setOptions([])
+      setFetchedOptions([])
       setError(err?.message || t('common.loadFailed'))
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }
-  }, [fetchOptions])
+  }, [fetchOptions, isStatic, t])
 
   // الجلب الكسول: لا طلب قبل فتح القائمة، ثم طلب واحد بعد انتهاء الكتابة (debounce)
+  // Only applies when not using static options
   useEffect(() => {
-    if (!open) return undefined
+    if (!open || isStatic) return undefined
     const delay = immediateRef.current ? 0 : debounceMs
     immediateRef.current = false
     const timer = setTimeout(() => { fetchNow(term) }, delay)
     return () => clearTimeout(timer)
-  }, [open, term, debounceMs, fetchNow])
+  }, [open, term, debounceMs, fetchNow, isStatic])
+
+  // Reset loading state when using static options
+  useEffect(() => {
+    if (isStatic) {
+      setLoading(false)
+      setError('')
+    }
+  }, [isStatic])
 
   // إغلاق عند النقر خارج المكوّن
   useEffect(() => {
@@ -101,7 +153,8 @@ export function SearchSelect({
   }, [open])
 
   // العنصر المختار يُعرض دائمًا في القائمة حتى لو خرج من نتائج التصفية
-  const shown = selected && !options.some((o) => idOf(o) === idOf(selected)) ? [selected, ...options] : options
+  const baseOptions = isStatic ? filteredStaticOptions : fetchedOptions
+  const shown = selected && !baseOptions.some((o) => idOf(o) === idOf(selected)) ? [selected, ...baseOptions] : baseOptions
   const hitLimit = !loading && !error && shown.length >= limit
   const selectedId = value === null || value === undefined ? '' : String(value)
 
@@ -132,7 +185,7 @@ export function SearchSelect({
     emittedRef.current = ''
     setSelected(null)
     setQuery('')
-    setOptions([])
+    setFetchedOptions([])
     setError('')
     setLoading(false)
     setActiveIndex(-1)
@@ -227,7 +280,7 @@ export function SearchSelect({
             <ul className="ss-list" id={listId} role="listbox" aria-label={placeholder}>
               {shown.map((option, index) => {
                 const optionId = idOf(option)
-                const meta = getOptionMeta ? getOptionMeta(option) : ''
+                const meta = resolveMeta(option)
                 return (
                   <li
                     key={optionId}

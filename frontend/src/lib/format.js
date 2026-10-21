@@ -106,11 +106,12 @@ export const PAYMENT_TYPES = {
 
 export const ROLE_LABELS = {
   SUPER_ADMIN: 'مدير النظام',
-  SYSTEM_ADMIN: 'مدير النظام',
+  SYSTEM_ADMIN: 'مدير العمليات',
   DOCTOR: 'طبيب',
   NURSE: 'ممرض/ة',
   ACCOUNTANT: 'محاسب',
   RECEPTIONIST: 'استقبال',
+  PHARMACIST: 'صيدلي',
   FINANCIAL_AUDITOR: 'مدقق مالي',
 }
 

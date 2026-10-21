@@ -94,6 +94,11 @@ const VALID_BODY = { batch_id: 7, movement_type: 'RECEIPT', quantity: 50 };
 /** معالج happy-path: قفل الدفعة، تحديث الكمية، إدراج الحركة (مع تمرير عبارات المعاملة). */
 const happyPath = (onHand: number) => (text: string, params: unknown[]): MockResult => {
   if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+  if (text === 'SAVEPOINT insert_movement' || text === 'RELEASE SAVEPOINT insert_movement' || text === 'ROLLBACK TO SAVEPOINT insert_movement') return { rows: [], rowCount: 0 };
+  if (text.includes('SELECT movement_id') && text.includes('idempotency_key')) {
+    // Early replay check - no existing movement
+    return { rows: [], rowCount: 0 };
+  }
   if (text.includes('FOR UPDATE OF b')) return { rows: [{ batch_id: 7, quantity_on_hand: onHand }], rowCount: 1 };
   if (text.includes('UPDATE inventory_batches b')) return { rows: [{ batch_id: 7, quantity_on_hand: onHand }], rowCount: 1 };
   if (text.includes('INSERT INTO stock_movements')) {
@@ -104,7 +109,7 @@ const happyPath = (onHand: number) => (text: string, params: unknown[]): MockRes
 
 const paramsToRow = (params: unknown[]) => ({
   batch_id: params[0], movement_type: params[1], quantity: params[2],
-  reference_type: params[3], reference_id: params[4], performed_by_user_id: params[5], notes: params[6],
+  reference_type: params[3], reference_id: params[4], performed_by_user_id: params[5], notes: params[6], idempotency_key: params[7],
 });
 
 const wasCommitted = (calls: QueryCall[]) => calls.some((c) => c.text === 'COMMIT');
@@ -288,7 +293,12 @@ test('ISOLATION: an admin is not clinic-restricted', async () => {
 
   await withMockedClient(
     (text) => {
-      if (text === 'COMMIT' || text === 'BEGIN') return { rows: [], rowCount: 0 };
+      if (text === 'COMMIT' || text === 'BEGIN' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (text === 'SAVEPOINT insert_movement' || text === 'RELEASE SAVEPOINT insert_movement' || text === 'ROLLBACK TO SAVEPOINT insert_movement') return { rows: [], rowCount: 0 };
+      if (text.includes('SELECT movement_id') && text.includes('idempotency_key')) {
+        // Early replay check - no existing movement
+        return { rows: [], rowCount: 0 };
+      }
       if (text.includes('FOR UPDATE OF b')) {
         assert.doesNotMatch(text, /ANY\(/);
         return { rows: [{ batch_id: 7, quantity_on_hand: 10 }], rowCount: 1 };
@@ -395,29 +405,28 @@ test('ADJUSTMENT: increases stock only — the schema has no direction or sign f
  * 14-15. MOVEMENT ROW / AUDIT FIELDS
  * ========================================================================== */
 
-test('MOVEMENT: the movement row is written with the authenticated user, not a body value', async () => {
+test('MOVEMENT: a body-supplied performed_by_user_id is rejected', async () => {
   const { res, captured } = makeRes();
 
-  await withMockedClient(happyPath(100), async (calls) => {
-    await createStockMovement(
-      movementReq({
-        ...VALID_BODY,
-        reference_type: 'PURCHASE_ORDER',
-        reference_id: 'PO-2026-0001',
-        notes: 'توريد دوري',
-        performed_by_user_id: 999,
-      }),
-      res,
-    );
+  await withMockedClient(
+    () => { throw new Error('no query may run when a forbidden field is present'); },
+    async (calls) => {
+      await createStockMovement(
+        movementReq({
+          ...VALID_BODY,
+          reference_type: 'PURCHASE_ORDER',
+          reference_id: 'PO-2026-0001',
+          notes: 'توريد دوري',
+          performed_by_user_id: 999,
+        }),
+        res,
+      );
 
-    assert.equal(captured.status, 201);
-    const insert = findInsert(calls)!;
-    assert.deepEqual(insert.params, [7, 'RECEIPT', 50, 'PURCHASE_ORDER', 'PO-2026-0001', 42, 'توريد دوري']);
-    assert.equal(insert.params[5], PHARMACIST.userId, 'a body-supplied user id must be ignored');
-    assert.match(insert.text, /performed_by_user_id/);
-    assert.match(calls[0]!.text, /^BEGIN$/);
-    assert.equal(calls[calls.length - 1]!.text, 'COMMIT');
-  });
+      assert.equal(captured.status, 400);
+      assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+      assert.match(captured.body.message, /performed_by_user_id/);
+    },
+  );
 });
 
 test('MOVEMENT: optional reference and notes default to NULL', async () => {
@@ -427,7 +436,10 @@ test('MOVEMENT: optional reference and notes default to NULL', async () => {
     await createStockMovement(movementReq({ ...VALID_BODY, reference_type: '', notes: '' }), res);
 
     assert.equal(captured.status, 201);
-    assert.deepEqual(findInsert(calls)!.params.slice(3), [null, null, 42, null]);
+    // INSERT params: [batch_id, movement_type, quantity, reference_type, reference_id, performed_by_user_id, notes, idempotency_key]
+    // slice(3) gives: [reference_type, reference_id, performed_by_user_id, notes, idempotency_key]
+    assert.deepEqual(findInsert(calls)!.params.slice(3, 7), [null, null, 42, null]);
+    assert.equal(findInsert(calls)!.params[7], null, 'idempotency_key should be null when not provided');
   });
 });
 
@@ -467,6 +479,11 @@ test('TRANSACTION: a DB constraint violation is reported, not bypassed', async (
   await withMockedClient(
     (text) => {
       if (text === 'BEGIN' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (text === 'SAVEPOINT insert_movement' || text === 'RELEASE SAVEPOINT insert_movement' || text === 'ROLLBACK TO SAVEPOINT insert_movement') return { rows: [], rowCount: 0 };
+      if (text.includes('SELECT movement_id') && text.includes('idempotency_key')) {
+        // Early replay check - no existing movement
+        return { rows: [], rowCount: 0 };
+      }
       if (text.includes('FOR UPDATE OF b')) return { rows: [{ batch_id: 7, quantity_on_hand: 100 }], rowCount: 1 };
       if (text.includes('UPDATE inventory_batches b')) return { rows: [{ batch_id: 7 }], rowCount: 1 };
       if (text.includes('INSERT INTO stock_movements')) {
@@ -597,6 +614,7 @@ test('READ LIST: returns only movements of accessible clinics with pagination me
       assert.match(text, /JOIN inventory_batches b ON b\.batch_id = sm\.batch_id/);
       assert.match(text, /JOIN inventory_items i ON i\.inventory_id = b\.inventory_id/);
       assert.match(text, SCOPED_LIST_MATCH, 'scope must run through the item join');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 2 }], rowCount: 1 };
       return { rows: [movementRow(), movementRow({ movement_id: 8 })], rowCount: 2 };
     },
     async (calls) => {
@@ -604,8 +622,11 @@ test('READ LIST: returns only movements of accessible clinics with pagination me
 
       assert.equal(captured.status, 200);
       assert.equal(captured.body.movements.length, 2);
-      assert.deepEqual(captured.body.pagination, { limit: DEFAULT_STOCK_MOVEMENT_LIMIT, offset: 0, returned: 2 });
-      assert.deepEqual(calls[0]!.params, [[1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
+      assert.deepEqual(captured.body.pagination, { limit: DEFAULT_STOCK_MOVEMENT_LIMIT, offset: 0, returned: 2, total: 2 });
+      // Data query is the second call (first is COUNT)
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.deepEqual(dataCall.params, [[1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
     },
   );
 });
@@ -615,6 +636,7 @@ test('READ LIST: ordering is newest first with movement_id as a tie-breaker', as
 
   await withMockedPool(
     (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       assert.match(text, /ORDER BY sm\.created_at DESC, sm\.movement_id DESC/);
       return { rows: [movementRow()], rowCount: 1 };
     },
@@ -632,6 +654,7 @@ test('READ LIST: a user assigned to no clinic gets an empty list, not every clin
   await withMockedPool(
     (text) => {
       assert.match(text, SCOPED_LIST_MATCH, 'the scope clause must never be omitted');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     async (calls) => {
@@ -639,7 +662,9 @@ test('READ LIST: a user assigned to no clinic gets an empty list, not every clin
         { query: {}, params: {}, body: {}, user: { ...PHARMACIST, clinicIds: [] } } as unknown as AuthenticatedRequest,
         res,
       );
-      assert.deepEqual(calls[0]!.params[0], [], 'empty scope denies by default');
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.deepEqual(dataCall.params[0], [], 'empty scope denies by default');
     },
   );
 
@@ -654,11 +679,14 @@ test('READ LIST: a batch filter outside the caller scope returns an empty list (
     (text) => {
       assert.match(text, /sm\.batch_id = \$1/);
       assert.match(text, SCOPED_LIST_MATCH);
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     async (calls) => {
       await listStockMovements(listReq({ batch_id: '999' }), res);
-      assert.deepEqual(calls[0]!.params, [999, [1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.deepEqual(dataCall.params, [999, [1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
     },
   );
 
@@ -673,11 +701,14 @@ test('READ LIST: a client-supplied clinic_id is ignored entirely', async () => {
     (text) => {
       assert.doesNotMatch(text, /clinic_id = \$/, 'a client clinic_id must never be bound as a filter');
       assert.match(text, SCOPED_LIST_MATCH);
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     async (calls) => {
       await listStockMovements(listReq({ clinic_id: '2' }), res);
-      assert.deepEqual(calls[0]!.params, [[1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.deepEqual(dataCall.params, [[1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
     },
   );
 
@@ -689,12 +720,15 @@ test('READ LIST: a valid movement_type filter is bound as a parameter', async ()
 
   await withMockedPool(
     (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       assert.match(text, /sm\.movement_type = \$1/);
       return { rows: [movementRow()], rowCount: 1 };
     },
     async (calls) => {
       await listStockMovements(listReq({ movement_type: 'DISPENSE' }), res);
-      assert.equal(calls[0]!.params[0], 'DISPENSE');
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.equal(dataCall.params[0], 'DISPENSE');
     },
   );
 
@@ -734,6 +768,7 @@ test('READ LIST: batch_id, reference and performer filters compose as parameters
 
   await withMockedPool(
     (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       assert.match(text, /sm\.batch_id = \$1 AND sm\.movement_type = \$2 AND sm\.reference_type = \$3 AND sm\.reference_id = \$4 AND sm\.performed_by_user_id = \$5/);
       assert.match(text, SCOPED_LIST_MATCH);
       return { rows: [movementRow()], rowCount: 1 };
@@ -746,7 +781,9 @@ test('READ LIST: batch_id, reference and performer filters compose as parameters
         }),
         res,
       );
-      assert.deepEqual(calls[0]!.params, [7, 'RETURN', 'PURCHASE_ORDER', 'PO-1', 42, [1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.deepEqual(dataCall.params, [7, 'RETURN', 'PURCHASE_ORDER', 'PO-1', 42, [1], DEFAULT_STOCK_MOVEMENT_LIMIT, 0]);
     },
   );
 
@@ -758,16 +795,19 @@ test('READ LIST: limit and offset are applied and echoed back', async () => {
 
   await withMockedPool(
     (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       assert.match(text, /LIMIT \$2 OFFSET \$3/);
       return { rows: [movementRow()], rowCount: 1 };
     },
     async (calls) => {
       await listStockMovements(listReq({ limit: '25', offset: '50' }), res);
-      assert.deepEqual(calls[0]!.params, [[1], 25, 50]);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.deepEqual(dataCall.params, [[1], 25, 50]);
     },
   );
 
-  assert.deepEqual(captured.body.pagination, { limit: 25, offset: 50, returned: 1 });
+  assert.deepEqual(captured.body.pagination, { limit: 25, offset: 50, returned: 1, total: 1 });
 });
 
 test('READ LIST: limit has a bounded maximum and offset must be non-negative', async () => {
@@ -794,14 +834,416 @@ test('READ LIST: the maximum limit itself is accepted', async () => {
   const { res, captured } = makeRes();
 
   await withMockedPool(
-    () => ({ rows: [], rowCount: 0 }),
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
     async (calls) => {
       await listStockMovements(listReq({ limit: String(MAX_STOCK_MOVEMENT_LIMIT) }), res);
-      assert.equal(calls[0]!.params[1], MAX_STOCK_MOVEMENT_LIMIT);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.equal(dataCall.params[1], MAX_STOCK_MOVEMENT_LIMIT);
     },
   );
 
   assert.equal(captured.status, 200);
+});
+
+/* ==========================================================================
+ * READ LIST: Date Filters (created_from / created_to)
+ * ========================================================================== */
+
+test('READ LIST: created_from filter is applied and scoped', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
+      assert.match(text, /sm\.created_at >= \$/, 'created_from filter must be applied');
+      // params order for data query: [created_from_date, clinic_ids_array, limit, offset]
+      // z.coerce.date() returns a Date object
+      assert.ok(params[0] instanceof Date, 'created_from date must be a Date object');
+      assert.equal((params[0] as Date).toISOString(), '2026-01-15T00:00:00.000Z', 'created_from date must be bound as first param');
+      assert.deepEqual(params[1], [1], 'clinic scope must be second param');
+      assert.deepEqual(params.slice(-2), [DEFAULT_STOCK_MOVEMENT_LIMIT, 0], 'limit, offset must be last');
+      return { rows: [movementRow({ created_at: '2026-01-15T10:00:00.000Z' })], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq({ created_from: '2026-01-15' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.movements.length, 1);
+});
+
+test('READ LIST: created_to filter is applied with inclusive end date (exclusive next-day boundary)', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
+      assert.match(text, /sm\.created_at < \$/, 'created_to filter must use exclusive upper bound');
+      // created_to '2026-01-31' should become 2026-02-01T00:00:00.000Z
+      const expectedTo = new Date('2026-02-01T00:00:00.000Z');
+      assert.deepEqual(params[0], expectedTo, 'created_to (exclusive next day) must be bound as first param');
+      assert.deepEqual(params[1], [1], 'clinic scope must be second param');
+      assert.deepEqual(params.slice(-2), [DEFAULT_STOCK_MOVEMENT_LIMIT, 0], 'limit, offset must be last');
+      return { rows: [movementRow({ created_at: '2026-01-31T23:59:59.000Z' })], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq({ created_to: '2026-01-31' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.movements.length, 1);
+});
+
+test('READ LIST: created_from and created_to combined filter correctly', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
+      assert.match(text, /sm\.created_at >= \$/, 'created_from filter must be applied');
+      assert.match(text, /sm\.created_at < \$/, 'created_to filter must be applied');
+      // params order for data query: [created_from, created_to_exclusive, clinic_ids_array, limit, offset]
+      const fromDate = new Date('2026-01-01T00:00:00.000Z');
+      const toDate = new Date('2026-02-01T00:00:00.000Z'); // 2026-01-31 + 1 day
+      assert.deepEqual(params[0], fromDate, 'created_from must be first param');
+      assert.deepEqual(params[1], toDate, 'created_to (exclusive next day) must be second param');
+      assert.deepEqual(params[2], [1], 'clinic scope must be third param');
+      assert.deepEqual(params.slice(-2), [DEFAULT_STOCK_MOVEMENT_LIMIT, 0], 'limit, offset must be last');
+      return { rows: [movementRow({ created_at: '2026-01-15T10:00:00.000Z' })], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq({ created_from: '2026-01-01', created_to: '2026-01-31' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.movements.length, 1);
+});
+
+test('READ LIST: invalid date format is rejected', async () => {
+  for (const query of [
+    { created_from: 'invalid-date' },
+    { created_to: 'not-a-date' },
+    { created_from: '2026-13-45' },
+  ]) {
+    const { res, captured } = makeRes();
+    await withMockedPool(
+      () => { throw new Error('no query may run for invalid date'); },
+      async (calls) => {
+        await listStockMovements(listReq(query), res);
+        assert.equal(calls.length, 0);
+      },
+    );
+    assert.equal(captured.status, 400, JSON.stringify(query));
+    assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+  }
+});
+
+test('READ LIST: reversed date range (created_from > created_to) is rejected', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    () => { throw new Error('no query may run for reversed range'); },
+    async (calls) => {
+      await listStockMovements(listReq({ created_from: '2026-02-01', created_to: '2026-01-31' }), res);
+      assert.equal(calls.length, 0);
+    },
+  );
+
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+});
+
+test('READ LIST: date filters combined with existing filters and pagination', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
+      assert.match(text, /sm\.batch_id = \$/, 'batch_id filter must be applied');
+      assert.match(text, /sm\.movement_type = \$/, 'movement_type filter must be applied');
+      assert.match(text, /sm\.created_at >= \$/, 'created_from filter must be applied');
+      assert.match(text, /sm\.created_at < \$/, 'created_to filter must be applied');
+      // params order for data query: [batch_id, movement_type, created_from, created_to_excl, clinic_ids_array, limit, offset]
+      const fromDate = new Date('2026-01-10T00:00:00.000Z');
+      const toDate = new Date('2026-01-21T00:00:00.000Z'); // 2026-01-20 + 1 day
+      assert.deepEqual(params[0], 7, 'batch_id must be first param');
+      assert.deepEqual(params[1], 'RECEIPT', 'movement_type must be second param');
+      assert.deepEqual(params[2], fromDate, 'created_from must be third param');
+      assert.deepEqual(params[3], toDate, 'created_to (exclusive next day) must be fourth param');
+      assert.deepEqual(params[4], [1], 'clinic scope must be fifth param');
+      assert.deepEqual(params.slice(-2), [10, 20], 'limit, offset must be last');
+      return { rows: [movementRow()], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq({
+        batch_id: '7',
+        movement_type: 'RECEIPT',
+        created_from: '2026-01-10',
+        created_to: '2026-01-20',
+        limit: '10',
+        offset: '20',
+      }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 20);
+});
+
+test('READ LIST: clinic isolation enforced with date filters', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
+      assert.match(text, /i\.clinic_id = ANY\(\$/, 'clinic scope must be applied');
+      assert.match(text, /sm\.created_at >= \$/, 'created_from filter must be applied');
+      return { rows: [], rowCount: 0 };
+    },
+    async () => {
+      await listStockMovements(
+        { query: { created_from: '2026-01-01' }, params: {}, body: {}, user: { ...PHARMACIST, clinicIds: [999] } } as unknown as AuthenticatedRequest,
+        res,
+      );
+      assert.equal(captured.status, 200);
+      assert.deepEqual(captured.body.movements, []);
+    },
+  );
+});
+
+test('READ LIST: admin is not clinic-restricted with date filters', async () => {
+  const { res, captured } = makeRes();
+  const adminReq = {
+    query: { created_from: '2026-01-01', created_to: '2026-12-31' },
+    params: {}, body: {},
+    user: { userId: 1, roleId: 1, clinicId: null, roleName: 'SUPER_ADMIN', permissions: [], clinicIds: [] },
+  } as unknown as AuthenticatedRequest;
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
+      assert.doesNotMatch(text, /ANY\(/);
+      assert.match(text, /sm\.created_at >= \$/);
+      assert.match(text, /sm\.created_at < \$/);
+      return { rows: [movementRow()], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(adminReq, res);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query must be executed');
+      assert.equal(dataCall.params.length, 4); // from, to, limit, offset (no scope)
+    },
+  );
+
+  assert.equal(captured.status, 200);
+});
+
+test('READ LIST: backward compatibility — no date filters returns same response shape', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      // Should not have WHERE clause filters for created_at
+      assert.doesNotMatch(text, /WHERE.*sm\.created_at/, 'no date filters should appear in WHERE clause');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 2 }], rowCount: 1 };
+      return { rows: [movementRow(), movementRow({ movement_id: 8 })], rowCount: 2 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq(), res);
+      assert.equal(captured.status, 200);
+      assert.equal(captured.body.movements.length, 2);
+      assert.ok('pagination' in captured.body);
+      assert.equal(captured.body.pagination.limit, DEFAULT_STOCK_MOVEMENT_LIMIT);
+      assert.equal(captured.body.pagination.offset, 0);
+      assert.equal(captured.body.pagination.returned, 2);
+      assert.equal(captured.body.pagination.total, 2);
+    },
+  );
+});
+
+/* ==========================================================================
+ * READ LIST: Total Count (WP-4.6.1)
+ * ========================================================================== */
+
+test('READ LIST: total count is correct for multiple pages', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 25 }], rowCount: 1 };
+      return { rows: Array.from({ length: 10 }, (_, i) => movementRow({ movement_id: 10 + i })), rowCount: 10 };
+    },
+    async () => {
+      await listStockMovements(listReq({ limit: '10', offset: '10' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 25);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 10);
+  assert.equal(captured.body.pagination.returned, 10);
+});
+
+test('READ LIST: total count reflects filters (movement_type)', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /sm\.movement_type = \$1/, 'movement_type filter must be in count query');
+      assert.match(text, SCOPED_LIST_MATCH, 'clinic scope must be in count query');
+      if (text.includes('COUNT(*)')) {
+        assert.deepEqual(params, ['DISPENSE', [1]], 'count query params must match data query params except limit/offset');
+        return { rows: [{ total: 8 }], rowCount: 1 };
+      }
+      return { rows: [movementRow({ movement_type: 'DISPENSE' })], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq({ movement_type: 'DISPENSE' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 8);
+});
+
+test('READ LIST: total count reflects date filters (created_from / created_to)', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /sm\.created_at >= \$/, 'created_from filter must be in count query');
+      assert.match(text, /sm\.created_at < \$/, 'created_to filter must be in count query');
+      assert.match(text, SCOPED_LIST_MATCH, 'clinic scope must be in count query');
+      if (text.includes('COUNT(*)')) {
+        const fromDate = new Date('2026-01-01T00:00:00.000Z');
+        const toDate = new Date('2026-02-01T00:00:00.000Z');
+        assert.deepEqual(params[0], fromDate, 'created_from must be first param');
+        assert.deepEqual(params[1], toDate, 'created_to (exclusive next day) must be second param');
+        assert.deepEqual(params[2], [1], 'clinic scope must be third param');
+        return { rows: [{ total: 15 }], rowCount: 1 };
+      }
+      return { rows: [movementRow({ created_at: '2026-01-15T10:00:00.000Z' })], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq({ created_from: '2026-01-01', created_to: '2026-01-31' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 15);
+});
+
+test('READ LIST: total count reflects combined filters and pagination', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /sm\.batch_id = \$/, 'batch_id filter must be in count query');
+      assert.match(text, /sm\.movement_type = \$/, 'movement_type filter must be in count query');
+      assert.match(text, /sm\.created_at >= \$/, 'created_from filter must be in count query');
+      assert.match(text, /sm\.created_at < \$/, 'created_to filter must be in count query');
+      assert.match(text, SCOPED_LIST_MATCH, 'clinic scope must be in count query');
+      if (text.includes('COUNT(*)')) {
+        // count query params exclude limit/offset
+        assert.deepEqual(params.slice(-1), [[1]], 'clinic scope must be last param in count query');
+        return { rows: [{ total: 42 }], rowCount: 1 };
+      }
+      return { rows: [movementRow()], rowCount: 1 };
+    },
+    async (calls) => {
+      await listStockMovements(listReq({
+        batch_id: '7',
+        movement_type: 'RECEIPT',
+        created_from: '2026-01-10',
+        created_to: '2026-01-20',
+        limit: '10',
+        offset: '20',
+      }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 42);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 20);
+  assert.equal(captured.body.pagination.returned, 1);
+});
+
+test('READ LIST: empty result set returns total 0', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    async () => {
+      await listStockMovements(listReq({ batch_id: '999' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.deepEqual(captured.body.movements, []);
+  assert.equal(captured.body.pagination.total, 0);
+  assert.equal(captured.body.pagination.returned, 0);
+});
+
+test('READ LIST: offset beyond last page returns empty items but correct total', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 5 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    async () => {
+      await listStockMovements(listReq({ limit: '10', offset: '100' }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.deepEqual(captured.body.movements, []);
+  assert.equal(captured.body.pagination.total, 5);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 100);
+  assert.equal(captured.body.pagination.returned, 0);
+});
+
+test('READ LIST: count and data queries use identical scope and filter params', async () => {
+  const { res, captured } = makeRes();
+
+  let countQueryParams: unknown[] = [];
+  let dataQueryParams: unknown[] = [];
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) {
+        countQueryParams = params;
+        return { rows: [{ total: 8 }], rowCount: 1 };
+      }
+      dataQueryParams = params;
+      return { rows: Array.from({ length: 3 }, (_, i) => movementRow({ movement_id: 30 + i })), rowCount: 3 };
+    },
+    async () => {
+      await listStockMovements(listReq({ movement_type: 'RECEIPT', limit: '3' }), res);
+    },
+  );
+
+  // Count query params should match data query params except for the last two (limit, offset)
+  assert.deepEqual(
+    countQueryParams,
+    dataQueryParams.slice(0, -2),
+    'count and data queries must use identical scope and filter params (excluding limit/offset)'
+  );
 });
 
 test('READ GET: returns the movement with its audit context', async () => {

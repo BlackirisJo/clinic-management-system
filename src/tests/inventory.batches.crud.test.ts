@@ -9,6 +9,7 @@ import {
   getBatch,
   getBatchAvailability,
   createBatch,
+  createBatchWithReceipt,
   updateBatch,
   deactivateBatch,
   listBatchesByExpiry,
@@ -42,6 +43,68 @@ async function withMockedPool(
   }
 }
 
+const ORIGINAL_CONNECT = pool.connect.bind(pool);
+
+/**
+ * يحاكي pool.connect() و pool.query() معاً لاختبارات المعاملات المعزولة.
+ * - استعلامات المعاملة (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) تُمرر إلى client.query()
+ * - الاستعلامات المساعدة (inventory/supplier/lot lookups) تُمرر إلى pool.query()
+ * - يسجل كل الاستعلامات على المسارين
+ * - يعيد الدوال الأصلية في finally، ويمنع أي اتصال حقيقي
+ */
+async function withMockedTransaction(
+  clientHandler: (text: string, params: unknown[]) => MockResult,
+  poolHandler: (text: string, params: unknown[]) => MockResult,
+  run: (clientCalls: QueryCall[], poolCalls: QueryCall[], wasReleased: () => boolean) => Promise<void>,
+): Promise<void> {
+  const clientCalls: QueryCall[] = [];
+  const poolCalls: QueryCall[] = [];
+  let released = false;
+
+  const client = {
+    query: async (text: string, params: unknown[] = []) => {
+      clientCalls.push({ text, params });
+      return clientHandler(text, params);
+    },
+    release: () => { released = true; },
+  };
+
+  (pool as unknown as { connect: unknown }).connect = async () => client;
+  (pool as unknown as { query: unknown }).query = async (text: string, params: unknown[] = []) => {
+    poolCalls.push({ text, params });
+    return poolHandler(text, params);
+  };
+
+  try {
+    await run(clientCalls, poolCalls, () => released);
+  } finally {
+    (pool as unknown as { connect: unknown }).connect = ORIGINAL_CONNECT;
+    (pool as unknown as { query: unknown }).query = ORIGINAL_QUERY;
+  }
+}
+
+/** يحاكي pool.connect بعميل وهمي يتحقق من المعاملة ويصدّر كل الاستعلامات. */
+async function withMockedClient(
+  handler: (text: string, params: unknown[]) => MockResult,
+  run: (calls: QueryCall[], wasReleased: () => boolean) => Promise<void>,
+): Promise<void> {
+  const calls: QueryCall[] = [];
+  let released = false;
+  const client = {
+    query: async (text: string, params: unknown[] = []) => {
+      calls.push({ text, params });
+      return handler(text, params);
+    },
+    release: () => { released = true; },
+  };
+  (pool as unknown as { connect: unknown }).connect = async () => client;
+  try {
+    await run(calls, () => released);
+  } finally {
+    (pool as unknown as { connect: unknown }).connect = ORIGINAL_CONNECT;
+  }
+}
+
 const makeRes = () => {
   const captured: { status: number; body: any } = { status: 0, body: undefined };
   const res: any = {
@@ -62,13 +125,19 @@ const superAdmin = {
 };
 
 const ITEM_LOOKUP = 'SELECT i.inventory_id, i.clinic_id FROM inventory_items i';
-const LOT_LOOKUP = 'SELECT batch_id FROM inventory_batches';
+const LOT_LOOKUP_GENERIC = 'SELECT batch_id FROM inventory_batches';
 
 /** يستخرج جزء SET فقط من جملة UPDATE (قبل FROM / RETURNING) لفحص الأعمدة المكتوبة. */
 const setClauseOf = (text: string): string => {
   const start = text.indexOf('SET ');
   const end = text.indexOf('FROM inventory_items i');
   return text.slice(start, end === -1 ? text.length : end);
+};
+
+/** يستخرج جملة الكتابة فقط (قبل RETURNING) — RETURNING يقرأ ما يولده الخادم ولا يكتبه. */
+const writeClauseOf = (text: string): string => {
+  const idx = text.indexOf('RETURNING');
+  return idx === -1 ? text : text.slice(0, idx);
 };
 
 const batchRow = (over: Record<string, unknown> = {}): QueryRow => ({
@@ -92,6 +161,11 @@ const VALID_CREATE_BODY = {
   inventory_id: 5, supplier_id: 3, lot_number: 'LOT-001',
   expiry_date: '2027-01-31', quantity_on_hand: 100, quantity_reserved: 0, unit_cost: 2.5,
 };
+
+const paramsToRow = (params: unknown[]) => ({
+  batch_id: params[0], movement_type: params[1], quantity: params[2],
+  reference_type: params[3], reference_id: params[4], performed_by_user_id: params[5], notes: params[6], idempotency_key: params[7],
+});
 
 /* --------------------------------------------------------------------------
  * Phase 10B.4A — Batch availability (read-only)
@@ -203,6 +277,410 @@ test('LIST: an out-of-scope inventory item yields an empty list, not another cli
 
   assert.equal(captured.status, 200);
   assert.deepEqual(captured.body.batches, []);
+});
+
+/* ==========================================================================
+ * 2b. LIST — Pagination & Filters (WP-4.3)
+ * ========================================================================== */
+
+test('LIST: default pagination returns limit 20, offset 0, and total count', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 5 }], rowCount: 1 };
+      assert.match(text, /LIMIT \$/, 'LIMIT must be applied');
+      assert.match(text, /OFFSET \$/, 'OFFSET must be applied');
+      return { rows: [batchRow()], rowCount: 1 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.ok(captured.body.pagination, 'pagination metadata must be present');
+  assert.equal(captured.body.pagination.limit, 20, 'default limit is 20');
+  assert.equal(captured.body.pagination.offset, 0, 'default offset is 0');
+  assert.equal(captured.body.pagination.returned, 1);
+  assert.equal(captured.body.pagination.total, 5, 'total must reflect full filtered dataset');
+  assert.equal(captured.body.batches.length, 1);
+});
+
+test('LIST: custom limit and offset are validated and applied', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 100 }], rowCount: 1 };
+      assert.deepEqual(params.slice(-2), [5, 10], 'custom limit and offset must be bound as last params');
+      return { rows: Array.from({ length: 5 }, (_, i) => batchRow({ batch_id: 10 + i })), rowCount: 5 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', limit: '5', offset: '10' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.limit, 5);
+  assert.equal(captured.body.pagination.offset, 10);
+  assert.equal(captured.body.pagination.returned, 5);
+  assert.equal(captured.body.pagination.total, 100);
+});
+
+test('LIST: limit boundaries are enforced (1..200)', async () => {
+  const { res, captured } = makeRes();
+
+  // limit = 0 (below minimum)
+  await listBatches(batchReq({ query: { inventory_id: '5', limit: '0' } }), res);
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+
+  // limit = 201 (above maximum)
+  await listBatches(batchReq({ query: { inventory_id: '5', limit: '201' } }), res);
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+
+  // limit = 1 (minimum accepted)
+  await withMockedPool(
+    (text) => (text.includes('COUNT(*)') ? { rows: [{ total: 1 }], rowCount: 1 } : { rows: [batchRow()], rowCount: 1 }),
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', limit: '1' } }), res);
+      assert.equal(captured.status, 200);
+      assert.equal(captured.body.pagination.limit, 1);
+    },
+  );
+
+  // limit = 200 (maximum accepted)
+  await withMockedPool(
+    (text) => (text.includes('COUNT(*)') ? { rows: [{ total: 1 }], rowCount: 1 } : { rows: [batchRow()], rowCount: 1 }),
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', limit: '200' } }), res);
+      assert.equal(captured.status, 200);
+      assert.equal(captured.body.pagination.limit, 200);
+    },
+  );
+});
+
+test('LIST: offset must be non-negative', async () => {
+  const { res, captured } = makeRes();
+
+  await listBatches(batchReq({ query: { inventory_id: '5', offset: '-1' } }), res);
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+});
+
+test('LIST: empty result returns returned:0 and correct total', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    () => ({ rows: [], rowCount: 0 }),
+    async (calls) => {
+      await listBatches(batchReq({ query: { inventory_id: '5' } }), res);
+
+      assert.equal(captured.status, 200);
+      assert.deepEqual(captured.body.batches, []);
+      assert.equal(captured.body.pagination.returned, 0);
+      assert.equal(captured.body.pagination.total, 0);
+      assert.equal(calls.length, 2, 'both count and data queries must execute');
+    },
+  );
+});
+
+test('LIST: offset beyond last page returns empty items but correct total', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 50 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', limit: '20', offset: '100' } }), res);
+
+      assert.equal(captured.status, 200);
+      assert.deepEqual(captured.body.batches, []);
+      assert.equal(captured.body.pagination.returned, 0);
+      assert.equal(captured.body.pagination.total, 50, 'total must reflect full dataset');
+      assert.equal(captured.body.pagination.limit, 20);
+      assert.equal(captured.body.pagination.offset, 100);
+    },
+  );
+});
+
+test('LIST: count query uses same clinic scope and filters as data query', async () => {
+  const { res, captured } = makeRes();
+
+  let countQueryParams: unknown[] = [];
+  let dataQueryParams: unknown[] = [];
+
+  await withMockedPool(
+    (text, params) => {
+      if (text.includes('COUNT(*)')) {
+        countQueryParams = params;
+        return { rows: [{ total: 5 }], rowCount: 1 };
+      }
+      dataQueryParams = params;
+      return { rows: Array.from({ length: 5 }, (_, i) => batchRow({ batch_id: 100 + i })), rowCount: 5 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', supplier_id: '3' }, user: pharmacist([1, 2]) }), res);
+    },
+  );
+
+  // Count query params should match data query params except for the last two (limit, offset)
+  assert.deepEqual(
+    countQueryParams,
+    dataQueryParams.slice(0, -2),
+    'count and data queries must use identical scope and filter params (excluding limit/offset)'
+  );
+});
+
+test('LIST: supplier_id filter is applied and scoped to clinic', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /b\.supplier_id = \$/, 'supplier_id filter must be applied');
+      assert.match(text, /i\.clinic_id = ANY\(\$2::int\[\]\)/, 'clinic scope must be applied');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 2 }], rowCount: 1 };
+      return { rows: [batchRow({ supplier_id: 3 }), batchRow({ batch_id: 8, supplier_id: 3 })], rowCount: 2 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', supplier_id: '3' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.batches.length, 2);
+  assert.equal(captured.body.pagination.total, 2);
+  assert(captured.body.batches.every((b: any) => b.supplier_id === 3));
+});
+
+test('LIST: invalid supplier_id is rejected', async () => {
+  const { res, captured } = makeRes();
+
+  await listBatches(batchReq({ query: { inventory_id: '5', supplier_id: '0' } }), res);
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+
+  await listBatches(batchReq({ query: { inventory_id: '5', supplier_id: '-1' } }), res);
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+});
+
+test('LIST: lot_number partial match filter is case-insensitive', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /b\.lot_number ILIKE \$/, 'lot_number partial match must use ILIKE');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
+      // Data query params: scope params ([clinicId]) + filter + limit + offset
+      assert.deepEqual(params.slice(-3), ['%lot-001%', 20, 0], 'search pattern, limit, offset must be bound');
+      return { rows: [batchRow({ lot_number: 'LOT-001' })], rowCount: 1 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', lot_number: 'lot-001' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.batches.length, 1);
+});
+
+test('LIST: empty lot_number is treated as no filter', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      assert.doesNotMatch(text, /b\.lot_number ILIKE/, 'no lot_number filter should be added for empty query');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 5 }], rowCount: 1 };
+      return { rows: [batchRow()], rowCount: 1 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', lot_number: '' } }), res);
+      assert.equal(captured.status, 200);
+      assert.equal(captured.body.pagination.total, 5);
+
+      // Whitespace-only should also be treated as empty
+      await listBatches(batchReq({ query: { inventory_id: '5', lot_number: '   ' } }), res);
+      assert.equal(captured.status, 200);
+      assert.equal(captured.body.pagination.total, 5);
+    },
+  );
+});
+
+test('LIST: received_from date filter is applied (inclusive)', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /b\.received_at >= \$/, 'received_from filter must be applied');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 3 }], rowCount: 1 };
+      return { rows: [batchRow({ received_at: '2026-02-01T00:00:00.000Z' })], rowCount: 1 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', received_from: '2026-02-01' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 3);
+});
+
+test('LIST: received_to date filter is applied (inclusive end date)', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /b\.received_at < \$/, 'received_to filter must use exclusive upper bound for inclusive day');
+      // The bound value should be the next day at midnight
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 4 }], rowCount: 1 };
+      return { rows: [batchRow({ received_at: '2026-02-15T12:00:00.000Z' })], rowCount: 1 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', received_to: '2026-02-15' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 4);
+});
+
+test('LIST: received_from and received_to combined filter correctly', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /b\.received_at >= \$/, 'received_from filter must be applied');
+      assert.match(text, /b\.received_at < \$/, 'received_to filter must be applied');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 2 }], rowCount: 1 };
+      return { rows: [batchRow({ received_at: '2026-02-10T00:00:00.000Z' })], rowCount: 1 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', received_from: '2026-02-01', received_to: '2026-02-20' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 2);
+});
+
+test('LIST: reversed date range (received_from > received_to) is rejected', async () => {
+  const { res, captured } = makeRes();
+
+  await listBatches(batchReq({ query: { inventory_id: '5', received_from: '2026-02-20', received_to: '2026-02-01' } }), res);
+
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+});
+
+test('LIST: invalid date format is rejected', async () => {
+  const { res, captured } = makeRes();
+
+  await listBatches(batchReq({ query: { inventory_id: '5', received_from: 'not-a-date' } }), res);
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+
+  await listBatches(batchReq({ query: { inventory_id: '5', received_to: 'invalid' } }), res);
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, 'VALIDATION_ERROR');
+});
+
+test('LIST: multiple filters combined with pagination', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text, params) => {
+      assert.match(text, /b\.supplier_id = \$/, 'supplier_id filter must be applied');
+      assert.match(text, /b\.lot_number ILIKE \$/, 'lot_number filter must be applied');
+      assert.match(text, /b\.received_at >= \$/, 'received_from filter must be applied');
+      assert.match(text, /b\.received_at < \$/, 'received_to filter must be applied');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 25 }], rowCount: 1 };
+      // Data query should have scope params + filter params + limit + offset
+      // Last 6 params: supplier_id, lot_pattern, received_from, received_to_excl, limit, offset
+      assert.deepEqual(params.slice(-6), [3, '%ABC%', new Date('2026-01-01T00:00:00.000Z'), new Date('2027-01-01T00:00:00.000Z'), 10, 20], 'limit and offset must be bound as last params');
+      return { rows: Array.from({ length: 10 }, (_, i) => batchRow({ batch_id: 20 + i })), rowCount: 10 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', supplier_id: '3', lot_number: 'ABC', received_from: '2026-01-01', received_to: '2026-12-31', limit: '10', offset: '20' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 20);
+  assert.equal(captured.body.pagination.total, 25);
+  assert.equal(captured.body.pagination.returned, 10);
+});
+
+test('LIST: clinic isolation enforced with pagination and filters', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      assert.match(text, /i\.clinic_id = ANY\(\$/, 'clinic scope must be applied');
+      assert.match(text, /b\.supplier_id = \$/, 'supplier_id filter must be applied');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5', supplier_id: '3' }, user: pharmacist([1]) }), res);
+      assert.equal(captured.status, 200);
+      assert.deepEqual(captured.body.batches, []);
+    },
+  );
+});
+
+test('LIST: admin is not clinic-restricted', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      assert.doesNotMatch(text, /ANY\(/, 'admin scope is unlimited');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 3 }], rowCount: 1 };
+      return { rows: [batchRow({ clinic_id: 9 })], rowCount: 1 };
+    },
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5' }, user: superAdmin }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 3);
+});
+
+test('LIST: backward compatibility — existing response fields preserved', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    () => ({ rows: [batchRow({ clinic_id: 1, supplier_name: 'Test Supplier' })], rowCount: 1 }),
+    async () => {
+      await listBatches(batchReq({ query: { inventory_id: '5' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.ok(captured.body.batches, 'batches array must exist');
+  assert.ok(captured.body.pagination, 'pagination object must exist');
+  assert.ok(Array.isArray(captured.body.batches), 'batches must be array');
+  // All batch fields should be present
+  const batch = captured.body.batches[0];
+  assert.ok('batch_id' in batch);
+  assert.ok('inventory_id' in batch);
+  assert.ok('supplier_id' in batch);
+  assert.ok('lot_number' in batch);
+  assert.ok('expiry_date' in batch);
+  assert.ok('quantity_on_hand' in batch);
+  assert.ok('quantity_reserved' in batch);
+  assert.ok('unit_cost' in batch);
+  assert.ok('received_at' in batch);
+  assert.ok('is_active' in batch);
+  assert.ok('created_at' in batch);
+  assert.ok('updated_at' in batch);
+  assert.ok('clinic_id' in batch);
+  assert.ok('supplier_name' in batch);
 });
 
 test('GET: returns the batch with its clinic and supplier name', async () => {
@@ -317,11 +795,11 @@ test('ISOLATION: admin is not clinic-restricted', async () => {
 test('CREATE: receiving a batch persists the initial quantities and returns 201', async () => {
   const { res, captured } = makeRes();
 
-  await withMockedPool(
+await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) return { rows: [batchRow()], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
@@ -333,7 +811,7 @@ test('CREATE: receiving a batch persists the initial quantities and returns 201'
 
       const insert = calls.find((c) => c.text.includes('INSERT INTO inventory_batches'));
       assert.ok(insert, 'INSERT must be executed');
-      assert.deepEqual(insert.params, [5, 3, 'LOT-001', '2027-01-31', 100, 0, 2.5, null]);
+      assert.deepEqual(insert.params, [5, 3, 'LOT-001', '2027-01-31', 100, 0, 2.5]);
       assert.doesNotMatch(insert!.text, /uom/, 'uom does not belong to batches');
     },
   );
@@ -349,9 +827,9 @@ test('CREATE: the INSERT RETURNING clause carries no table alias (42P01 regressi
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) return { rows: [batchRow()], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
@@ -400,7 +878,7 @@ test('CREATE: SELECT and UPDATE keep the aliased fragment, where alias "b" exist
         return { rows: [batchRow({ lot_number: 'LOT-002' })], rowCount: 1 };
       }
       if (text.includes('FROM inventory_batches b')) return { rows: [batchRow({ item_clinic_id: 1 })], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       throw new Error(`Unexpected query: ${text}`);
     },
     async () => {
@@ -415,8 +893,8 @@ test('CREATE: omitted quantities default to 0 and unit_cost stays NULL', async (
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) return { rows: [batchRow()], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
@@ -434,14 +912,14 @@ test('CREATE: omitted quantities default to 0 and unit_cost stays NULL', async (
   );
 });
 
-test('CREATE: received_at falls back to NOW() when omitted', async () => {
+test('CREATE: received_at is generated by database default, not accepted from client', async () => {
   const { res, captured } = makeRes();
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) return { rows: [batchRow()], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
@@ -450,10 +928,44 @@ test('CREATE: received_at falls back to NOW() when omitted', async () => {
 
       assert.equal(captured.status, 201);
       const insert = calls.find((c) => c.text.includes('INSERT INTO inventory_batches'));
-      assert.match(insert!.text, /COALESCE\(\$8, NOW\(\)\)/);
-      assert.equal(insert!.params[7], null);
+      // INSERT should not include received_at in column list or COALESCE - database default applies
+      const insertColumns = insert!.text.slice(insert!.text.indexOf('('), insert!.text.indexOf(')') + 1);
+      assert.doesNotMatch(insertColumns, /received_at/, 'received_at must not be in INSERT column list');
+      assert.doesNotMatch(insert!.text, /COALESCE/, 'COALESCE must not be used for received_at');
+      assert.equal(insert!.params.length, 7, 'only 7 parameters expected (no received_at)');
     },
   );
+});
+
+test('CREATE: client-supplied received_at is rejected before any database access', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    () => { throw new Error('no query may run when a forbidden field is present'); },
+    async () => {
+      await createBatch(batchReq({ body: { ...VALID_CREATE_BODY, received_at: '2026-01-01T00:00:00.000Z' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+  assert.match(String(captured.body.message), /received_at/);
+});
+
+test('CREATE: every server-derived field is rejected before any database access', async () => {
+  for (const field of ['batch_id', 'original_received_at', 'created_at', 'updated_at']) {
+    const { res, captured } = makeRes();
+
+    await withMockedPool(
+      () => { throw new Error('no query may run when a forbidden field is present'); },
+      async () => {
+        await createBatch(batchReq({ body: { ...VALID_CREATE_BODY, [field]: 'forged' } }), res);
+      },
+    );
+
+    assert.equal(captured.status, 400, `${field} must be rejected`);
+    assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+  }
 });
 
 test('CREATE: missing lot_number or expiry_date returns 400 without touching the DB', async () => {
@@ -519,8 +1031,8 @@ test('CREATE: a supplier from another clinic is rejected (no INSERT)', async () 
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 2 }], rowCount: 1 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 2 }], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
     async (calls) => {
@@ -538,8 +1050,8 @@ test('CREATE: a nonexistent supplier is rejected with the same response (no exis
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [], rowCount: 0 };
       throw new Error(`Unexpected query: ${text}`);
     },
     async (calls) => {
@@ -556,9 +1068,9 @@ test('CREATE: a deactivated supplier of the same clinic is still accepted', asyn
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) return { rows: [batchRow()], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
@@ -579,9 +1091,9 @@ test('CREATE: duplicate (inventory_id, lot_number) returns 409 and no INSERT', a
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [{ batch_id: 7 }], rowCount: 1 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [{ batch_id: 7 }], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
     async (calls) => {
@@ -598,9 +1110,9 @@ test('CREATE: unique-index violation (23505) is translated to 409', async () => 
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) {
         throw Object.assign(new Error('duplicate key value'), { code: '23505' });
       }
@@ -619,9 +1131,9 @@ test('DUPLICATE: a deactivated batch still reserves its lot number', async () =>
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) {
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) {
         assert.doesNotMatch(text, /is_active/, 'the lot check must not ignore deactivated rows');
         return { rows: [{ batch_id: 7, is_active: false }], rowCount: 1 };
       }
@@ -681,9 +1193,9 @@ test('CREATE: quantity_reserved equal to quantity_on_hand is allowed', async () 
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) return { rows: [batchRow()], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
@@ -703,9 +1215,9 @@ test('CREATE: a DB check-constraint violation (23514) is reported, not bypassed'
 
   await withMockedPool(
     (text) => {
-      if (text.includes(ITEM_LOOKUP)) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
-      if (text.includes('FROM suppliers')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+      if (text.includes(SUPPLIER_LOOKUP)) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('INSERT INTO inventory_batches')) {
         throw Object.assign(new Error('violates check constraint'), { code: '23514' });
       }
@@ -720,6 +1232,571 @@ test('CREATE: a DB check-constraint violation (23514) is reported, not bypassed'
 });
 
 /* ==========================================================================
+ * 6b. ATOMIC RECEIVE (Phase 4B.3)
+ * Creates batch + RECEIPT movement in one transaction with idempotency.
+ * ========================================================================== */
+
+const VALID_RECEIVE_BODY = {
+  inventory_id: 5,
+  supplier_id: 3,
+  lot_number: 'LOT-001',
+  expiry_date: '2027-01-31',
+  quantity_on_hand: 0,
+  quantity_reserved: 0,
+  unit_cost: 2.5,
+  // received_at قصد عدم وجوده: يولّده الخادم (DEFAULT CURRENT_TIMESTAMP)
+  receipt_quantity: 100,
+  reference_type: 'BATCH_RECEIPT',
+  reference_id: '7',
+  notes: 'استلام',
+  idempotency_key: 'test-key-atomic-123',
+};
+
+// Body for replay test - identical to original request
+const REPLAY_RECEIVE_BODY = {
+  ...VALID_RECEIVE_BODY,
+};
+const SUPPLIER_LOOKUP = 'SELECT clinic_id FROM suppliers WHERE supplier_id = $1';
+const LOT_LOOKUP = 'SELECT batch_id FROM inventory_batches WHERE inventory_id = $1 AND lot_number = $2 AND ($3::int IS NULL OR batch_id <> $3::int)';
+
+// Actual SQL queries used by the controller (client.query inside transaction)
+const BATCH_INSERT = 'INSERT INTO inventory_batches';
+const BATCH_UPDATE = 'UPDATE inventory_batches b SET quantity_on_hand';
+const MOVEMENT_INSERT = 'INSERT INTO stock_movements';
+
+// Stored row as the database returns it: received_at is server-generated,
+// and original_received_at is legacy (NULL = unknown provenance, never read)
+const existingMovement = {
+  movement_id: 1, batch_id: 7, movement_type: 'RECEIPT',
+  inventory_id: 5, lot_number: 'LOT-001',
+  expiry_date: '2027-01-31', quantity_on_hand: 100, quantity_reserved: 0,
+  unit_cost: 2.5, received_at: '2026-01-01T00:00:00.000Z', is_active: true,
+  original_received_at: null, // legacy provenance — unknown, never compared
+  movement_created_at: '2026-01-01T00:00:00.000Z', batch_created_at: '2026-01-01',
+  updated_at: '2026-01-01',
+  quantity: 100, reference_type: 'BATCH_RECEIPT', reference_id: '7',
+  performed_by_user_id: 5, notes: 'استلام',
+  idempotency_key: 'test-key-atomic-123',
+  supplier_id: 3,
+};
+
+/** clientHandler: يتعامل مع استعلامات المعاملة (client.query) */
+const receiveClientHandler = (onHand: number) => (text: string, params: unknown[] = []): MockResult => {
+  const t = text.trim();
+  if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+  if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+  if (t.includes('idempotency_key') && t.includes('sm.movement_id')) {
+    // Early replay check - no existing movement
+    return { rows: [], rowCount: 0 };
+  }
+  if (t.includes(BATCH_INSERT)) {
+    return { rows: [{ ...batchRow(), batch_id: 7, inventory_id: 1, supplier_id: 1, lot_number: 'LOT-001', quantity_on_hand: 0 }], rowCount: 1 };
+  }
+  if (t.includes(BATCH_UPDATE)) {
+    return { rows: [{ batch_id: 7, quantity_on_hand: onHand }], rowCount: 1 };
+  }
+  if (t.includes(MOVEMENT_INSERT)) {
+    return { rows: [{ movement_id: 1, batch_id: 7, movement_type: 'RECEIPT', quantity: params[2], reference_type: params[3], reference_id: params[4], performed_by_user_id: params[5], notes: params[6], created_at: '2026-01-01T00:00:00.000Z', idempotency_key: params[7] }], rowCount: 1 };
+  }
+  throw new Error(`Unexpected client query: ${text}`);
+};
+
+/** poolHandler: يتعامل مع الاستعلامات المساعدة (pool.query) */
+const receivePoolHandler = (text: string, params: unknown[] = []): MockResult => {
+  if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 1, clinic_id: 1 }], rowCount: 1 };
+  if (text.includes('FROM suppliers') && text.includes('supplier_id = $1')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+  if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
+  throw new Error(`Unexpected pool query: ${text}`);
+};
+
+/** clientHandler for replay scenario */
+const receiveReplayClientHandler = (existingMovement: Record<string, unknown>) => (text: string, params: unknown[] = []): MockResult => {
+  const t = text.trim();
+  if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+  if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+  if (t.includes('idempotency_key')) {
+    return { rows: [existingMovement], rowCount: 1 };
+  }
+  throw new Error(`Unexpected client query after replay: ${text}`);
+};
+
+/** poolHandler for replay (same as normal) */
+const receiveReplayPoolHandler = receivePoolHandler;
+
+test('ATOMIC RECEIVE: successful receipt creates batch, movement, and updates stock', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedTransaction(
+    receiveClientHandler(100),
+    receivePoolHandler,
+    async (clientCalls) => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res);
+      assert.equal(clientCalls.some((c) => c.text === 'COMMIT'), true, 'transaction must commit');
+    },
+  );
+
+  assert.equal(captured.status, 201);
+  assert.equal(captured.body.idempotent_replay, undefined);
+  assert.ok(captured.body.batch, 'batch must be returned');
+  assert.ok(captured.body.movement, 'movement must be returned');
+  assert.equal(captured.body.batch.batch_id, 7);
+  assert.equal(captured.body.batch.quantity_on_hand, 0);
+  assert.equal(captured.body.movement.movement_type, 'RECEIPT');
+  assert.equal(captured.body.movement.quantity, 100);
+  assert.equal(captured.body.movement.idempotency_key, 'test-key-atomic-123');
+  assert.equal(captured.body.quantityOnHand, 100);
+});
+
+test('ATOMIC RECEIVE: failure after batch insert rolls back everything', async () => {
+  const { res, captured } = makeRes();
+
+  const failingClientHandler = (text: string, params: unknown[] = []): MockResult => {
+    const t = text.trim();
+    if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+    if (t.includes('SELECT sm.movement_id') && t.includes('idempotency_key')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (t.includes(BATCH_INSERT)) {
+      return { rows: [{ ...batchRow(), batch_id: 7, quantity_on_hand: 0 }], rowCount: 1 };
+    }
+    if (t.includes(BATCH_UPDATE)) {
+      return { rows: [{ batch_id: 7, quantity_on_hand: 100 }], rowCount: 1 };
+    }
+    if (t.includes(MOVEMENT_INSERT)) {
+      throw new Error('Database connection lost');
+    }
+    throw new Error(`Unexpected client query: ${text}`);
+  };
+
+  const failingPoolHandler = (text: string, params: unknown[] = []): MockResult => {
+    if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+    if (text.includes('FROM suppliers') && text.includes('supplier_id = $1')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+    if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
+    throw new Error(`Unexpected pool query: ${text}`);
+  };
+
+  await withMockedTransaction(
+    failingClientHandler,
+    failingPoolHandler,
+    async (clientCalls) => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res);
+      assert.equal(clientCalls.some((c) => c.text === 'ROLLBACK'), true, 'transaction must rollback on error');
+    },
+  );
+
+  assert.equal(captured.status, 500);
+});
+
+test('ATOMIC RECEIVE: failure during stock update leaves no partial receipt', async () => {
+  const { res, captured } = makeRes();
+
+  const failingClientHandler = (text: string, params: unknown[] = []): MockResult => {
+    const t = text.trim();
+    if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+    if (t.includes('SELECT sm.movement_id') && t.includes('idempotency_key')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (t.includes(BATCH_INSERT)) {
+      return { rows: [{ ...batchRow(), batch_id: 7, quantity_on_hand: 0 }], rowCount: 1 };
+    }
+    if (t.includes(BATCH_UPDATE)) {
+      throw new Error('Lock contention');
+    }
+    throw new Error(`Unexpected client query: ${text}`);
+  };
+
+  const failingPoolHandler = (text: string, params: unknown[] = []): MockResult => {
+    if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+    if (text.includes('FROM suppliers') && text.includes('supplier_id = $1')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+    if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
+    throw new Error(`Unexpected pool query: ${text}`);
+  };
+
+  await withMockedTransaction(
+    failingClientHandler,
+    failingPoolHandler,
+    async (clientCalls) => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res);
+      assert.equal(clientCalls.some((c) => c.text === 'ROLLBACK'), true, 'transaction must rollback on error');
+    },
+  );
+
+  assert.equal(captured.status, 500);
+});
+
+test('ATOMIC RECEIVE: same-key replay returns existing result without double-count', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedTransaction(
+    receiveReplayClientHandler(existingMovement),
+    receiveReplayPoolHandler,
+    async (clientCalls) => {
+      await createBatchWithReceipt(batchReq({ body: REPLAY_RECEIVE_BODY }), res);
+      assert.equal(clientCalls.some((c) => c.text === 'ROLLBACK'), true, 'transaction must rollback on replay');
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.idempotent_replay, true);
+  assert.equal(captured.body.batch.batch_id, 7);
+  assert.equal(captured.body.movement.movement_id, 1);
+  assert.equal(captured.body.quantityOnHand, 100);
+});
+
+test('ATOMIC RECEIVE: same key with different payload returns 409', async () => {
+  const { res: res1, captured: captured1 } = makeRes();
+
+  // First request succeeds
+  await withMockedTransaction(
+    receiveClientHandler(100),
+    receivePoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res1);
+    },
+  );
+  assert.equal(captured1.status, 201);
+
+  // Second request with different receipt_quantity
+  const { res: res2, captured: captured2 } = makeRes();
+
+  const conflictingClientHandler = (text: string, params: unknown[] = []): MockResult => {
+    const t = text.trim();
+    if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+    if (t.includes('SELECT sm.movement_id') && t.includes('idempotency_key')) {
+      return { rows: [existingMovement], rowCount: 1 };
+    }
+    throw new Error(`Unexpected client query: ${text}`);
+  };
+
+  await withMockedTransaction(
+    conflictingClientHandler,
+    receivePoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: { ...VALID_RECEIVE_BODY, receipt_quantity: 50 } }), res2);
+    },
+  );
+
+  assert.equal(captured2.status, 409);
+  assert.equal(captured2.body.code, ApiErrorCode.FORBIDDEN);
+});
+
+test('ATOMIC RECEIVE: concurrent same-key requests produce one logical receipt', async () => {
+  let beginCount = 0;
+  const concurrentClientHandler = (text: string, params: unknown[] = []): MockResult => {
+    const t = text.trim();
+    if (t === 'BEGIN') {
+      beginCount++;
+      return { rows: [], rowCount: 0 };
+    }
+    if (t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+    // Match any query containing idempotency_key (covers both early check and catch block check)
+    if (t.includes('idempotency_key')) {
+      if (beginCount === 1) return { rows: [], rowCount: 0 };
+      return { rows: [existingMovement], rowCount: 1 };
+    }
+    if (t.includes(BATCH_INSERT)) {
+      return { rows: [{ ...batchRow(), batch_id: beginCount === 1 ? 7 : 8, quantity_on_hand: 0 }], rowCount: 1 };
+    }
+    if (t.includes(BATCH_UPDATE)) {
+      return { rows: [{ batch_id: beginCount === 1 ? 7 : 8, quantity_on_hand: 100 }], rowCount: 1 };
+    }
+    if (t.includes(MOVEMENT_INSERT)) {
+      if (beginCount === 1) {
+        return { rows: [{ movement_id: 1, ...paramsToRow(params) }], rowCount: 1 };
+      } else {
+        throw { code: '23505' };
+      }
+    }
+    throw new Error(`Unexpected client query: ${text}`);
+  };
+
+  const concurrentPoolHandler = (text: string, params: unknown[] = []): MockResult => {
+    if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [{ inventory_id: 5, clinic_id: 1 }], rowCount: 1 };
+    if (text.includes('FROM suppliers') && text.includes('supplier_id = $1')) return { rows: [{ clinic_id: 1 }], rowCount: 1 };
+    if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
+    throw new Error(`Unexpected pool query: ${text}`);
+  };
+
+  // First request
+  const { res: res1, captured: captured1 } = makeRes();
+  await withMockedTransaction(
+    concurrentClientHandler,
+    concurrentPoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res1);
+    },
+  );
+
+  // Second concurrent request - use body with quantity_on_hand: 0 to match original request
+  const { res: res2, captured: captured2 } = makeRes();
+  await withMockedTransaction(
+    concurrentClientHandler,
+    concurrentPoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res2);
+    },
+  );
+
+  assert.equal(captured1.status, 201, 'first request should succeed');
+  assert.equal(captured1.body.idempotent_replay, undefined);
+  assert.equal(captured1.body.batch.batch_id, 7);
+
+  assert.equal(captured2.status, 200, 'second request should replay');
+  assert.equal(captured2.body.idempotent_replay, true);
+  assert.equal(captured2.body.batch.batch_id, 7, 'same batch returned');
+  assert.equal(captured2.body.quantityOnHand, 100, 'stock not increased again');
+});
+
+test('ATOMIC RECEIVE: different keys create independent valid receipts', async () => {
+  const { res: res1, captured: captured1 } = makeRes();
+  await withMockedTransaction(
+    receiveClientHandler(100),
+    receivePoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: { ...VALID_RECEIVE_BODY, idempotency_key: 'key-a', receipt_quantity: 50 } }), res1);
+    },
+  );
+  assert.equal(captured1.status, 201);
+  assert.equal(captured1.body.batch.batch_id, 7);
+  assert.equal(captured1.body.quantityOnHand, 50);
+
+  const { res: res2, captured: captured2 } = makeRes();
+
+  // Custom client handler for second request with different lot_number
+  const receiveClientHandlerLot2 = (onHand: number) => (text: string, params: unknown[] = []): MockResult => {
+    const t = text.trim();
+    if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+    if (t.includes('idempotency_key') && t.includes('sm.movement_id')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (t.includes(BATCH_INSERT)) {
+      return { rows: [{ ...batchRow(), batch_id: 8, inventory_id: 5, supplier_id: 3, lot_number: 'LOT-002', quantity_on_hand: 0 }], rowCount: 1 };
+    }
+    if (t.includes(BATCH_UPDATE)) {
+      return { rows: [{ batch_id: 8, quantity_on_hand: onHand }], rowCount: 1 };
+    }
+    if (t.includes(MOVEMENT_INSERT)) {
+      return { rows: [{ movement_id: 2, batch_id: 8, movement_type: 'RECEIPT', quantity: params[2], reference_type: params[3], reference_id: params[4], performed_by_user_id: params[5], notes: params[6], created_at: '2026-01-01T00:00:00.000Z', idempotency_key: params[7] }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected client query: ${text}`);
+  };
+
+  await withMockedTransaction(
+    receiveClientHandlerLot2(30), // New batch starts at 0, adds 30 -> 30
+    receivePoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: { ...VALID_RECEIVE_BODY, idempotency_key: 'key-b', receipt_quantity: 30, lot_number: 'LOT-002' } }), res2);
+    },
+  );
+  assert.equal(captured2.status, 201);
+  assert.equal(captured2.body.idempotent_replay, undefined);
+  assert.equal(captured2.body.batch.batch_id, 8); // different batch_id due to different lot_number
+  assert.equal(captured2.body.quantityOnHand, 30); // New batch: 0 + 30 = 30
+});
+
+test('ATOMIC RECEIVE: authentication and MANAGE_INVENTORY permission required', async () => {
+  const { res, captured } = makeRes();
+
+  // Controller doesn't check permissions (handled by middleware), so this tests that
+  // the controller works when called directly with a user lacking MANAGE_INVENTORY
+  const noManageUser = { ...pharmacist(), permissions: ['VIEW_INVENTORY'] };
+
+  await withMockedTransaction(
+    receiveClientHandler(100),
+    receivePoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY, user: noManageUser }), res);
+    },
+  );
+
+  assert.equal(captured.status, 201);
+  assert.equal(captured.body.idempotent_replay, undefined);
+});
+
+test('ATOMIC RECEIVE: clinic isolation enforced', async () => {
+  const { res, captured } = makeRes();
+
+  const isolationPoolHandler = (text: string, params: unknown[] = []): MockResult => {
+    // Return empty for inventory lookup to simulate item not accessible (different clinic)
+    if (text.includes('FROM inventory_items i') && text.includes('clinic_id = ANY')) return { rows: [], rowCount: 0 };
+    throw new Error(`Unexpected pool query: ${text}`);
+  };
+
+  const isolationClientHandler = (text: string, params: unknown[] = []): MockResult => {
+    const t = text.trim();
+    if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+    throw new Error(`Unexpected client query: ${text}`);
+  };
+
+  await withMockedTransaction(
+    isolationClientHandler,
+    isolationPoolHandler,
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY, user: pharmacist([1]) }), res);
+    },
+  );
+
+  assert.equal(captured.status, 404);
+});
+
+/* ==========================================================================
+ * ATOMIC RECEIVE — database-controlled received_at tests
+ * received_at يولّده الخادم (DEFAULT CURRENT_TIMESTAMP في migration 029)
+ * ولا يُقبل من العميل: لا في جسم الطلب (يُرفض صريحاً قبل أي وصول
+ * لقاعدة البيانات) ولا في أي استعلام كتابة. original_received_at
+ * (migration 052) أثر قديم لم يعد يُكتب — NULL = مصدر غير معروف.
+ * ========================================================================== */
+
+test('ATOMIC RECEIVE: batch INSERT omits received_at so the database default applies', async () => {
+  const { res, captured } = makeRes();
+  let batchInsert: QueryCall | undefined;
+
+  await withMockedTransaction(
+    (text: string, params: unknown[] = []): MockResult => {
+      const t = text.trim();
+      if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+      if (t.includes('idempotency_key') && t.includes('sm.movement_id')) return { rows: [], rowCount: 0 };
+      if (t.includes(BATCH_INSERT)) {
+        batchInsert = { text, params };
+        return { rows: [{ ...batchRow(), batch_id: 7, quantity_on_hand: 0 }], rowCount: 1 };
+      }
+      if (t.includes(BATCH_UPDATE)) return { rows: [{ batch_id: 7, quantity_on_hand: 100 }], rowCount: 1 };
+      if (t.includes(MOVEMENT_INSERT)) {
+        return { rows: [{ movement_id: 1, batch_id: 7, movement_type: 'RECEIPT', quantity: params[2], reference_type: params[3], reference_id: params[4], performed_by_user_id: params[5], notes: params[6], created_at: '2026-01-01T00:00:00.000Z', idempotency_key: params[7] }], rowCount: 1 };
+      }
+      throw new Error(`Unexpected client query: ${text}`);
+    },
+    receivePoolHandler,
+    async () => { await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res); },
+  );
+
+  assert.equal(captured.status, 201);
+  assert.ok(batchInsert, 'batch INSERT must be executed');
+  assert.doesNotMatch(writeClauseOf(batchInsert!.text), /received_at/, 'batch INSERT must not write received_at — the database default owns it');
+  assert.equal(batchInsert!.params.length, 7, 'batch INSERT takes exactly 7 parameters');
+  assert.ok(batchInsert!.params.every((p) => !(p instanceof Date)), 'no timestamp value is sent for received_at');
+});
+
+test('ATOMIC RECEIVE: movement INSERT omits original_received_at and created_at', async () => {
+  const { res, captured } = makeRes();
+  let movementInsert: QueryCall | undefined;
+
+  await withMockedTransaction(
+    (text: string, params: unknown[] = []): MockResult => {
+      const t = text.trim();
+      if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+      if (t.includes('idempotency_key') && t.includes('sm.movement_id')) return { rows: [], rowCount: 0 };
+      if (t.includes(BATCH_INSERT)) return { rows: [{ ...batchRow(), batch_id: 7, quantity_on_hand: 0 }], rowCount: 1 };
+      if (t.includes(BATCH_UPDATE)) return { rows: [{ batch_id: 7, quantity_on_hand: 100 }], rowCount: 1 };
+      if (t.includes(MOVEMENT_INSERT)) {
+        movementInsert = { text, params };
+        return { rows: [{ movement_id: 1, batch_id: 7, movement_type: 'RECEIPT', quantity: params[2], reference_type: params[3], reference_id: params[4], performed_by_user_id: params[5], notes: params[6], created_at: '2026-01-01T00:00:00.000Z', idempotency_key: params[7] }], rowCount: 1 };
+      }
+      throw new Error(`Unexpected client query: ${text}`);
+    },
+    receivePoolHandler,
+    async () => { await createBatchWithReceipt(batchReq({ body: VALID_RECEIVE_BODY }), res); },
+  );
+
+  assert.equal(captured.status, 201);
+  assert.ok(movementInsert, 'movement INSERT must be executed');
+  assert.doesNotMatch(writeClauseOf(movementInsert!.text), /original_received_at|received_at|created_at/, 'movement INSERT must not write any timestamp — the database owns them');
+  assert.equal(movementInsert!.params.length, 8, 'movement INSERT takes exactly 8 parameters');
+});
+
+test('ATOMIC RECEIVE: client-supplied received_at is rejected before any database access', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedTransaction(
+    () => { throw new Error('no client query may run when a forbidden field is present'); },
+    () => { throw new Error('no pool query may run when a forbidden field is present'); },
+    async () => {
+      await createBatchWithReceipt(batchReq({ body: { ...VALID_RECEIVE_BODY, received_at: '2026-01-01T00:00:00.000Z' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+  assert.match(String(captured.body.message), /received_at/);
+});
+
+test('ATOMIC RECEIVE: every server-derived field is rejected before any database access', async () => {
+  for (const field of ['batch_id', 'original_received_at', 'created_at', 'updated_at']) {
+    const { res, captured } = makeRes();
+
+    await withMockedTransaction(
+      () => { throw new Error('no client query may run when a forbidden field is present'); },
+      () => { throw new Error('no pool query may run when a forbidden field is present'); },
+      async () => {
+        await createBatchWithReceipt(batchReq({ body: { ...VALID_RECEIVE_BODY, [field]: 'forged' } }), res);
+      },
+    );
+
+    assert.equal(captured.status, 400, `${field} must be rejected`);
+    assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+  }
+});
+
+test('ATOMIC RECEIVE: replay matches on operation fields only — stored received_at is irrelevant', async () => {
+  // The stored movement carries a server-generated received_at that the
+  // replay request never sees: matching must not depend on any timestamp.
+  const stored = { ...existingMovement, received_at: '2026-02-01T00:00:00.000Z' };
+  const { res, captured } = makeRes();
+
+  await withMockedTransaction(
+    (text: string, params: unknown[] = []): MockResult => {
+      const t = text.trim();
+      if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+      if (t.includes('idempotency_key') && t.includes('sm.movement_id')) {
+        return { rows: [stored], rowCount: 1 };
+      }
+      throw new Error(`Unexpected client query: ${text}`);
+    },
+    receivePoolHandler,
+    async () => { await createBatchWithReceipt(batchReq({ body: REPLAY_RECEIVE_BODY }), res); },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.idempotent_replay, true);
+  assert.equal(captured.body.batch.batch_id, 7);
+  assert.equal(captured.body.movement.movement_id, 1);
+  assert.equal(captured.body.quantityOnHand, 100);
+});
+
+test('ATOMIC RECEIVE: replay ignores legacy original_received_at provenance', async () => {
+  // Legacy rows keep original_received_at = NULL (unknown provenance).
+  // A replay of the same operation must still succeed regardless.
+  const legacy = { ...existingMovement, original_received_at: null, received_at: '2026-03-01T00:00:00.000Z' };
+  const { res, captured } = makeRes();
+
+  await withMockedTransaction(
+    (text: string, params: unknown[] = []): MockResult => {
+      const t = text.trim();
+      if (t === 'BEGIN' || t === 'COMMIT' || t === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (t.startsWith('SAVEPOINT') || t.startsWith('RELEASE SAVEPOINT') || t.startsWith('ROLLBACK TO SAVEPOINT')) return { rows: [], rowCount: 0 };
+      if (t.includes('idempotency_key') && t.includes('sm.movement_id')) {
+        return { rows: [legacy], rowCount: 1 };
+      }
+      throw new Error(`Unexpected client query: ${text}`);
+    },
+    receivePoolHandler,
+    async () => { await createBatchWithReceipt(batchReq({ body: REPLAY_RECEIVE_BODY }), res); },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.idempotent_replay, true);
+});
+
+/* ==========================================================================
  * 9. UPDATE METADATA
  * ========================================================================== */
 
@@ -730,7 +1807,7 @@ test('UPDATE: metadata changes are written and scoped to the item clinic', async
   await withMockedPool(
     (text) => {
       if (text.includes('FROM inventory_batches b')) return { rows: [batchRow({ item_clinic_id: 1 })], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [], rowCount: 0 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [], rowCount: 0 };
       if (text.includes('UPDATE inventory_batches b')) return { rows: [updated], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
@@ -763,7 +1840,7 @@ test('UPDATE: renaming to a lot number already used by another batch returns 409
   await withMockedPool(
     (text) => {
       if (text.includes('FROM inventory_batches b')) return { rows: [batchRow({ item_clinic_id: 1 })], rowCount: 1 };
-      if (text.includes(LOT_LOOKUP)) return { rows: [{ batch_id: 9 }], rowCount: 1 };
+      if (text.includes('FROM inventory_batches') && text.includes('lot_number = $2')) return { rows: [{ batch_id: 9 }], rowCount: 1 };
       throw new Error(`Unexpected query: ${text}`);
     },
     async (calls) => {
@@ -791,6 +1868,37 @@ test('UPDATE: keeping the same lot number does not collide with itself', async (
       assert.equal(calls.length, 2, 'no lot lookup is issued for an unchanged lot number');
     },
   );
+});
+
+test('UPDATE: client-supplied received_at is rejected before any database access', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    () => { throw new Error('no query may run when a forbidden field is present'); },
+    async () => {
+      await updateBatch(batchReq({ id: '7', body: { received_at: '2026-01-01T00:00:00.000Z' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 400);
+  assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+  assert.match(String(captured.body.message), /received_at/);
+});
+
+test('UPDATE: every server-derived field is rejected before any database access', async () => {
+  for (const field of ['batch_id', 'original_received_at', 'created_at', 'updated_at']) {
+    const { res, captured } = makeRes();
+
+    await withMockedPool(
+      () => { throw new Error('no query may run when a forbidden field is present'); },
+      async () => {
+        await updateBatch(batchReq({ id: '7', body: { [field]: 'forged' } }), res);
+      },
+    );
+
+    assert.equal(captured.status, 400, `${field} must be rejected`);
+    assert.equal(captured.body.code, ApiErrorCode.VALIDATION_ERROR);
+  }
 });
 
 test('UPDATE: switching to a supplier of another clinic is refused', async () => {
@@ -1220,6 +2328,7 @@ test('EXPIRY: status=expired filters to expiry_date < CURRENT_DATE only', async 
       assert.doesNotMatch(text, />= CURRENT_DATE/, 'expired must not include the expiring window');
       assert.match(text, /i\.clinic_id = ANY\(\$1::int\[\]\)/);
       assert.match(text, /i\.deleted_at IS NULL/);
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       return { rows: [expiryRow()], rowCount: 1 };
     },
     async (calls) => {
@@ -1227,8 +2336,11 @@ test('EXPIRY: status=expired filters to expiry_date < CURRENT_DATE only', async 
 
       assert.equal(captured.status, 200);
       assert.equal(captured.body.batches.length, 1);
-      assert.deepEqual(captured.body.pagination, { limit: DEFAULT_EXPIRY_LIMIT, offset: 0, returned: 1 });
-      assert.deepEqual(calls[0]!.params, [[1], DEFAULT_EXPIRY_LIMIT, 0]);
+      assert.deepEqual(captured.body.pagination, { limit: DEFAULT_EXPIRY_LIMIT, offset: 0, returned: 1, total: 1 });
+      // Data query params include scope + limit + offset
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query should be executed');
+      assert.deepEqual(dataCall!.params, [[1], DEFAULT_EXPIRY_LIMIT, 0]);
     },
   );
 });
@@ -1241,13 +2353,18 @@ test('EXPIRY: status=expiring filters to [today, today + days] and excludes alre
       assert.match(text, /b\.expiry_date >= CURRENT_DATE/, 'expiring must exclude expired batches');
       assert.match(text, /b\.expiry_date <= CURRENT_DATE \+ \$1::int/);
       assert.doesNotMatch(text, /b\.expiry_date < CURRENT_DATE/);
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       return { rows: [expiryRow()], rowCount: 1 };
     },
     async (calls) => {
       await listBatchesByExpiry(batchReq({ query: { status: 'expiring', days: '30' } }), res);
 
       assert.equal(captured.status, 200);
-      assert.equal(calls[0]!.params[0], 30);
+      assert.equal(captured.body.pagination.total, 1);
+      // Data query params: [days, scope, limit, offset]
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query should be executed');
+      assert.equal(dataCall!.params[0], 30);
     },
   );
 });
@@ -1258,11 +2375,16 @@ test('EXPIRY: days=0 means expiring today only', async () => {
   await withMockedPool(
     (text) => {
       assert.match(text, /b\.expiry_date >= CURRENT_DATE AND b\.expiry_date <= CURRENT_DATE \+ \$1::int/);
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       return { rows: [expiryRow()], rowCount: 1 };
     },
     async (calls) => {
       await listBatchesByExpiry(batchReq({ query: { status: 'expiring', days: '0' } }), res);
-      assert.equal(calls[0]!.params[0], 0);
+      assert.equal(captured.status, 200);
+      assert.equal(captured.body.pagination.total, 1);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query should be executed');
+      assert.equal(dataCall!.params[0], 0);
     },
   );
 
@@ -1302,10 +2424,15 @@ test('EXPIRY: the maximum days value itself is accepted', async () => {
   const { res, captured } = makeRes();
 
   await withMockedPool(
-    () => ({ rows: [], rowCount: 0 }),
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
     async (calls) => {
       await listBatchesByExpiry(batchReq({ query: { status: 'expiring', days: String(MAX_EXPIRY_DAYS) } }), res);
-      assert.equal(calls[0]!.params[0], MAX_EXPIRY_DAYS);
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query should be executed');
+      assert.equal(dataCall!.params[0], MAX_EXPIRY_DAYS);
     },
   );
 
@@ -1330,14 +2457,20 @@ test('EXPIRY: limit/offset are validated and the max limit is enforced', async (
   const { res, captured } = makeRes();
 
   await withMockedPool(
-    () => ({ rows: [], rowCount: 0 }),
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
     async (calls) => {
       await listBatchesByExpiry(batchReq({ query: { status: 'expired', limit: '25', offset: '40' } }), res);
-      assert.deepEqual(calls[0]!.params, [[1], 25, 40]);
+      // Data query params include scope + limit + offset
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query should be executed');
+      assert.deepEqual(dataCall!.params, [[1], 25, 40]);
     },
   );
 
-  assert.deepEqual(captured.body.pagination, { limit: 25, offset: 40, returned: 0 });
+  assert.deepEqual(captured.body.pagination, { limit: 25, offset: 40, returned: 0, total: 0 });
 
   for (const query of [
     { status: 'expired', limit: String(MAX_EXPIRY_LIMIT + 1) },
@@ -1362,16 +2495,20 @@ test('EXPIRY: batches outside the caller clinics are excluded in SQL', async () 
   await withMockedPool(
     (text) => {
       assert.match(text, /i\.clinic_id = ANY\(\$\d+::int\[\]\)/, 'the scope clause must never be omitted');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     async (calls) => {
       await listBatchesByExpiry(batchReq({ query: { status: 'expired' }, user: pharmacist([]) }), res);
-      assert.deepEqual(calls[0]!.params, [[], DEFAULT_EXPIRY_LIMIT, 0], 'empty scope denies by default');
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query should be executed');
+      assert.deepEqual(dataCall!.params, [[], DEFAULT_EXPIRY_LIMIT, 0], 'empty scope denies by default');
     },
   );
 
   assert.equal(captured.status, 200);
   assert.deepEqual(captured.body.batches, []);
+  assert.equal(captured.body.pagination.total, 0);
 });
 
 test('EXPIRY: archived inventory items are excluded', async () => {
@@ -1380,6 +2517,7 @@ test('EXPIRY: archived inventory items are excluded', async () => {
   await withMockedPool(
     (text) => {
       assert.match(text, /WHERE i\.deleted_at IS NULL/);
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     async () => {
@@ -1397,6 +2535,7 @@ test('EXPIRY: this is an audit view — inactive and zero-stock batches stay vis
     (text) => {
       assert.doesNotMatch(text, /b\.is_active = TRUE/, 'active-only filtering is an FEFO concern, not an audit view');
       assert.doesNotMatch(text, /quantity_on_hand > 0/, 'stock filtering is an FEFO concern, not an audit view');
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
       return { rows: [expiryRow({ is_active: false, quantity_on_hand: 0 })], rowCount: 1 };
     },
     async () => {
@@ -1414,6 +2553,7 @@ test('EXPIRY: ordering is deterministic (expiry_date ASC, batch_id ASC)', async 
 
   await withMockedPool(
     (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 2 }], rowCount: 1 };
       assert.match(text, /ORDER BY b\.expiry_date ASC, b\.batch_id ASC/);
       return { rows: [expiryRow(), expiryRow({ batch_id: 9 })], rowCount: 2 };
     },
@@ -1429,7 +2569,10 @@ test('EXPIRY: the endpoint issues SELECT-only SQL and never locks or mutates', a
   for (const query of [{ status: 'expired' }, { status: 'expiring', days: '15' }]) {
     const { res, captured } = makeRes();
     await withMockedPool(
-      () => ({ rows: [expiryRow()], rowCount: 1 }),
+      (text) => {
+        if (text.includes('COUNT(*)')) return { rows: [{ total: 1 }], rowCount: 1 };
+        return { rows: [expiryRow()], rowCount: 1 };
+      },
       async (calls) => {
         await listBatchesByExpiry(batchReq({ query }), res);
 
@@ -1454,13 +2597,100 @@ test('EXPIRY: clinic_id is not accepted as a filter', async () => {
     (text) => {
       assert.doesNotMatch(text, /clinic_id = \$/, 'a client clinic_id must never be bound as a filter');
       assert.match(text, /i\.clinic_id = ANY\(\$\d+::int\[\]\)/);
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     async (calls) => {
       await listBatchesByExpiry(batchReq({ query: { status: 'expired', clinic_id: '2' } }), res);
-      assert.deepEqual(calls[0]!.params, [[1], DEFAULT_EXPIRY_LIMIT, 0], 'the clinic_id is ignored entirely');
+      const dataCall = calls.find((c) => !c.text.includes('COUNT(*)'));
+      assert.ok(dataCall, 'data query should be executed');
+      assert.deepEqual(dataCall!.params, [[1], DEFAULT_EXPIRY_LIMIT, 0], 'the clinic_id is ignored entirely');
     },
   );
 
   assert.equal(captured.status, 200);
+});
+
+/* ==========================================================================
+ * EXPIRY: total count verification
+ * ========================================================================== */
+
+test('EXPIRY: total count is correct for multiple pages of expired batches', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 25 }], rowCount: 1 };
+      return { rows: Array.from({ length: 10 }, (_, i) => expiryRow({ batch_id: 10 + i })), rowCount: 10 };
+    },
+    async () => {
+      await listBatchesByExpiry(batchReq({ query: { status: 'expired', limit: '10', offset: '10' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 25);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 10);
+  assert.equal(captured.body.pagination.returned, 10);
+});
+
+test('EXPIRY: total count is correct for expiring batches', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 15 }], rowCount: 1 };
+      return { rows: Array.from({ length: 10 }, (_, i) => expiryRow({ batch_id: 20 + i })), rowCount: 10 };
+    },
+    async () => {
+      await listBatchesByExpiry(batchReq({ query: { status: 'expiring', days: '30', limit: '10', offset: '0' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.equal(captured.body.pagination.total, 15);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 0);
+  assert.equal(captured.body.pagination.returned, 10);
+});
+
+test('EXPIRY: empty result set returns total 0', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 0 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    async () => {
+      await listBatchesByExpiry(batchReq({ query: { status: 'expired' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.deepEqual(captured.body.batches, []);
+  assert.equal(captured.body.pagination.total, 0);
+  assert.equal(captured.body.pagination.returned, 0);
+});
+
+test('EXPIRY: offset beyond last page returns empty items but correct total', async () => {
+  const { res, captured } = makeRes();
+
+  await withMockedPool(
+    (text) => {
+      if (text.includes('COUNT(*)')) return { rows: [{ total: 5 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    async () => {
+      await listBatchesByExpiry(batchReq({ query: { status: 'expired', limit: '10', offset: '100' } }), res);
+    },
+  );
+
+  assert.equal(captured.status, 200);
+  assert.deepEqual(captured.body.batches, []);
+  assert.equal(captured.body.pagination.total, 5);
+  assert.equal(captured.body.pagination.limit, 10);
+  assert.equal(captured.body.pagination.offset, 100);
+  assert.equal(captured.body.pagination.returned, 0);
 });

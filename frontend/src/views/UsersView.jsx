@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import { useT } from '../i18n'
 
 const LIMIT = 10
-const ROLES = ['DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST', 'SYSTEM_ADMIN', 'SUPER_ADMIN']
+const ROLES = ['DOCTOR', 'NURSE', 'ACCOUNTANT', 'RECEPTIONIST', 'PHARMACIST', 'SYSTEM_ADMIN', 'SUPER_ADMIN']
 // تحديث قائمة الاتصال (Online/Offline) أثناء فتح الشاشة — منفصل تماماً عن نبضة المستخدم الحالي
 const PRESENCE_POLL_MS = 15000
 

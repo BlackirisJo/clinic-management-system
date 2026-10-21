@@ -7,7 +7,36 @@ import { INVENTORY_UOM_CODES, isInventoryUom } from '../lib/inventoryUom';
 // الحد الأعلى لكمية المخزون (NUMERIC(12,3))
 export const MAX_STOCK_QUANTITY = 999_999_999.999;
 
+// Pagination defaults (aligned with stock movements)
+export const DEFAULT_INVENTORY_LIMIT = 20;
+export const MAX_INVENTORY_LIMIT = 200;
+
 const id = z.coerce.number().int().positive();
+
+const optionalQueryInt = (min: number, max: number, message: string) =>
+  z.preprocess(
+    (value) => (value === '' || value === undefined || value === null ? undefined : value),
+    z.coerce.number().int().min(min, message).max(max, message),
+  ).optional();
+
+const optionalQueryString = (maxLength: number, message: string) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null) return undefined;
+      const str = String(value).trim();
+      return str === '' ? undefined : str;
+    },
+    z.string().max(maxLength, message).optional(),
+  ).optional();
+
+export const inventoryListQuerySchema = z.object({
+  clinic_id: optionalQueryInt(1, Number.MAX_SAFE_INTEGER, 'معرّف العيادة غير صالح'),
+  limit: optionalQueryInt(1, MAX_INVENTORY_LIMIT, `الحد يجب أن يكون بين 1 و ${MAX_INVENTORY_LIMIT}`),
+  offset: optionalQueryInt(0, Number.MAX_SAFE_INTEGER, 'البداية يجب أن تكون 0 أو أكثر'),
+  q: optionalQueryString(100, 'نص البحث يجب ألا يتجاوز 100 حرف'),
+});
+
+export type InventoryListQuery = z.infer<typeof inventoryListQuerySchema>;
 
 // '' و null لا تمر عبر z.coerce (لأن null يتحول إلى 0) — تُعاملان كـ "غير مُرسل"
 const quantity = z.preprocess(

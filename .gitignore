@@ -20,6 +20,14 @@ dist/
 .DS_Store
 .vscode/
 
+# Local artifacts that carry live credentials
+# مُرتكزة على الجذر عمداً وبأسماء دقيقة: /login.json يحتوي كلمة مرور
+# دخول نصية، و/ds_check.mjs يحتوي سلسلة اتصال قاعدة بيانات فيها كلمة المرور.
+# كلاهما ملف تشخيص محلي لا مصدر مشروع، وقواعد عامة (مثل *.json) كانت
+# ستخفي ملفات المشروع المهمة.
+/login.json
+/ds_check.mjs
+
 # Temporary scripts & SQL
 tmp_*.js
 tmp_*.sql

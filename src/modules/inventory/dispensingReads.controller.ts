@@ -135,6 +135,7 @@ export const getDispensing = async (req: AuthenticatedRequest, res: Response) =>
     const items = await pool.query(
       `SELECT di.dispensing_item_id, di.prescription_item_id, di.medication_id, di.inventory_item_id,
               di.prescribed_quantity, di.dispensed_quantity, di.remaining_quantity, di.uom, di.cycle_index,
+              di.unit_price_snapshot, di.cogs_amount,
               m.trade_name, m.scientific_name, m.strength, m.dosage_form,
               dib.dispensing_item_batch_id, dib.batch_id, dib.quantity AS allocated_quantity,
               dib.unit_cost_snapshot, dib.expiry_date_snapshot, dib.lot_number
@@ -166,6 +167,11 @@ export const getDispensing = async (req: AuthenticatedRequest, res: Response) =>
           remaining_quantity: row.remaining_quantity,
           uom: row.uom,
           cycle_index: row.cycle_index,
+          // لقطة سعر البيع وقت الصرف — NULL لصفوف ما قبل 10E.3
+          unit_price_snapshot: row.unit_price_snapshot,
+          // تكلفة البضاعة المباعة وقت الصرف — NULL لصفوف ما قبل 10E.5،
+          // وهي مشتقة من unit_cost_snapshot لكل صف تخصيص أدناه.
+          cogs_amount: row.cogs_amount,
           batches: [],
         });
       }

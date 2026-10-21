@@ -155,9 +155,28 @@ export const getMedicationReturn = async (req: AuthenticatedRequest, res: Respon
     const items = await pool.query(
       `SELECT mri.return_item_id, mri.dispensing_item_batch_id, mri.batch_id, mri.medication_id,
               mri.quantity, mri.unit_cost_snapshot, mri.restock_decision, mri.created_at,
-              m.trade_name, m.scientific_name, m.strength, m.dosage_form
+              m.trade_name, m.scientific_name, m.strength, m.dosage_form,
+              -- Phase 10E.7: LEFT JOIN so a return line written before 10E.7
+              -- (or one whose reversal is absent) still reads exactly as before,
+              -- with a null reversal block instead of dropping the line.
+              mrr.reversal_id, mrr.returned_quantity AS reversal_returned_quantity,
+              mrr.unit_cost_snapshot AS reversal_unit_cost_snapshot,
+              mrr.cogs_reversal_amount, mrr.loss_amount, mrr.dispensing_id AS reversal_dispensing_id,
+              mrr.dispensing_item_id AS reversal_dispensing_item_id,
+              -- Phase 10E.8: revenue credit, LEFT JOINed so a return line with no
+              -- credit (not yet invoiced, or no discount snapshot) still reads
+              -- exactly as it did before 10E.7.
+              mrc.credit_id, mrc.reversal_id AS credit_reversal_id,
+              mrc.invoice_id, mrc.invoice_item_id,
+              mrc.unit_price_snapshot AS credit_unit_price_snapshot,
+              mrc.medication_discount_value AS credit_medication_discount_value,
+              mrc.gross_amount, mrc.net_amount AS credit_net_amount,
+              mrc.credit_amount, mrc.applied_to_outstanding, mrc.refund_due_amount,
+              mrc.currency_code AS credit_currency_code
        FROM medication_return_items mri
        JOIN medications m ON m.medication_id = mri.medication_id
+       LEFT JOIN medication_return_reversals mrr ON mrr.return_item_id = mri.return_item_id
+       LEFT JOIN medication_return_credits mrc ON mrc.return_item_id = mri.return_item_id
        WHERE mri.return_id = $1
        ORDER BY mri.return_item_id ASC`,
       [returnId],
@@ -181,6 +200,43 @@ export const getMedicationReturn = async (req: AuthenticatedRequest, res: Respon
           unit_cost_snapshot: row.unit_cost_snapshot,
           restock_decision: row.restock_decision,
           created_at: row.created_at,
+          // Additive only: null for any line predating 10E.7. The two
+          // unit_cost_snapshot fields are intentionally different numbers —
+          // mri's is the ROUND(...,3) one, the reversal's is the exact one.
+          financial_reversal:
+            row.reversal_id === null
+              ? null
+              : {
+                  reversal_id: row.reversal_id,
+                  dispensing_id: row.reversal_dispensing_id,
+                  dispensing_item_id: row.reversal_dispensing_item_id,
+                  returned_quantity: row.reversal_returned_quantity,
+                  unit_cost_snapshot: row.reversal_unit_cost_snapshot,
+                  cogs_reversal_amount: row.cogs_reversal_amount,
+                  loss_amount: row.loss_amount,
+                },
+          // Additive only: null when no revenue credit exists for this line.
+          // credit_amount (revenue) is deliberately distinct from
+          // refund_due_amount (an entitlement, not a payment — there is no
+          // payment table, so no money has moved).
+          revenue_credit:
+            row.credit_id === null
+              ? null
+              : {
+                  credit_id: row.credit_id,
+                  reversal_id: row.credit_reversal_id,
+                  invoice_id: row.invoice_id,
+                  invoice_item_id: row.invoice_item_id,
+                  returned_quantity: row.reversal_returned_quantity,
+                  unit_price_snapshot: row.credit_unit_price_snapshot,
+                  medication_discount_value: row.credit_medication_discount_value,
+                  gross_amount: row.gross_amount,
+                  net_amount: row.credit_net_amount,
+                  credit_amount: row.credit_amount,
+                  applied_to_outstanding: row.applied_to_outstanding,
+                  refund_due_amount: row.refund_due_amount,
+                  currency_code: row.credit_currency_code,
+                },
         })),
       },
     });
@@ -303,6 +359,10 @@ interface LockedAllocation {
   unit_cost_snapshot: string | null;
   medication_id: number;
   inventory_item_id: number;
+  /** Phase 10E.7 — the reversal is anchored on the allocation and denormalises
+   *  these two so 10E.8 can reach the invoice line without re-deriving the chain. */
+  dispensing_id: number;
+  dispensing_item_id: number;
 }
 
 interface LockedBatch {
@@ -311,6 +371,27 @@ interface LockedBatch {
   is_active: boolean;
   quantity_on_hand: number;
   quantity_reserved: number;
+}
+
+/**
+ * Phase 10E.8 — سطر الفاتورة المحمَّل لبند صرف.
+ *
+ * كل الحقول المالية لقطة تاريخية تُقرأ من سطر الفاتورة وقت الإرجاع ولا تُشتق
+ * من أي إعداد حالي. amount/paid/net مُنسوخة لأن حالة دفع الفاتورة قد تتغير
+ * لاحقاً، وقرار الائتمان يجب أن يبقى مربوطاً بما رآه وقت صدوره.
+ */
+interface ChargeLine {
+  dispensing_item_id: number;
+  invoice_item_id: number;
+  invoice_id: number;
+  charged_quantity: string;
+  unit_price_snapshot: string;
+  /** null = سطر بلا لقطة خصم دواء (ما قبل 10E.8) — لا يُفترض صفراً */
+  medication_discount_value: string | null;
+  invoice_net_amount: string;
+  invoice_paid_amount: string;
+  payment_type: string;
+  currency_code: string;
 }
 
 /** ينفّذ الإرجاع داخل معاملة قائمة — يرمي MedicationReturnError عند أي رفض. */
@@ -352,7 +433,7 @@ const runMedicationReturn = async (
   const allocationIds = [...new Set(input.items.map((item) => item.dispensing_item_batch_id))].sort((a, b) => a - b);
   const allocationResult = await client.query(
     `SELECT dib.dispensing_item_batch_id, dib.batch_id, dib.quantity, dib.unit_cost_snapshot,
-            di.medication_id, di.inventory_item_id
+            di.medication_id, di.inventory_item_id, di.dispensing_id, di.dispensing_item_id
      FROM dispensing_item_batches dib
      JOIN dispensing_items di ON di.dispensing_item_id = dib.dispensing_item_id
      WHERE dib.dispensing_item_batch_id = ANY($1::bigint[])
@@ -382,6 +463,8 @@ const runMedicationReturn = async (
           : String(row.unit_cost_snapshot),
         medication_id: Number(row.medication_id),
         inventory_item_id: Number(row.inventory_item_id),
+        dispensing_id: Number(row.dispensing_id),
+        dispensing_item_id: Number(row.dispensing_item_id),
       },
     ]),
   );
@@ -427,6 +510,63 @@ const runMedicationReturn = async (
       );
     }
   }
+
+  // 3a) Phase 10E.8 — سطر الفاتورة المحمَّل لكل بند صرف.
+  //
+  // الإيراد لا يُعكس إلا إذا كان قد سُجّل أصلاً: بند صرف غير مُشهر ليس له إيراد
+  // ليُنقص. لذلك absence سطر الفاتورة ليس خطأ — الإرجاع والتكلفة يعملان، ولا
+  // يُنشأ ائتمان مالٍ لشيء لم يُحاسب عليه.
+  //
+  // القفل يسبق قفل الدفعات (انظر أدناه) حفاظاً على ترتيب القفل العام:
+  // dispensing → dispensing_item_batches → invoice_items → inventory_batches.
+  // invoices.discount_amount مقصود عدم قراءته: خصم العيادة لا يُوزَّع على سطر دواء.
+  const chargeResult = await client.query(
+    `SELECT ii.dispensing_item_id, ii.item_id, ii.invoice_id, ii.dispensed_quantity, ii.unit_price_snapshot,
+            ii.medication_discount_value, i.net_amount, i.paid_amount,
+            i.payment_type, i.currency_code
+     FROM invoice_items ii
+     JOIN invoices i ON i.invoice_id = ii.invoice_id
+     WHERE ii.dispensing_item_id = ANY($1::int[])
+     ORDER BY ii.item_id ASC
+     FOR UPDATE OF ii`,
+    [[...allocations.values()].map((a) => a.dispensing_item_id)],
+  );
+  const chargeLines = new Map<number, ChargeLine>(
+    chargeResult.rows.map((row) => [
+      Number(row.dispensing_item_id),
+      {
+        dispensing_item_id: Number(row.dispensing_item_id),
+        invoice_item_id: Number(row.item_id),
+        invoice_id: Number(row.invoice_id),
+        charged_quantity: String(row.dispensed_quantity),
+        unit_price_snapshot: String(row.unit_price_snapshot),
+        // NULL = لا لقطة خصم على سطر سابق لـ 10E.8 — يُعالَص صراحةً، ولا يُفترض صفراً
+        medication_discount_value:
+          row.medication_discount_value === null || row.medication_discount_value === undefined
+            ? null
+            : String(row.medication_discount_value),
+        invoice_net_amount: String(row.net_amount),
+        invoice_paid_amount: String(row.paid_amount),
+        payment_type: row.payment_type === null || row.payment_type === undefined
+          ? 'CASH'
+          : String(row.payment_type),
+        currency_code: String(row.currency_code),
+      },
+    ]),
+  );
+
+  // 3b) تفادي الائتمان المزدوج والزيادة: المجموع المُحتسب ≤ الكمية المحمَّلة.
+  //     بنفس انضباط القفل الذي يحمي الكمية المُعادة في الخطوة 3.
+  const creditedResult = await client.query(
+    `SELECT mrc.dispensing_item_id, COALESCE(SUM(mrc.returned_quantity), 0) AS credited_quantity
+     FROM medication_return_credits mrc
+     WHERE mrc.dispensing_item_id = ANY($1::int[])
+     GROUP BY mrc.dispensing_item_id`,
+    [[...allocations.values()].map((a) => a.dispensing_item_id)],
+  );
+  const alreadyCredited = new Map<number, number>(
+    creditedResult.rows.map((row) => [Number(row.dispensing_item_id), Number(row.credited_quantity)]),
+  );
 
   // 4) قفل كل الدفعات المتأثرة بترتيب حتمي — يمنع الجمود بين عمليتين متقاطعتين
   const targetBatchIds = [
@@ -545,6 +685,7 @@ const runMedicationReturn = async (
   // 7) بنود الإرجاع — batch_id المُحفظ هو دفعة الصرف الأصلية (إثبات المصدر)،
   //    والتكلفة التاريخية ROUND(..., 3) من لقطة سطر الصرف لا من الدفعة
   const itemRows: Record<string, unknown>[] = [];
+  const reversalRows: Record<string, unknown>[] = [];
   for (const entry of planned) {
     const item = await client.query(
       `INSERT INTO medication_return_items
@@ -562,7 +703,158 @@ const runMedicationReturn = async (
         entry.restock_decision,
       ],
     );
-    itemRows.push(item.rows[0]!);
+    const returnItem = item.rows[0]!;
+    itemRows.push(returnItem);
+
+    // 7b) Phase 10E.7 — العكس المالي، داخل نفس المعاملة ونفس الحلقة.
+    //
+    // التكلفة تُقرأ من تخصيص الصرف (dispensing_item_batches) لا من
+    // medication_return_items: الأخير NUMERIC(12,3) ومكتوب ROUND(...,3)، فقيمة
+    // 2.5678 مخزّنة فيه 2.568، وقياس العكس منه يبالغ في كل سطر. ولا تُقرأ
+    // منه ولا من تكلفة الدفعة الحالية التي قد تكون أُعيد تسعيرها بعد الصرف.
+    //
+    // $3 هو quantity × unit_cost_snapshot محسوبان في SQL: NUMERIC أدق من
+    // IEEE-744، فيبقى العكس قابلاً للتسوية على تخصيصه بالضبط. WASTE يسجّل
+    // خسارة مساوية حتى لا يختفي الفقد تحت رقم COGS وحده.
+    const reversal = await client.query(
+      `INSERT INTO medication_return_reversals
+         (return_item_id, dispensing_item_batch_id, dispensing_id, dispensing_item_id, clinic_id,
+          returned_quantity, unit_cost_snapshot, cogs_reversal_amount, loss_amount, restock_decision)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $6::numeric * $7::numeric,
+               CASE WHEN $8 = 'WASTE' THEN $6::numeric * $7::numeric ELSE 0 END, $8)
+       RETURNING reversal_id, return_item_id, dispensing_item_batch_id, dispensing_id, dispensing_item_id,
+                 clinic_id, returned_quantity, unit_cost_snapshot, cogs_reversal_amount, loss_amount,
+                 restock_decision, created_at`,
+      [
+        returnItem.return_item_id,
+        entry.allocation.dispensing_item_batch_id,
+        entry.allocation.dispensing_id,
+        entry.allocation.dispensing_item_id,
+        clinicId,
+        entry.quantity,
+        entry.allocation.unit_cost_snapshot,
+        entry.restock_decision,
+      ],
+    );
+    reversalRows.push(reversal.rows[0]!);
+  }
+
+  // 7c) Phase 10E.8 — ائتمان الإيراد، في نفس المعاملة والحلقة.
+  //
+  //   gross   = returned_quantity × unit_price_snapshot
+  //   net     = gross − (gross × medication_discount_value / 100)
+  //   credit  = net
+  //
+  // السعر والخصم كلاهما منسوخان من سطر الفاتورة. خصم العيادة
+  // (invoices.discount_amount) لا يُقرأ إطلاقاً: خصمان مستقلان، والأول بلا
+  // أساس يُوزَّع على سطر واحد.
+  //
+  // الاستحقاق ليس استرداداً: لا يوجد جدول مدفوعات، فلا مال حرّك. paid_amount
+  // المأخوذ من الفاتورة هو أقصى ما يثبته النظام أن المريض دفعه، فيصلح كسقف
+  // للمبلغ المستحق — لا كدليل على حركة نقدية.
+  const creditRows: Record<string, unknown>[] = [];
+  const creditsSkipped: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < planned.length; index++) {
+    const entry = planned[index]!;
+    const charge = chargeLines.get(entry.allocation.dispensing_item_id);
+
+    // لا سطر فاتورة = لا إيراد سُجّل أصلاً، فلا شيء يُعكس. ليس خطأً.
+    if (charge === undefined) {
+      creditsSkipped.push({
+        dispensing_item_batch_id: entry.allocation.dispensing_item_batch_id,
+        dispensing_item_id: entry.allocation.dispensing_item_id,
+        reason: 'NOT_INVOICED',
+      });
+      continue;
+    }
+
+    // خصم دواء بلا لقطة على سطر سابق لـ 10E.8. لا نفترض صفراً: تسعير medicine
+    // بدون معرفة الخصم المطبَّق سيمنح المريض أقل مما استحق أو أكثر، ورقم مُختلق
+    // أسوأ من غياب رقم. يُترك صريحاً ويُبلَّغ.
+    if (charge.medication_discount_value === null) {
+      creditsSkipped.push({
+        dispensing_item_batch_id: entry.allocation.dispensing_item_batch_id,
+        dispensing_item_id: entry.allocation.dispensing_item_id,
+        invoice_item_id: charge.invoice_item_id,
+        reason: 'MISSING_MEDICATION_DISCOUNT_SNAPSHOT',
+      });
+      continue;
+    }
+
+    // 7d) حاجب الزيادة: المُجتمَع + الحالي ≤ الكمية المحمَّلة على الفاتورة.
+    const priorCredited = roundReturnQuantity(
+      alreadyCredited.get(entry.allocation.dispensing_item_id) ?? 0,
+    );
+    const creditable = roundReturnQuantity(Number(charge.charged_quantity) - priorCredited);
+    if (entry.quantity > creditable) {
+      throw new MedicationReturnError(
+        409,
+        ApiErrorCode.FORBIDDEN,
+        'الكمية المطلوبة تتجاوز المتبقي من الكمية المحمَّلة على الفاتورة',
+        {
+          dispensing_item_batch_id: entry.allocation.dispensing_item_batch_id,
+          charged_quantity: charge.charged_quantity,
+          previously_credited_quantity: priorCredited,
+          creditable_quantity: creditable,
+        },
+      );
+    }
+
+    // 7e) القسمة بين ما يُلغي المتبقي وما يصبح استحقاقاً:
+    //   - INSURANCE/SPLIT: الدافع ليس المريض، وتقسيمه بين المريض والدافع تخمين
+    //     في نظام غير موجود. الإيراد يُسجَّل كاملاً، والاستحقاق يؤجَّل.
+    //   - CASH/CARD: السقف هو المدفوع فعلاً، لا الصافي.
+    const credit = await client.query(
+      `WITH amounts AS (
+         SELECT
+           $4::numeric * $5::numeric AS gross,
+           $4::numeric * $5::numeric * $6::numeric / 100 AS discount_amount
+       ), netted AS (
+         SELECT gross, discount_amount,
+                gross - ROUND(discount_amount, 2) AS net
+         FROM amounts
+       ), credit AS (
+         SELECT gross, net, net AS credit_amount
+         FROM netted
+       )
+       INSERT INTO medication_return_credits
+         (return_item_id, reversal_id, dispensing_id, dispensing_item_id, invoice_id, invoice_item_id,
+          clinic_id, returned_quantity, unit_price_snapshot, medication_discount_value,
+          gross_amount, net_amount, credit_amount,
+          applied_to_outstanding, refund_due_amount,
+          invoice_net_amount, invoice_paid_amount, currency_code)
+       SELECT $1, $2, $3, $7, $8, $9, $10, $4, $5, $6,
+              gross, net, credit_amount,
+              -- ما يُلغي المتبقي: min(credit, outstanding) وأقل من ذلك استحقاق
+              LEAST(credit_amount, GREATEST($11::numeric - $12::numeric, 0)),
+              -- الاستحقاق لا يُحسب إطلاقاً لفاتورة تأمين أو دفع مقسّم
+              CASE WHEN $13 IN ('CASH', 'CARD')
+                   THEN credit_amount - LEAST(credit_amount, GREATEST($11::numeric - $12::numeric, 0))
+                   ELSE 0 END,
+              $11, $12, $14
+       FROM credit
+       RETURNING credit_id, return_item_id, reversal_id, dispensing_item_id, invoice_id, invoice_item_id,
+                 returned_quantity, unit_price_snapshot, medication_discount_value,
+                 gross_amount, net_amount, credit_amount,
+                 applied_to_outstanding, refund_due_amount, currency_code, created_at`,
+      [
+        itemRows[index]!.return_item_id,
+        reversalRows[index]!.reversal_id,
+        entry.allocation.dispensing_id,
+        entry.quantity,
+        charge.unit_price_snapshot,
+        charge.medication_discount_value,
+        entry.allocation.dispensing_item_id,
+        charge.invoice_id,
+        charge.invoice_item_id,
+        clinicId,
+        charge.invoice_net_amount,
+        charge.invoice_paid_amount,
+        charge.payment_type,
+        charge.currency_code,
+      ],
+    );
+    creditRows.push(credit.rows[0]!);
   }
 
   // 8) المخزون والعزل — quantity_reserved لا يُكتب، ولا يُكتب حقل التكلفة
@@ -683,6 +975,14 @@ const runMedicationReturn = async (
           restock_decision: entry.restock_decision,
           movement_type: entry.movement_type,
           previously_returned_quantity: alreadyReturned.get(entry.allocation.dispensing_item_batch_id) ?? 0,
+          // العكس المالي — Phase 10E.7. يوثّق أن الإرجاع سجّل أثره على التكلفة
+          reversals: {
+            cogs_reversal_amount: reversalRows[planned.indexOf(entry)]!.cogs_reversal_amount,
+            loss_amount: reversalRows[planned.indexOf(entry)]!.loss_amount,
+            unit_cost_snapshot: reversalRows[planned.indexOf(entry)]!.unit_cost_snapshot,
+          },
+          // ائتمان الإيراد — Phase 10E.8
+          revenue_credit: creditRows[planned.indexOf(entry)] ?? null,
         })),
       }),
     ],
@@ -690,7 +990,15 @@ const runMedicationReturn = async (
 
   return {
     message: 'تم تسجيل إرجاع الأدوية بنجاح',
-    return: { ...header.rows[0], items: itemRows },
+    return: {
+      ...header.rows[0],
+      items: itemRows,
+      reversals: reversalRows,
+      // Phase 10E.8 — ائتمان الإيراد. غياب ائتمان مذكور صراحةً في
+      // revenue_credits_skipped بدل أن يُفترض صفراً.
+      revenue_credits: creditRows,
+      revenue_credits_skipped: creditsSkipped,
+    },
     movements,
   };
 };

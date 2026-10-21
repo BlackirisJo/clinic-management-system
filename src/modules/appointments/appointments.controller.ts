@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { pool } from '../../config/database';
 import { AuthenticatedRequest, accessibleClinicIds } from '../../middlewares/auth.middleware';
+import { ApiErrorCode } from '../../utils/apiErrors';
+import { calendarGate, calendarGateMessage, isCalendarGateError } from '../calendar/calendar.gate';
 
 // 1. حجز موعد جديد
 export const createAppointment = async (req: AuthenticatedRequest, res: Response) => {
@@ -24,10 +26,20 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
     return res.status(400).json({ message: 'وقت نهاية الموعد يجب أن يكون بعد وقت البداية' });
   }
 
+  const client = await pool.connect();
   try {
+    // المعاملة + قفل التقويم:
+    // يُلتقط قفل (العيادة، اليوم) قبل فحص البوابة ولا يُفكّ قبل الإدراج، فلا يمكن
+    // أن يمرّ حجز إلى تاريخ صار محجوباً في أثناء تصحيح عطلة (انزلاق الحجز).
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1::int, (EXTRACT(EPOCH FROM $2::date) / 86400)::int)', [
+      Number(clinic_id),
+      appointment_date,
+    ]);
+
     // أمن وسلامة البيانات: الطبيب المحدد يجب أن يكون حساباً نشطاً بدور DOCTOR ومسنداً لهذه العيادة
     // (أساسي أو إسناد إضافي) — لا يمكن حجز طبيب من عيادة أخرى.
-    const doctorMembership = await pool.query(
+    const doctorMembership = await client.query(
       `SELECT 1 FROM users u
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.user_id = $1 AND u.status = 'ACTIVE' AND r.role_name = 'DOCTOR' AND (
@@ -36,6 +48,7 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
       [doctor_id, clinic_id]
     );
     if (!doctorMembership.rowCount) {
+      await client.query('ROLLBACK');
       return res.status(400).json({ message: 'الطبيب المحدد غير موجود أو غير مسند لهذه العيادة' });
     }
 
@@ -47,7 +60,7 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
     //    أن يكون عضواً في عيادة مالك المريض وفي العيادة الهدف معاً ضمن نطاقه
     //    (accessibleClinicIds = الأساسية + clinic_staff). المدراء (نطاق null) يبقى
     //    سلوكهم كما هو (ملكية أو مشاركة) دون توسيع.
-    const ownership = await pool.query(
+    const ownership = await client.query(
       `SELECT p.clinic_id AS owner_clinic_id,
               EXISTS (SELECT 1 FROM patient_clinic_shares s
                       WHERE s.patient_id = p.patient_id AND s.target_clinic_id = $2
@@ -65,43 +78,96 @@ export const createAppointment = async (req: AuthenticatedRequest, res: Response
       && userClinicIds.includes(ownerClinicId as number)
       && userClinicIds.includes(targetClinicId);
     if (!patientRow || (!sameOwnerClinic && !patientRow.can_write && !internalCenterCase)) {
+      await client.query('ROLLBACK');
       return res.status(400).json({ message: 'المريض غير مسجل في هذه العيادة أو غير مشارَك إليها' });
+    }
+
+    // بوابة التقويم: عطلة رسمية أو إجازة معتمدة تمنع الحجز.
+    // الترتيب: الإجازة تتقدّم على العطل، ولا يتجاوز أيٌّ منهما جدول العمل الأسبوعي.
+    // البوابة على مستوى التاريخ، فتسري حتى على الموعد بلا وقت.
+    const gate = await calendarGate(client, targetClinicId, Number(doctor_id), appointment_date);
+    if (gate.is_blocked) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        message: calendarGateMessage(gate.code),
+        code: gate.code === 'LEAVE' ? ApiErrorCode.DOCTOR_LEAVE : ApiErrorCode.HOLIDAY_CLOSED,
+        calendar_gate: gate,
+      });
     }
 
     // التحقق من عدم وجود تعارض في مواعيد الطبيب لنفس اليوم والوقت (Overlapping Check)
     // يُنفَّذ فقط إذا تم توفير أوقات البداية والنهاية معاً
     if (start_time && end_time) {
-    const conflictCheck = await pool.query(
-      `SELECT appointment_id FROM appointments
-       WHERE doctor_id = $1
-        AND clinic_id = $2
-        AND appointment_date = $3
-         AND status NOT IN ('CANCELLED')
-        AND start_time IS NOT NULL AND end_time IS NOT NULL
-        AND start_time < $5 AND end_time > $4`,
-      [doctor_id, clinic_id, appointment_date, start_time, end_time]
-    );
+      // Validate against doctor's working schedule
+      // يوم الأسبوع يُحسب في قاعدة البيانات (EXTRACT DOW) لا في ذاكرة Node:
+      // new Date('YYYY-MM-DD').getDay() كان ينزاح يوماً في المناطق الزمنية السالبة.
+      const dayOfWeek = await client.query('SELECT EXTRACT(DOW FROM $1::date)::int AS dow', [appointment_date]);
+      const workingSchedule = await client.query(
+        `SELECT schedule_id, start_time, end_time FROM doctor_schedules
+         WHERE doctor_id = $1 AND clinic_id = $2 AND day_of_week = $3 AND is_working_day = TRUE
+         AND start_time <= $4::time AND end_time >= $5::time`,
+        [doctor_id, clinic_id, dayOfWeek.rows[0]?.dow ?? 0, start_time, end_time]
+      );
 
-    if (conflictCheck.rows.length > 0) {
-      return res.status(409).json({ message: 'الطبيب لديه موعد آخر محجوز يتداخل مع هذا الوقت' });
-    }
+      if (!workingSchedule.rowCount || workingSchedule.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'الوقت المحدد خارج أوقات العمل الرسمية للطبيب' });
+      }
+
+      const conflictCheck = await client.query(
+        `SELECT appointment_id FROM appointments
+         WHERE doctor_id = $1
+           AND clinic_id = $2
+           AND appointment_date = $3
+           AND status NOT IN ('CANCELLED')
+           AND start_time IS NOT NULL AND end_time IS NOT NULL
+           AND start_time < $5 AND end_time > $4`,
+        [doctor_id, clinic_id, appointment_date, start_time, end_time]
+      );
+
+      if (conflictCheck.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ message: 'الطبيب لديه موعد آخر محجوز يتداخل مع هذا الوقت' });
+      }
     }
 
     // إدراج الحجز الجديد في قاعدة البيانات
-    const result = await pool.query(
+    // (مُشغّل البوابة في قاعدة البيانات — ترحيل 059 — يطبّق القاعدة نفسها على أي كاتب)
+    const result = await client.query(
       `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, reason, notes, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SCHEDULED')
        RETURNING *`,
       [clinic_id, patient_id, doctor_id, appointment_date, start_time || null, end_time || null, reason || null, notes || null]
     );
 
+    await client.query('COMMIT');
     return res.status(201).json({
       message: 'تم حجز الموعد بنجاح',
       appointment: result.rows[0],
     });
-  } catch (error) {
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    // رفض بوابة التقويم من مستوى قاعدة البيانات (يُعاد ترجمته إلى 409 لا 500)
+    if (isCalendarGateError(error)) {
+      const code = typeof error?.detail === 'string' && error.detail.startsWith('LEAVE')
+        ? 'LEAVE'
+        : 'HOLIDAY';
+      return res.status(409).json({
+        message: calendarGateMessage(code),
+        code: code === 'LEAVE' ? ApiErrorCode.DOCTOR_LEAVE : ApiErrorCode.HOLIDAY_CLOSED,
+      });
+    }
+    // تعارض زمني على مستوى القيد الحصري (23P01) — رفض تشغيلي لا عطل خادم
+    if (error?.code === '23P01') {
+      return res.status(409).json({
+        message: 'الطبيب لديه موعد آخر محجوز يتداخل مع هذا الوقت',
+        code: ApiErrorCode.CALENDAR_CONFLICT,
+      });
+    }
     console.error('خطأ أثناء إنشاء الموعد:', error);
     return res.status(500).json({ message: 'حدث خطأ داخلي أثناء حجز الموعد' });
+  } finally {
+    client.release();
   }
 };
 

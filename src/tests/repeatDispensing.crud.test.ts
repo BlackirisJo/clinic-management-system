@@ -70,6 +70,7 @@ async function run(scenario: Scenario = {}, user: unknown = DOCTOR) {
     if (t.startsWith('INSERT INTO dispensings')) return { rows: [{ dispensing_id: 900, status: 'COMPLETED' }], rowCount: 1 };
     if (t.startsWith('INSERT INTO dispensing_items')) return { rows: [{ dispensing_item_id: 901 }], rowCount: 1 };
     if (t.startsWith('INSERT INTO dispensing_item_batches')) return { rows: [], rowCount: 1 };
+    if (t.startsWith('UPDATE dispensing_items')) return { rows: [{ cogs_amount: '0' }], rowCount: 1 };
     if (t.startsWith('UPDATE inventory_batches')) return { rows: [], rowCount: 1 };
     if (t.startsWith('INSERT INTO stock_movements')) return { rows: [], rowCount: 1 };
     if (t.startsWith('INSERT INTO audit_logs')) return { rows: [], rowCount: 1 };
@@ -94,6 +95,12 @@ async function run(scenario: Scenario = {}, user: unknown = DOCTOR) {
       return { rows: history.map((h) => ({ prescription_item_id: 300, cycle_index: h.cycle_index, status: h.status, dispensed_quantity: h.dispensed })), rowCount: history.length };
     }
     if (t.includes('FROM inventory_items')) return { rows: [{ inventory_id: 5, uom: 'TABLET' }], rowCount: 1 };
+    // Phase 10E.3: الصنف 5 له سعر بيع نشط، وإلا رفض الصرف قبل أي كتابة
+    if (t.includes('FROM medication_prices mp')) {
+      const requested = (params[0] as number[]) ?? [];
+      const rows = requested.map((inventoryId) => ({ inventory_id: inventoryId, unit_price: '2.50' }));
+      return { rows, rowCount: rows.length };
+    }
     if (t.includes('FOR UPDATE OF b')) {
       if (stock <= 0) return { rows: [], rowCount: 0 };
       return { rows: [{ batch_id: 117, inventory_id: 5, lot_number: 'LOT-A', expiry_date: '2027-01-31', quantity_on_hand: stock, unit_cost: 2.5 }], rowCount: 1 };

@@ -56,6 +56,11 @@ interface Scenario {
   failOn?: string;
   deductRowCount?: number;
   noInventory?: boolean;
+  /**
+   * Phase 10E.3: inventory_id -> active unit_price. Absent from the map means
+   * that item has NO active selling price and dispensing must refuse.
+   */
+  activePrice?: Record<number, string>;
 }
 
 const DEFAULT_ITEMS: ItemSpec[] = [{ item_id: 300, medication_id: 11, prescribed_quantity: 30, uom: 'TABLET' }];
@@ -66,6 +71,12 @@ const makeHandler = (s: Scenario) => {
   const uoms = s.inventoryUom ?? Object.fromEntries(items.map((i) => [i.medication_id, 'TABLET']));
   // (note: Arabic comment removed during a re-encode; see the controller for the domain text)
   const stockFor = (inventoryId: number): number => stock[inventoryId] ?? 0;
+
+  // Phase 10E.3: every stocked item has an active price unless a test opts out
+  // by supplying its own activePrice map.
+  const activePrices =
+    s.activePrice ??
+    Object.fromEntries(items.map((i) => [i.medication_id, '2.50']));
 
   return (text: string, params: unknown[] = []): MockResult => {
     const t = text.trim();
@@ -85,6 +96,7 @@ const makeHandler = (s: Scenario) => {
       return { rows: [{ dispensing_item_id: 901 + Number(params[1]) }], rowCount: 1 };
     }
     if (t.startsWith('INSERT INTO dispensing_item_batches')) return { rows: [], rowCount: 1 };
+    if (t.startsWith('UPDATE dispensing_items')) return { rows: [{ cogs_amount: '0' }], rowCount: 1 };
     if (t.startsWith('UPDATE inventory_batches')) return { rows: [], rowCount: s.deductRowCount ?? 1 };
     if (t.startsWith('INSERT INTO stock_movements')) return { rows: [], rowCount: 1 };
     if (t.startsWith('INSERT INTO audit_logs')) return { rows: [], rowCount: 1 };
@@ -115,6 +127,14 @@ const makeHandler = (s: Scenario) => {
       const uom = s.noInventory ? null : uoms[medicationId] ?? null;
       if (uom === null) return { rows: [], rowCount: 0 };
       return { rows: [{ inventory_id: medicationId, uom }], rowCount: 1 };
+    }
+    // Phase 10E.3: the active selling price of each requested inventory item
+    if (t.includes('FROM medication_prices mp')) {
+      const requested = (params[0] as number[]) ?? [];
+      const rows = requested
+        .filter((inventoryId) => activePrices[inventoryId] !== undefined)
+        .map((inventoryId) => ({ inventory_id: inventoryId, unit_price: activePrices[inventoryId] }));
+      return { rows, rowCount: rows.length };
     }
     if (t.includes('FOR UPDATE OF b')) {
       const inventoryId = Number(params[0]);

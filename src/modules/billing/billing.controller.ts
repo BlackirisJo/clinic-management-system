@@ -4,6 +4,8 @@ import { AuthenticatedRequest, accessibleClinicIds, financeClinicScope, isGlobal
 import { InvoiceCalcError, invoiceNumberFor, invoiceStatus, resolveItem, round2, servicesKey } from './billing.calculation';
 import type { ServicePricing } from './billing.calculation';
 import { getBaseCurrency } from '../currencies/currency.validation';
+import { readCutoverState, SettlementCutoverMissingError } from './settlementCutover';
+import { ApiErrorCode } from '../../utils/apiErrors';
 
 // المحاسب دور مالي مركزي: يتعامل مع كل العيادات النشطة دون تقييد بالإسناد.
 // نطاق العمليات المالية موحّد عبر financeClinicScope من auth.middleware.ts
@@ -209,12 +211,39 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
 
     const baseCurrency = await getBaseCurrency();
 
-    // إدراج الفاتورة الرئيسية (المدفوع = الصافي لأنها تُحصَّل فوراً حسب النموذج الحالي)
+    // Phase 10G.3 — عتبة التسوية. العتبة تُقرأ من قاعدة البيانات ولا تُثبَّت هنا،
+    // فالكود والبيانات لا يختلفان على الحد: غياب الصف يعني أنك تكتب على قاعدة لم
+    // تُفعَّل فيها التسوية، وهذا يُرفض صريحاً بدل التخمين (readCutoverAt يرمي
+    // SettlementCutoverMissingError فيلغى كل ما سبق ويُردّ 503).
+    //
+// وجود العتبة هو ما يوقف الإصدار المحصّل: بعد تفويض 048 يكون now >= cutover
+   // Always، فلا يبقى في هذا المسار طريق يُصدّر فاتورة محصّلة. والفرع
+   // المقابل (قبل العبة) ليس للمتوقّع بل للاتساق مع قاعدة التصنيف: فاتورة
+   // صدرت قبل العبة legacy، وlegacy في هذا النظام تولد محصّلة.
+   //
+// The decision is made by the DATABASE CLOCK, not by the application host:
+   // `CURRENT_TIMESTAMP >= cutover_at` is evaluated by PostgreSQL against the
+   // same TIMESTAMPTZ domain that later classifies the row. Using `new Date()`
+   // here would let a host clock behind the database clock issue an invoice
+   // born paid with no payment row behind it — an invoice that is then
+   // classified PAYMENT_BACKED and is permanently unsettleable. The fix is to
+   // let the database decide, which this function does.
+   const { cutoverAt, postCutoverNow: paymentBacked } = await readCutoverState(client);
+
+    // المدفوع عند الإصدار. الإصدار بعد العتبة لا يُنشئ أي دفعة: لا سجل حركة مال
+    // عند إصدار مستند. payment_type يُحفظ كما هو لأن 044 يقرأه لاشتقاق حق
+    // الاسترداد، لا لأنه إثبات وصول مال، ولأن قيمه تاريخية على الفواتير القائمة.
+    //
+    // قبل العتبة كانت الفاتورة تُصدر محصّلة: paid_amount = net_amount. ادعاء
+    // بتحصيل لم يسنده سجل دفعة ولا سند. بعد العتبة تُصدر غير محصّلة ويصبح
+    // paid_amount مشتقاً من الدفعات وحدها.
+    const issuedPaidAmount = paymentBacked ? 0 : netAmount;
+
     const invoiceResult = await client.query(
       `INSERT INTO invoices (patient_id, visit_id, receptionist_id, total_amount, discount_amount, net_amount, paid_amount, payment_type, currency_code)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [patient_id, visit_id || null, receptionist_id, totalAmount, discount, netAmount, netAmount, payment_type || 'CASH', baseCurrency]
+      [patient_id, visit_id || null, receptionist_id, totalAmount, discount, netAmount, issuedPaidAmount, payment_type || 'CASH', baseCurrency]
     );
     const invoiceId = invoiceResult.rows[0].invoice_id;
 
@@ -229,18 +258,26 @@ export const createInvoice = async (req: AuthenticatedRequest, res: Response) =>
 
     await client.query('COMMIT');
     transactionActive = false;
-    await logAudit(receptionist_id, processedItems[0]?.clinic_id ?? req.user?.clinicId, 'INVOICE_CREATED', 'INVOICE', invoiceId, JSON.stringify({ total: totalAmount, net: netAmount }));
+    await logAudit(receptionist_id, processedItems[0]?.clinic_id ?? req.user?.clinicId, 'INVOICE_CREATED', 'INVOICE', invoiceId, JSON.stringify({ total: totalAmount, net: netAmount, settlement: paymentBacked ? 'PAYMENT_BACKED' : 'LEGACY' }));
 
     return res.status(201).json({
-      message: 'تم إصدار الفاتورة وتحصيل المبلغ بنجاح',
+      // الرسالة لا تدّعي تحصيلاً لم يحدث: بعد العتبة الإصدار يعني "مستحق" فقط.
+      message: paymentBacked ? 'تم إصدار الفاتورة بنجاح — المبلغ مستحق ولم يُحصَّل بعد' : 'تم إصدار الفاتورة وتحصيل المبلغ بنجاح',
       invoice_id: invoiceId,
       total_amount: totalAmount,
       discount_amount: discount,
       net_amount: netAmount,
-      paid_amount: netAmount,
+      paid_amount: issuedPaidAmount,
+      remaining: round2(netAmount - issuedPaidAmount),
+      status: invoiceStatus(netAmount, issuedPaidAmount),
+      settlement: paymentBacked ? 'PAYMENT_BACKED' : 'LEGACY',
     });
   } catch (error: any) {
     if (transactionActive) await client.query('ROLLBACK');
+    // غياب العتبة ليس خطأ حساب ولا خطأ عميل: حالة قاعدة بيانات غير مهيأة.
+    if (error instanceof SettlementCutoverMissingError) {
+      return res.status(503).json({ message: error.message, code: ApiErrorCode.SETTLEMENT_CUTOVER_MISSING });
+    }
     console.error('Create Invoice Error:', error);
     if (error instanceof InvoiceCalcError) {
       return res.status(400).json({ message: error.message });

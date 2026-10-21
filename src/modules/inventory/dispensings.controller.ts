@@ -35,6 +35,8 @@ interface PrescriptionItemRow {
   prescribed_quantity: number | null;
   uom: string | null;
   dosage: string;
+  /** Phase 10F.1: قرار المريض المُسجَّل — يُقرأ للحماية فقط، لا يُعاد حسابه هنا */
+  fulfilment_status: string;
 }
 
 const toNumber = (value: unknown): number => Number(value);
@@ -42,6 +44,16 @@ const toNumberOrNull = (value: unknown): number | null =>
   value === null || value === undefined ? null : Number(value);
 
 const round3 = (value: number): number => Number(value.toFixed(3));
+
+/**
+ * Phase 10F.2 — قرارات المريض التي تعني صراحةً "ليس من العيادة".
+ *
+ * PENDING = "لم يُقرَّر بعد" — لا يُصرف إلا بقرار صريح.
+ * EXTERNAL_PHARMACY / PATIENT_DECLINED / CANCELLED = قرارات صريحة بعدم الصرف من العيادة.
+ * DISPENSED_FROM_CLINIC / PARTIALLY_DISPENSED ملكٌ لمسار الصرف نفسه.
+ * CLINIC_DISPENSING = قرار صريح بالصّرف من العيادة — مسموح.
+ */
+const REFUSING_DECISION_STATUSES = ['PENDING', 'EXTERNAL_PHARMACY', 'PATIENT_DECLINED', 'CANCELLED'] as const;
 
 /**
  * Phase 10C.4B — التوزيع بأقصى المتاح دون تجاوز المتبقي.
@@ -64,6 +76,58 @@ const allocateBestEffort = async (
     if (best.ok) return best.allocations;
   }
   return [];
+};
+
+/**
+ * Phase 10E.3 — تجميد سعر البيع النشط لكل صنف داخل معاملة الصرف.
+ *
+ * أصناف الروشتة كلها تُقفل في استعلام واحد ومرتَّبة تصاعدياً بـ inventory_id،
+ * فقفل الصفوف على أي ترتيب لا يُنتج deadlock بين عمليتي صرف متزامنتين. لا
+ * SKIP LOCKED عمداً: إن كان السعر مُعدَّلاً بمعاملة أخرى، ننتظر ثم نقرأ
+ * الصف المقفل، تماماً كما في قفل دفعات FEFO.
+ *
+ * الاستعلام يربط medication_prices.inventory_id بصنف المخزون مباشرةً، فالنطاق
+ * موروث من الخطوة 4 ولا يُبنى من أي مُدخَل. السعر النشط واحد فقط لكل صنف
+ * (uq_medication_prices_inventory_active)، فالسعر المقفول هو سعر الخصم.
+ *
+ * صنف بلا سعر نشط يرمي DispensingError قبل أي كتابة في جداول الصرف.
+ */
+const lockActiveSellingPrices = async (
+  client: PoolClient,
+  inventoryByMedication: Map<number, { inventory_id: number; uom: string }>,
+): Promise<Map<number, string>> => {
+  const inventoryIds = [...new Set([...inventoryByMedication.values()].map((i) => i.inventory_id))].sort(
+    (a, b) => a - b,
+  );
+  if (inventoryIds.length === 0) return new Map();
+
+  const result = await client.query(
+    `SELECT mp.inventory_id, mp.unit_price
+     FROM medication_prices mp
+     WHERE mp.inventory_id = ANY($1::int[]) AND mp.is_active
+     ORDER BY mp.inventory_id ASC
+     FOR UPDATE OF mp`,
+    [inventoryIds],
+  );
+
+  const priceByInventoryId = new Map<number, string>(
+    result.rows.map((row) => [toNumber(row.inventory_id), String(row.unit_price)]),
+  );
+
+  const missing = inventoryIds.filter((inventoryId) => !priceByInventoryId.has(inventoryId));
+  if (missing.length > 0) {
+    throw new DispensingError(
+      409,
+      ApiErrorCode.FORBIDDEN,
+      'لا يوجد سعر بيع نشط لأحد الأدوية في هذه العيادة — لا يمكن الصرف',
+      {
+        reason: 'MISSING_SELLING_PRICE',
+        inventory_ids: missing,
+      },
+    );
+  }
+
+  return priceByInventoryId;
 };
 
 /** ينفّذ الصرف داخل معاملة قائمة — يرمي DispensingError عند أي رفض. */
@@ -93,9 +157,10 @@ const runDispensing = async (
   const clinicId = toNumber(prescription.clinic_id);
 
   // 2) بنود الروشتة — يجب أن تحمل كمية ووحدة مُعرَّفتين.
-  // القفل هنا (وليس على prescriptions) هو ما يمنع حسابين متزامنين لنفس المتبقي.
+  // القفل هنا (وليس على prescriptions) هو ما يمنع حسابين متزامنين لنفس المتبقي،
+  // وهو أيضاً ما يضمن أن تُقرأ حالة التنفيذ (10F.1) تحت القفل نفسه الذي ستُكتب عليه.
   const itemsResult = await client.query(
-    `SELECT pi.item_id, pi.medication_id, pi.prescribed_quantity, pi.uom, pi.dosage
+    `SELECT pi.item_id, pi.medication_id, pi.prescribed_quantity, pi.uom, pi.dosage, pi.fulfilment_status
      FROM prescription_items pi
      WHERE pi.prescription_id = $1
      ORDER BY pi.item_id ASC
@@ -107,6 +172,11 @@ const runDispensing = async (
     medication_id: toNumber(row.medication_id),
     prescribed_quantity: toNumberOrNull(row.prescribed_quantity),
     uom: row.uom === null || row.uom === undefined ? null : String(row.uom),
+    // صفوف ما قبل 045 بلا عمود ⇒ PENDING، وهي الحالة الوحيدة التي لا تعترض الصرف
+    fulfilment_status:
+      row.fulfilment_status === null || row.fulfilment_status === undefined
+        ? 'PENDING'
+        : String(row.fulfilment_status),
   })) as PrescriptionItemRow[];
 
   if (items.length === 0) {
@@ -123,6 +193,29 @@ const runDispensing = async (
         { prescription_item_id: item.item_id },
       );
     }
+  }
+
+  // 2b) Phase 10F.2 — قرار المريض المُسجَّل يتحكّم في أهلية الصرف.
+  // PENDING = "لم يُقرَّر بعد" → ممنوع الصرف حتى يُسجّل قرار صريح.
+  // EXTERNAL_PHARMACY / PATIENT_DECLINED / CANCELLED = قرارات صريحة بعدم الصرف من العيادة.
+  // CLINIC_DISPENSING = قرار صريح بالصّرف من العيادة → مسموح.
+  // DISPENSED_FROM_CLINIC / PARTIALLY_DISPENSED ملكٌ لمسار الصرف نفسه → لا تعترض.
+  const decidedAgainst = items.filter((item) =>
+    REFUSING_DECISION_STATUSES.includes(item.fulfilment_status as (typeof REFUSING_DECISION_STATUSES)[number]),
+  );
+  if (decidedAgainst.length > 0) {
+    throw new DispensingError(
+      409,
+      ApiErrorCode.FORBIDDEN,
+      'أحد بنود الروشتة لا يجوز صرفه من العيادة — يتطلب قرار صريح بالصرف من العيادة (CLINIC_DISPENSING) أو العودة إلى "لم يُقرَّر بعد" مع تأكيد',
+      {
+        reason: 'PATIENT_DECISION_RECORDS_NO_CLINIC_FULFILMENT',
+        items: decidedAgainst.map((item) => ({
+          prescription_item_id: item.item_id,
+          fulfilment_status: item.fulfilment_status,
+        })),
+      },
+    );
   }
 
   // 3) تفويض التكرار + تاريخ الصرف — الدورات تُحسم لكل الروشتة دفعة واحدة
@@ -259,6 +352,16 @@ const runDispensing = async (
     });
   }
 
+  // 4b) Phase 10E.3 — تجميد سعر البيع لكل صنف، داخل نفس معاملة الصرف.
+  // النطاق مشتق من صنف المخزون المُصرَّح عنه في الخطوة 4: لا clinic_id ولا
+  // price_id يأتيان من جسم الطلب إطلاقاً. القفل FOR UPDATE يمنع تغيّر السعر
+  // بين القراءة والكتابة، تماماً كما يفعل قفل الدفعة مع الكمية.
+  // صنف بلا سعر نشط = رفض قبل أي كتابة: لا خصم ولا سجل صرف ولا حركة ولا تدقيق.
+  const unitPriceByInventoryId = await lockActiveSellingPrices(
+    client,
+    inventoryByMedication,
+  );
+
   // 5) قفل وتوزيع FEFO على نفس PoolClient — بأقصى المتاح دون تجاوز المتبقي
   const planned: {
     line: (typeof lines)[number];
@@ -269,6 +372,29 @@ const runDispensing = async (
   for (const line of lines) {
     const inventoryId = inventoryByMedication.get(line.item.medication_id)!.inventory_id;
     planned.push({ line, inventoryId, allocations: await allocateBestEffort(client, req, inventoryId, line.remaining) });
+  }
+
+  // 5a) Phase 10E.5 — تكلفة شراء كل دفعة مخصَّصة يجب أن تكون مجمَّدة، وإلا فلا COGS.
+  // التخصيصات الصفرية تُتجاهل هنا كما في الكاتب أدناه، فلا يُفحص إلا ما سيُكتب فعلاً.
+  // تكلفة دفعة NULL = تكلفة غير معروفة، ولا تُستبدل أبداً بتكلفة الدفعة الحالية
+  // ولا بصفر: الاستبدال الصامت يعيد كتابة تاريخ مالي لم يُسجَّل أصلاً.
+  // الرمي هنا قبل أي كتابة، فيسقط الصرف بالكامل بلا أثر جزئي.
+  for (const entry of planned) {
+    const missingCost = entry.allocations.filter(
+      (allocation) => allocation.allocation > 0 && allocation.unit_cost === null,
+    );
+    if (missingCost.length > 0) {
+      throw new DispensingError(
+        409,
+        ApiErrorCode.FORBIDDEN,
+        'تكلفة شراء إحدى دفعات الصرف غير مسجّلة — لا يمكن احتساب تكلفة البضاعة المباعة',
+        {
+          reason: 'MISSING_COST_SNAPSHOT',
+          prescription_item_id: entry.line.item.item_id,
+          batch_ids: missingCost.map((allocation) => allocation.batch_id).sort((a, b) => a - b),
+        },
+      );
+    }
   }
 
   // 5b) لا سجل صرف فارغ — إن لم يُخصم أي شيء فلا معنى لإنشاء معاملة
@@ -320,14 +446,18 @@ const runDispensing = async (
   const dispensingId = toNumber(header.rows[0].dispensing_id);
 
   // 7) بنود الصرف وتخصيصاتها — صف لكل بند، مع حفظ الحساب الدقيق
+  // تكلفة البضاعة المباعة لكل بند، كما أعادتها قاعدة البيانات لا كما حُسبت في JS
+  const cogsByItem = new Map<number, string>();
+  const fulfilmentByItem = new Map<number, string>();
   for (const entry of planned) {
     const currentDispensed = dispensedByItem.get(entry.line.item.item_id) ?? 0;
     const finalRemaining = round3(entry.line.item.prescribed_quantity! - entry.line.prior - currentDispensed);
     const itemInsert = await client.query(
       `INSERT INTO dispensing_items
          (dispensing_id, prescription_item_id, medication_id, inventory_item_id,
-          prescribed_quantity, dispensed_quantity, remaining_quantity, uom, cycle_index)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          prescribed_quantity, dispensed_quantity, remaining_quantity, uom, cycle_index,
+          unit_price_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING dispensing_item_id`,
       [
         dispensingId,
@@ -339,6 +469,9 @@ const runDispensing = async (
         finalRemaining,
         entry.line.item.uom,
         entry.line.cycleIndex,
+        // لقطة واحدة لكل بند صرف، مهما كان عدد الدفعات التي|kmّلت بنداً واحداً.
+        // تُكتب عند الإدراج فقط، فلا يُعاد كتابتها أبداً.
+        unitPriceByInventoryId.get(entry.inventoryId) ?? null,
       ],
     );
     const dispensingItemId = toNumber(itemInsert.rows[0].dispensing_item_id);
@@ -353,6 +486,61 @@ const runDispensing = async (
         [dispensingItemId, allocation.batch_id, allocation.allocation, allocation.unit_cost, allocation.expiry_date],
       );
     }
+
+    // 7b) Phase 10E.5 — تكلفة البضاعة المباعة لهذا البند.
+    //
+    // تُشتق من صفوف التخصيص التي كُتبت للتو، فتبقى الكمية المجمَّدة مشتقة من
+    // مصدر واحد: SUM(quantity × unit_cost_snapshot) على دفعات FEFO كلها التي
+    // أكّمت هذا البند. الحساب في SQL لا في JS لأن NUMERIC أدق من IEEE-754،
+    // فتبقى الكمية قابلة للتسوية حسابياً على صفوف التخصيص نفسها.
+    //
+    // صفر بند لم يُخصم منه شيء = تكلفة صفر، لا NULL: COALESCE يميّز ذلك عن
+    // "غير محتسب" الذي يبقى NULL لصفوف ما قبل 10E.5، وتكلفة NULL مرفوضة في 5a.
+    const cogsRow = await client.query(
+      `UPDATE dispensing_items di
+       SET cogs_amount = COALESCE((
+             SELECT SUM(dib.quantity * dib.unit_cost_snapshot)
+             FROM dispensing_item_batches dib
+             WHERE dib.dispensing_item_id = di.dispensing_item_id
+           ), 0)
+       WHERE di.dispensing_item_id = $1
+       RETURNING cogs_amount`,
+      [dispensingItemId],
+    );
+    cogsByItem.set(entry.line.item.item_id, cogsRow.rows[0].cogs_amount);
+    // Phase 10F.1 — الحالة مشتقّة من المتبقي المحسوب فعلاً في هذه الحلقة، لا من
+    // رأس الصرف: بند انتهى متبقيه ⇒ صُرف كاملاً، وإلا فصُرف جزء منه.
+    fulfilmentByItem.set(
+      entry.line.item.item_id,
+      finalRemaining <= 0 ? 'DISPENSED_FROM_CLINIC' : 'PARTIALLY_DISPENSED',
+    );
+  }
+
+  // 7c) Phase 10F.2 — مزامنة حالة التنفيذ على بنود الروشتة. إضافة فقط: البند
+  // يحمل الآن ما حدث فعلاً داخل هذه المعاملة. decision_note و decided_by_user_id
+  // و decided_at لا تُمَسّ — ذلك سجل قرار المريض، لا نتيجة صرف.
+  //
+  // مصدر الصرف يُثبَّت على CLINIC لأن الكمية خرجت من مخزون هذه العيادة، وهو
+  // حقيقة صرف لا اختيار للمريض.
+  //
+  // لا يمكن هنا تجاوز حالة قرار مسجَّلة: الحارس في الخطوة 2b يرفض
+  // الصرف أصلاً لو كان أي بند PENDING أو EXTERNAL_PHARMACY أو PATIENT_DECLINED أو CANCELLED،
+  // والصفوف مقفلة FOR UPDATE أعلاه فلا تتغيّر تحتها.
+  if (fulfilmentByItem.size > 0) {
+    const syncParams: unknown[] = [];
+    const syncValues = [...fulfilmentByItem.entries()]
+      .map(([itemId, fulfilmentStatus]) => {
+        syncParams.push(itemId, fulfilmentStatus);
+        return `($${syncParams.length - 1}::int, $${syncParams.length}::text)`;
+      })
+      .join(', ');
+    await client.query(
+      `UPDATE prescription_items pi
+       SET fulfilment_status = v.fulfilment_status, source = 'CLINIC'
+       FROM (VALUES ${syncValues}) AS v(item_id, fulfilment_status)
+       WHERE pi.item_id = v.item_id`,
+      syncParams,
+    );
   }
 
   // 8) خصم المخزون من الدفعات المقفلة — بحارس يمنع السالب
@@ -419,6 +607,12 @@ const runDispensing = async (
           cycle_index: entry.line.cycleIndex,
           max_cycles: entry.line.maxCycles,
           cycle_state: isCompleted ? 'COMPLETED' : 'PARTIAL',
+          // لقطة سعر البيع المجمّدة — تُقرأ من الصف المُدرج لا من السعر الحالي،
+          // فتبقى صادقة مهما تغيّر السعر لاحقاً.
+          unit_price_snapshot: unitPriceByInventoryId.get(entry.inventoryId) ?? null,
+          // تكلفة البضاعة المباعة — من لقطات تكلفة الدفعات المخصَّصة، لا من
+          // تكلفة الدفعة الحالية، فتبقى صادقة مهما تغيّرت التكلفة لاحقاً.
+          cogs_amount: cogsByItem.get(entry.line.item.item_id) ?? null,
           batches: entry.allocations
             .filter((allocation) => allocation.allocation > 0)
             .map((allocation) => ({
@@ -454,6 +648,9 @@ const runDispensing = async (
           uom: entry.line.item.uom,
           cycle_index: entry.line.cycleIndex,
           max_cycles: entry.line.maxCycles,
+          unit_price_snapshot: unitPriceByInventoryId.get(entry.inventoryId) ?? null,
+          // تكلفة البضاعة المباعة من لقطات تكلفة الدفعات — Phase 10E.5
+          cogs_amount: cogsByItem.get(entry.line.item.item_id) ?? null,
           batches: entry.allocations
             .filter((allocation) => allocation.allocation > 0)
             .map((allocation) => ({

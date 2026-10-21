@@ -17,6 +17,7 @@ import {
   updateRepeatAuthorization,
   cancelRepeatAuthorization,
 } from './repeatAuthorizations.controller';
+import { recordFulfilmentDecision } from './fulfilmentDecisions.controller';
 
 const router = Router();
 
@@ -42,6 +43,12 @@ router.get('/items/:itemId/repeat-authorization', requirePermission('VIEW_PRESCR
 router.post('/items/:itemId/repeat-authorization', requirePermission('CREATE_PRESCRIPTION'), createRepeatAuthorization);
 router.put('/items/:itemId/repeat-authorization', requirePermission('CREATE_PRESCRIPTION'), updateRepeatAuthorization);
 router.delete('/items/:itemId/repeat-authorization', requirePermission('CREATE_PRESCRIPTION'), cancelRepeatAuthorization);
+
+// --- قرار المريض بشأن التنفيذ (Phase 10F.1) ---
+// صلاحية مستقلة (Phase 10F.2) لا CREATE_PRESCRIPTION: تسجيل رأي المريض ليس
+// كتابة روشتة، والصيدلي الذي يسأل المريض في الصيدلية لا يملك CREATE_PRESCRIPTION.
+// الفعل الوحيد المُمنح هو تسجيل القرار — لا صرف ولا فاتورة ولا خصم مخزون.
+router.patch('/items/:id/fulfilment', requirePermission('RECORD_PRESCRIPTION_FULFILMENT'), recordFulfilmentDecision);
 
 // العرض من داخل ملف المريض متاح لأي دور يملك عرض المرضى (طبيب/ممرض/استقبال)، مع فحص العيادة داخل الكنترولر
 router.get('/:id', requirePermission('VIEW_PATIENTS'), getPrescriptionById);

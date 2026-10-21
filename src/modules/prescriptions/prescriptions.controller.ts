@@ -4,6 +4,32 @@ import { ApiErrorCode } from '../../utils/apiErrors';
 import { AuthenticatedRequest, accessibleClinicIds, canManageAllClinics } from '../../middlewares/auth.middleware';
 import { isDosageForm, type DosageFormCode } from '../../lib/dosageForm';
 
+/* ==========================================================================
+ * Phase 10G.6 — prescription business errors
+ *
+ * The old catch block at the bottom of createPrescription swallowed EVERYTHING
+ * — the controller's own "visit does not belong to you" rejection, a bad
+ * medication_id, a CHECK violation — into one 500 INTERNAL_ERROR with a
+ * constant Arabic string. Nothing the client could act on, nothing the logs
+ * could disambiguate without a live DB.
+ *
+ * These are operational rejections, not server faults. They carry their own
+ * status + code so the global error handler (`app.ts:103`) emits a uniform
+ * { message, code } body, and so the client can localize by code instead of
+ * parsing a raw message string.
+ * ========================================================================== */
+
+class PrescriptionError extends Error {
+  status: number;
+  code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
 // 1. إضافة دواء جديد إلى الدليل الشامل للأدوية
 export const createMedication = async (req: AuthenticatedRequest, res: Response) => {
   const { trade_name, scientific_name, default_dosage, instructions, strength, dosage_form } = req.body;
@@ -196,7 +222,15 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
       [visit_id, patient_id, clinic_id, doctor_id]
     );
     if (visitOwnership.rows.length !== 1) {
-      throw new Error('الزيارة لا تنتمي إلى المريض أو العيادة أو الطبيب الحالي');
+      // Phase 10G.6: رفض تشغيلي معروف — لا يُحَوَّل إلى 500.
+      // ال visiting لا تنتمي للمريض/العيادة/طبيب التسجيل: إما أن الطبيب
+      // اخترى visit من عيادة أخرى (قائمة الزيارات لا تُصفّي بـ doctor_id)،
+      // أو أن المريض/العيادة غير متطابقين. كلاهما خطأ عميل، وليست خدمة.
+      throw new PrescriptionError(
+        409,
+        ApiErrorCode.PRESCRIPTION_VISIT_OWNERSHIP,
+        'الزيارة لا تنتمي إلى المريض أو العيادة أو الطبيب الحالي',
+      );
     }
 
     // إنشاء السجل الرئيسي للروشتة
@@ -216,7 +250,11 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
       const { medication_id, dosage, frequency, duration, timing_instructions, repeats_count, prescribed_quantity, uom } = item;
 
       if (!medication_id || !dosage || !frequency || !duration) {
-        throw new Error('بيانات الدواء في الروشتة غير مكتملة');
+        throw new PrescriptionError(
+          400,
+          ApiErrorCode.PRESCRIPTION_INVALID_ITEM,
+          'بيانات الدواء في الروشتة غير مكتملة',
+        );
       }
 
       await client.query(
@@ -244,7 +282,28 @@ export const createPrescription = async (req: AuthenticatedRequest, res: Respons
       prescription_id: prescriptionId,
     });
   } catch (error: any) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => undefined);
+
+    // Phase 10G.6: رفضات تشغيلية معروفة تُreturns بـ code مستقر بدلاً من INTERNAL_ERROR.
+    if (error instanceof PrescriptionError) {
+      return res.status(error.status).json({ message: error.message, code: error.code });
+    }
+
+    // Phase 10G.6: أخطاء قاعدة بيانات معروفة تُpreferences بـ code تطبيقي آمن.
+    // لا تُ exposing table names أو constraint names أو SQL أو PostgreSQL messages.
+    if (error && error.code === '23503') {
+      return res.status(409).json({
+        message: 'مفتاح الدواء المطلوب غير موجود أو غير صحيح',
+        code: ApiErrorCode.PRESCRIPTION_INVALID_REFERENCE,
+      });
+    }
+    if (error && error.code === '23514') {
+      return res.status(409).json({
+        message: 'قيم بند الروشتة غير صحيحة (الكمية يجب أن تكون موجبة، والحدة القياسية معروفة)',
+        code: ApiErrorCode.PRESCRIPTION_INVALID_ITEM,
+      });
+    }
+
     console.error('Create Prescription Error:', error.message, `requestId=${(req as any).requestId || 'unknown'}`);
     return res.status(500).json({ message: 'حدث خطأ أثناء إنتاج الروشتة', code: ApiErrorCode.INTERNAL_ERROR });
   } finally {
@@ -299,6 +358,7 @@ export const getPrescriptionById = async (req: AuthenticatedRequest, res: Respon
     const itemsQuery = await pool.query(
       `SELECT pi.item_id, pi.dosage, pi.frequency, pi.duration, pi.timing_instructions, pi.repeats_count,
               pi.prescribed_quantity, pi.uom,
+              pi.fulfilment_status, pi.decision_note, pi.decided_by_user_id, pi.decided_at, pi.source,
               m.trade_name, m.scientific_name, m.strength, m.dosage_form
        FROM prescription_items pi
        JOIN medications m ON pi.medication_id = m.medication_id
@@ -350,6 +410,11 @@ export const getPharmacyQueue = async (req: AuthenticatedRequest, res: Response)
             'repeats_count', pi.repeats_count,
             'prescribed_quantity', pi.prescribed_quantity,
             'uom', pi.uom,
+            'fulfilment_status', pi.fulfilment_status,
+            'decision_note', pi.decision_note,
+            'decided_by_user_id', pi.decided_by_user_id,
+            'decided_at', pi.decided_at,
+            'source', pi.source,
             'trade_name', m.trade_name,
             'scientific_name', m.scientific_name,
             'strength', m.strength,

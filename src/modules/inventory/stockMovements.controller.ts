@@ -7,6 +7,7 @@ import {
   stockMovementCreateSchema,
   stockMovementListQuerySchema,
   isStockIncreasing,
+  FORBIDDEN_STOCK_MOVEMENT_FIELDS,
   DEFAULT_STOCK_MOVEMENT_LIMIT,
   type StockMovementType,
   type StockMovementListQuery,
@@ -87,6 +88,19 @@ const buildMovementFilters = (query: StockMovementListQuery): { clause: string; 
   if (query.reference_id !== undefined) add('sm.reference_id', query.reference_id);
   if (query.performed_by_user_id !== undefined) add('sm.performed_by_user_id', query.performed_by_user_id);
 
+  if (query.created_from !== undefined) {
+    params.push(query.created_from);
+    conditions.push(`sm.created_at >= $${params.length}`);
+  }
+
+  if (query.created_to !== undefined) {
+    // For inclusive end date, add 1 day to capture the full day
+    const toDate = new Date(query.created_to);
+    toDate.setDate(toDate.getDate() + 1);
+    params.push(toDate);
+    conditions.push(`sm.created_at < $${params.length}`);
+  }
+
   return { clause: conditions.length ? ` AND ${conditions.join(' AND ')}` : '', params };
 };
 
@@ -102,6 +116,14 @@ export const listStockMovements = async (req: AuthenticatedRequest, res: Respons
   try {
     const scope = buildClinicScope(req, filters.params, 'i.clinic_id');
     const nextPlaceholder = scope.params.length + 1;
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total ${MOVEMENT_JOINS}
+       WHERE i.deleted_at IS NULL${filters.clause}${scope.clause}`,
+      scope.params,
+    );
+    const total = countResult.rows[0]?.total ?? 0;
+
     const result = await pool.query(
       `SELECT ${MOVEMENT_COLUMNS} ${MOVEMENT_JOINS}
        WHERE i.deleted_at IS NULL${filters.clause}${scope.clause}
@@ -112,7 +134,7 @@ export const listStockMovements = async (req: AuthenticatedRequest, res: Respons
 
     return res.status(200).json({
       movements: result.rows,
-      pagination: { limit, offset, returned: result.rows.length },
+      pagination: { limit, offset, returned: result.rows.length, total },
     });
   } catch (error) {
     console.error('List Stock Movements Error:', error);
@@ -148,13 +170,24 @@ export const getStockMovement = async (req: AuthenticatedRequest, res: Response)
 
 // تسجيل حركة مخزون وتحديث كمية الدفعة داخل معاملة واحدة
 export const createStockMovement = async (req: AuthenticatedRequest, res: Response) => {
-  const parsed = stockMovementCreateSchema.safeParse(req.body ?? {});
+  const rawBody = (req.body ?? {}) as Record<string, unknown>;
+
+  // أي حقل يُشتق على الخادم في الجسم = تزوير، ويُرفض قبل أي وصول لقاعدة البيانات
+  // (performed_by_user_id من المستخدم الموثَّق، والطوابع من قاعدة البيانات)
+  const forbiddenField = FORBIDDEN_STOCK_MOVEMENT_FIELDS.find((field) => rawBody[field] !== undefined);
+  if (forbiddenField !== undefined) {
+    return validationError(res, `الحقل ${forbiddenField} غير مقبول في طلب حركة المخزون — هذه القيم تُشتق على الخادم`);
+  }
+
+  const parsed = stockMovementCreateSchema.safeParse(rawBody);
   if (!parsed.success) return validationError(res, 'بيانات حركة المخزون غير صالحة');
   const body = parsed.data;
 
   const isIncrease = isStockIncreasing(body.movement_type);
   // من المستخدم الموثَّق دائماً — لا يُقرأ من جسم الطلب إطلاقاً
   const performedByUserId = req.user?.userId ?? null;
+  // مفتاح التكرار — يُستخدم فقط لعمليات RECEIPT
+  const idempotencyKey = body.idempotency_key ?? null;
 
   let client: PoolClient | null = null;
   try {
@@ -175,6 +208,41 @@ export const createStockMovement = async (req: AuthenticatedRequest, res: Respon
     if (locked.rows.length === 0) {
       await client.query('ROLLBACK');
       return batchNotFound(res);
+    }
+
+    // 0) Early replay check for keyed RECEIPT operations
+    // Must be done AFTER acquiring the batch lock to serialize with concurrent requests
+    // Unique index is on idempotency_key for RECEIPT, so query by key alone
+    if (idempotencyKey !== null && body.movement_type === 'RECEIPT') {
+      const existing = await client.query(
+        `SELECT movement_id, batch_id, movement_type, quantity, reference_type, reference_id,
+                performed_by_user_id, notes, created_at
+         FROM stock_movements
+         WHERE idempotency_key = $1 AND movement_type = 'RECEIPT'
+         LIMIT 1`,
+        [idempotencyKey],
+      );
+      if (existing.rows.length > 0) {
+        const existingMovement = existing.rows[0];
+        // Verify this is the same operation (same batch, quantity, reference)
+        if (Number(existingMovement.batch_id) !== body.batch_id ||
+            Number(existingMovement.quantity) !== body.quantity ||
+            (existingMovement.reference_type ?? null) !== (body.reference_type ?? null) ||
+            (existingMovement.reference_id ?? null) !== (body.reference_id ?? null)) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            message: 'مفتاح التكرار مستخدم لعملية استلام مختلفة',
+            code: ApiErrorCode.FORBIDDEN,
+          });
+        }
+        await client.query('ROLLBACK');
+        return res.status(200).json({
+          message: 'سبق تسجيل هذه الحركة بنفس مفتاح التكرار',
+          idempotent_replay: true,
+          movement: existingMovement,
+          quantityOnHand: Number(locked.rows[0].quantity_on_hand),
+        });
+      }
     }
 
     const available = Number(locked.rows[0].quantity_on_hand);
@@ -206,22 +274,72 @@ export const createStockMovement = async (req: AuthenticatedRequest, res: Respon
       return batchNotFound(res);
     }
 
-    const inserted = await client.query(
-      `INSERT INTO stock_movements
-         (batch_id, movement_type, quantity, reference_type, reference_id, performed_by_user_id, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING movement_id, batch_id, movement_type, quantity, reference_type, reference_id,
-                 performed_by_user_id, notes, created_at`,
-      [
-        body.batch_id,
-        body.movement_type,
-        body.quantity,
-        body.reference_type ?? null,
-        body.reference_id ?? null,
-        performedByUserId,
-        body.notes ?? null,
-      ],
-    );
+    // 1) Insert under a savepoint: a unique-index collision with a concurrent
+    //    request carrying the same key is caught here instead of taking the whole
+    //    transaction down, and is then read as a replay rather than a 500.
+    let inserted: { rows: any[] };
+    try {
+      await client.query('SAVEPOINT insert_movement');
+      inserted = await client.query(
+        `INSERT INTO stock_movements
+           (batch_id, movement_type, quantity, reference_type, reference_id, performed_by_user_id, notes, idempotency_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING movement_id, batch_id, movement_type, quantity, reference_type, reference_id,
+                   performed_by_user_id, notes, created_at, idempotency_key`,
+        [
+          body.batch_id,
+          body.movement_type,
+          body.quantity,
+          body.reference_type ?? null,
+          body.reference_id ?? null,
+          performedByUserId,
+          body.notes ?? null,
+          idempotencyKey,
+        ],
+      );
+      await client.query('RELEASE SAVEPOINT insert_movement');
+    } catch (insertError: any) {
+      await client.query('ROLLBACK TO SAVEPOINT insert_movement');
+      if (insertError?.code === '23505' && idempotencyKey !== null && body.movement_type === 'RECEIPT') {
+        const existing = await client.query(
+          `SELECT movement_id, batch_id, movement_type, quantity, reference_type, reference_id,
+                  performed_by_user_id, notes, created_at, idempotency_key
+           FROM stock_movements
+           WHERE idempotency_key = $1 AND movement_type = 'RECEIPT'
+           LIMIT 1`,
+          [idempotencyKey],
+        );
+        // Re-lock the batch to get the current quantity after the other transaction committed
+        const relocked = await client.query(
+          `SELECT b.quantity_on_hand
+           FROM inventory_batches b
+           JOIN inventory_items i ON i.inventory_id = b.inventory_id
+           WHERE b.batch_id = $1 AND i.deleted_at IS NULL${lockScope.clause}`,
+          lockScope.params,
+        );
+        await client.query('ROLLBACK');
+        if (existing.rows.length > 0) {
+          const existingMovement = existing.rows[0];
+          // Verify this is the same operation (same batch, quantity, reference)
+          if (Number(existingMovement.batch_id) !== body.batch_id ||
+              Number(existingMovement.quantity) !== body.quantity ||
+              (existingMovement.reference_type ?? null) !== (body.reference_type ?? null) ||
+              (existingMovement.reference_id ?? null) !== (body.reference_id ?? null)) {
+            return res.status(409).json({
+              message: 'مفتاح التكرار مستخدم لعملية استلام مختلفة',
+              code: ApiErrorCode.FORBIDDEN,
+            });
+          }
+          return res.status(200).json({
+            message: 'سبق تسجيل هذه الحركة بنفس مفتاح التكرار',
+            idempotent_replay: true,
+            movement: existingMovement,
+            quantityOnHand: relocked.rows.length > 0 ? Number(relocked.rows[0].quantity_on_hand) : nextQuantity,
+          });
+        }
+      }
+      throw insertError;
+    }
 
     await client.query('COMMIT');
     return res.status(201).json({

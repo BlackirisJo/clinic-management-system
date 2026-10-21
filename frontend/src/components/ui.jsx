@@ -70,14 +70,15 @@ export function Notice({ kind = 'error', children }) {
 }
 
 // ترقيم صفحات بسيط يعتمد على حجم الصفحة الحالية
-export function Paginator({ page, rows, limit, onPage }) {
+export function Paginator({ page, rows, limit, onPage, total }) {
   const t = useT()
   if (!rows || rows.length === 0) return null
-  const hasNext = rows.length >= (limit || 50)
+  const hasNext = total !== undefined ? page * limit < total : rows.length >= (limit || 50)
+  const totalPages = total !== undefined ? Math.ceil(total / (limit || 50)) : null
   return (
     <div className="pagination">
       <button type="button" className="secondary-button compact" disabled={page <= 1} onClick={() => onPage(page - 1)}>{t('common.pagination.prev')}</button>
-      <span>{t('common.pagination.page', { page })}</span>
+      <span>{t('common.pagination.page', { page })} {totalPages ? t('common.pagination.of', { total: totalPages }) : ''}</span>
       <button type="button" className="secondary-button compact" disabled={!hasNext} onClick={() => onPage(page + 1)}>{t('common.pagination.next')}</button>
     </div>
   )

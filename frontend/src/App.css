@@ -143,15 +143,16 @@
 .invoice-sheet .inv-status.partial{background:#fff7e0;color:#8a6d1a}
 .invoice-sheet .inv-footer{margin-top:12px;font-size:11px;color:#536467;display:flex;justify-content:space-between}
 
-/* حماية طباعة نظيفة: اطبع الفاتورة فقط */
+/* حماية طباعة نظيفة: اطبع الفاتورة أو الروشتة فقط */
 @media print{
   @page{size:A4;margin:12mm}
   body *{visibility:hidden}
-  .invoice-sheet,.invoice-sheet *{visibility:visible}
-  .invoice-sheet{position:absolute;inset-inline-start:0;top:0;width:100%;padding:0}
+  .invoice-sheet,.invoice-sheet *,
+  .prescription-paper,.prescription-paper *{visibility:visible}
+  .invoice-sheet,.prescription-paper{position:absolute;inset-inline-start:0;top:0;width:100%;padding:0}
   .modal-backdrop{position:static;background:#fff;padding:0}
   .modal-card{box-shadow:none;border:none;max-height:none;width:100%;max-width:none;margin:0}
-  .modal-header,.modal-close,.invoice-print-actions{display:none !important}
+  .modal-header,.modal-close,.invoice-print-actions,.paper-actions{display:none !important}
 }
 
 /* ===== ????? ??????????: ?????? ???????? ===== */
@@ -193,4 +194,19 @@
 .ss-state{display:flex;align-items:center;gap:8px;padding:10px 11px;color:#9aa8a7;font-size:11px}
 .ss-state.error{background:#fbe9e7;border-radius:8px;color:#a6554b}
 .ss-more{border-top:1px dashed var(--line);margin-top:4px;padding:8px 11px 4px;color:#a0acab;font-size:10px}
+
+/* ===== Batch Receipt Modal Styles ===== */
+.input-error{border-color:#a6554b!important;background:#fef8f7}
+.input-error:focus{border-color:#a6554b!important;box-shadow:0 0 0 3px #a6554b25!important}
+.field-error{display:block;color:#a6554b;font-size:11px;margin-top:5px;font-weight:500}
+
+/* ===== تقويم العطل الرسمية ===== */
+.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:18px}
+.calendar-grid-head{text-align:center;font-size:11px;color:#7b8a8c;padding:4px 0}
+.calendar-cell{min-height:74px;border:1px solid var(--line);border-radius:9px;padding:6px;background:#fff;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+.calendar-cell.muted{background:#f6f9f8;opacity:.6}
+.calendar-day-number{font-size:11px;color:#536467}
+.chip-holiday{background:#fdf0e3;border-color:#ecd3b0;color:#8a5a1d;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plain-list{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:3px;font-size:12px}
+.muted-text{color:#8b9a9b;font-size:12px;margin:0 0 12px}
 

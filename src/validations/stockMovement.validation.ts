@@ -20,7 +20,7 @@ export const STOCK_MOVEMENT_TYPES = [
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 
 // quantity دائماً موجبة، والاتجاه يحدده movement_type.
-// ADJUSTMENT يظل زيادة فقط有一段ه: القيود أضيفت ADJUSTMENT_DECREASE منفصلاً
+// ADJUSTMENT يظل زيادة فقطهناك: القيود أضيفت ADJUSTMENT_DECREASE منفصلاً
 // (migration 033) بدل قلب معنى ADJUSTMENT أو إضافة عمود اتجاه/إشارة.
 export const STOCK_INCREASING_TYPES: readonly StockMovementType[] = ['RECEIPT', 'RETURN', 'ADJUSTMENT'];
 export const STOCK_DECREASING_TYPES: readonly StockMovementType[] = [
@@ -61,9 +61,31 @@ export const stockMovementCreateSchema = z.object({
   reference_id: optionalText(100, 'معرّف المرجع طويل جداً'),
   notes: optionalText(5000, 'الملاحظات طويلة جداً'),
   // performed_by_user_id مقصود عدم وجوده: يُؤخذ من المستخدم الموثَّق دائماً
+  // idempotency_key: اختياري — مفتاح منع التكرار لعمليات RECEIPT.
+  // الفهرس الفريد الجزئي على (batch_id, idempotency_key) WHERE movement_type='RECEIPT'
+  // هو الضمان الحقيقي، وهذا الحقل هو مرساه. غيابه لا يمنع تسجيل حركة.
+  idempotency_key: z.string().trim().min(1).max(64).optional(),
 });
 
 export type StockMovementCreateInput = z.infer<typeof stockMovementCreateSchema>;
+
+/**
+ * حقول يُرفض وجودها في جسم طلب تسجيل حركة مخزون. كل منها يُشتق على الخادم:
+ *   - movement_id          مُولَّد من التسلسل
+ *   - performed_by_user_id من المستخدم الموثَّق دائماً
+ *   - created_at           طابع قاعدة البيانات
+ *   - received_at / original_received_at لا وجود لهما في stock_movements
+ *     أصلاً — استلام الدفعة يولّد received_at عبر الخادم (migration 029)
+ * تُرفض قبل أي وصول لقاعدة البيانات ولا تُتجاهل بصمت.
+ */
+export const FORBIDDEN_STOCK_MOVEMENT_FIELDS = [
+  'movement_id',
+  'performed_by_user_id',
+  'received_at',
+  'original_received_at',
+  'created_at',
+  'updated_at',
+] as const;
 
 /* ==========================================================================
  * Phase 10B.3B — قراءة/تدقيق حركات المخزون (قراءة فقط)
@@ -85,6 +107,12 @@ const optionalQueryText = (max: number) =>
     z.string().trim().min(1).max(max),
   ).optional();
 
+const optionalQueryDate = (message: string) =>
+  z.preprocess(
+    (value) => (value === '' || value === undefined || value === null ? undefined : value),
+    z.coerce.date().optional(),
+  ).optional();
+
 export const stockMovementListQuerySchema = z.object({
   batch_id: optionalQueryInt(1, Number.MAX_SAFE_INTEGER, 'معرّف الدفعة غير صالح'),
   movement_type: z.preprocess(
@@ -94,9 +122,19 @@ export const stockMovementListQuerySchema = z.object({
   reference_type: optionalQueryText(50),
   reference_id: optionalQueryText(100),
   performed_by_user_id: optionalQueryInt(1, Number.MAX_SAFE_INTEGER, 'معرّف المستخدم غير صالح'),
+  created_from: optionalQueryDate('تاريخ الحركة من غير صالح'),
+  created_to: optionalQueryDate('تاريخ الحركة إلى غير صالح'),
   limit: optionalQueryInt(1, MAX_STOCK_MOVEMENT_LIMIT, `الحد يجب أن يكون بين 1 و ${MAX_STOCK_MOVEMENT_LIMIT}`),
   offset: optionalQueryInt(0, Number.MAX_SAFE_INTEGER, 'البداية يجب أن تكون 0 أو أكثر'),
   // clinic_id غير مُعرَّف هنا عمداً: أي قيمة ترسل من العميل تُهمَل ولا تُستخدم في الاستعلام
-});
+}).refine(
+  (data) => {
+    if (data.created_from && data.created_to) {
+      return data.created_from <= data.created_to;
+    }
+    return true;
+  },
+  { message: 'تاريخ الحركة من يجب أن يكون قبل أو يساوي تاريخ الحركة إلى', path: ['created_from'] },
+);
 
 export type StockMovementListQuery = z.infer<typeof stockMovementListQuerySchema>;
