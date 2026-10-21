@@ -202,6 +202,7 @@ function AddMedicationModal({ onClose, onSaved, editMed }) {
 }
 function PrescriptionsTab() {
   const t = useT()
+  const { user } = useAuth()
   const [patientId, setPatientId] = useState('')
   const [visits, setVisits] = useState(null)
   const [visitId, setVisitId] = useState('')
@@ -210,14 +211,24 @@ function PrescriptionsTab() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState(null)
+  const [decisionDialogOpen, setDecisionDialogOpen] = useState(false)
+  const [decisionItemIndex, setDecisionItemIndex] = useState(-1)
+  const [decisionSaving, setDecisionSaving] = useState(false)
 
   // المرضى والأدوية يُجلَبان من جهة الخادم عند البحث (SearchSelect) بدل تحميل أول 100/50 فقط
   useEffect(() => {
     if (!patientId) { setVisits(null); setVisitId(''); return }
     api.patients.visits(patientId)
-      .then((r) => setVisits(r.visits || []))
+      .then((r) => {
+        const all = r.visits || []
+        // تصفية الزيارات: للأطباء يُعرض زياراتهم فقط؛ للأدوار المُرتفعة (مدير/صلاحيات عريضة) جميع الزيارات
+        const isDoctor = user?.roleName === 'DOCTOR'
+        const isElevated = user?.roleName === 'SUPER_ADMIN' || user?.roleName === 'SYSTEM_ADMIN' || user?.permissions?.includes('MANAGE_SERVICES')
+        const filtered = (isDoctor && !isElevated) ? all.filter((v) => Number(v.doctor_id) === Number(user?.userId)) : all
+        setVisits(filtered)
+      })
       .catch(() => { setVisits([]); setError(t('prescriptions.load.error')) })
-  }, [patientId])
+  }, [patientId, user])
 
   // تغيير المريض يُبطل الزيارة المختارة سابقًا (الزيارة تخص مريضًا واحدًا)
   function changePatient(id) {
@@ -227,7 +238,7 @@ function PrescriptionsTab() {
   }
 
   function addItem() {
-    setItems((prev) => [...prev, { medication_id: '', dosage: '', frequency: '', duration: '', timing_instructions: '', repeats_count: 1, prescribed_quantity: '', uom: '' }])
+    setItems((prev) => [...prev, { medication_id: '', dosage: '', frequency: '', duration: '', timing_instructions: '', repeats_count: 1, prescribed_quantity: '', uom: '', fulfilment_status: 'PENDING', decision_note: '' }])
   }
 
   function updateItem(index, key, value) {
@@ -236,6 +247,34 @@ function PrescriptionsTab() {
 
   function removeItem(index) {
     setItems((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function openDecisionDialog(index) {
+    setDecisionItemIndex(index)
+    setDecisionDialogOpen(true)
+  }
+
+  async function handleDecisionSave(decisionData) {
+    setDecisionSaving(true)
+    try {
+      const item = items[decisionItemIndex]
+      // For new prescriptions (not yet saved), just update local state
+      if (!item.item_id) {
+        updateItem(decisionItemIndex, 'fulfilment_status', decisionData.fulfilment_status)
+        updateItem(decisionItemIndex, 'decision_note', decisionData.decision_note || '')
+        setDecisionDialogOpen(false)
+        return
+      }
+      // For existing prescription items, call the API
+      await api.prescriptions.setItemFulfilment(item.item_id, decisionData)
+      updateItem(decisionItemIndex, 'fulfilment_status', decisionData.fulfilment_status)
+      updateItem(decisionItemIndex, 'decision_note', decisionData.decision_note || '')
+      setDecisionDialogOpen(false)
+    } catch (err) {
+      setError(err.message || t('prescriptions.fulfilment.error'))
+    } finally {
+      setDecisionSaving(false)
+    }
   }
 
   async function submit(e) {
@@ -316,6 +355,25 @@ function PrescriptionsTab() {
                   <Field label={t('prescriptions.timing')}><input placeholder={t('prescriptions.timing.placeholder')} value={it.timing_instructions} onChange={(e) => updateItem(i, 'timing_instructions', e.target.value)} /></Field>
                   <Field label={t('prescriptions.repeats')}><input type="number" min="1" value={it.repeats_count} onChange={(e) => updateItem(i, 'repeats_count', e.target.value)} /></Field>
                 </div>
+                <div className="form-row">
+                  <Field label={t('prescriptions.fulfilment.decisionLabel')}>
+                    <select value={it.fulfilment_status || 'PENDING'} onChange={(e) => updateItem(i, 'fulfilment_status', e.target.value)}>
+                      <option value="PENDING">{t('prescriptions.fulfilment.status.PENDING')}</option>
+                      <option value="CLINIC_DISPENSING">{t('prescriptions.fulfilment.status.CLINIC_DISPENSING')}</option>
+                      <option value="EXTERNAL_PHARMACY">{t('prescriptions.fulfilment.status.EXTERNAL_PHARMACY')}</option>
+                      <option value="PATIENT_DECLINED">{t('prescriptions.fulfilment.status.PATIENT_DECLINED')}</option>
+                      <option value="CANCELLED">{t('prescriptions.fulfilment.status.CANCELLED')}</option>
+                    </select>
+                  </Field>
+                  <Field label={t('prescriptions.fulfilment.noteLabel')}>
+                    <input
+                      placeholder={t('prescriptions.fulfilment.notePlaceholder')}
+                      value={it.decision_note || ''}
+                      onChange={(e) => updateItem(i, 'decision_note', e.target.value)}
+                      maxLength={500}
+                    />
+                  </Field>
+                </div>
                 <button type="button" className="text-button danger" onClick={() => removeItem(i)}>{t('prescriptions.remove')}</button>
               </div>
             ))}
@@ -329,6 +387,17 @@ function PrescriptionsTab() {
       </form>
 
       {created && <PrescriptionDetailModal prescription={created} onClose={() => setCreated(null)} />}
+      {decisionDialogOpen && decisionItemIndex >= 0 && items[decisionItemIndex] && (
+        <FulfilmentDecisionDialog
+          isOpen={decisionDialogOpen}
+          onClose={() => { setDecisionDialogOpen(false); setDecisionItemIndex(-1); }}
+          onSave={handleDecisionSave}
+          initialStatus={items[decisionItemIndex].fulfilment_status || 'PENDING'}
+          initialNote={items[decisionItemIndex].decision_note || ''}
+          itemLabel={t('prescriptions.fulfilment.dialogItemLabel', { medication: items[decisionItemIndex].trade_name || '' })}
+          saving={decisionSaving}
+        />
+      )}
     </div>
   )
 }
@@ -350,11 +419,11 @@ function PrescriptionDetailModal({ prescription, onClose }) {
         </div>
         {data.notes ? <div className="paper-notes"><b>{t('patients.prescriptionItems.notesLabel')}</b> {data.notes}</div> : null}
         <table>
-              <thead><tr><th>#</th><th>{t('prescriptions.detail.medication')}</th><th>{t('prescriptions.detail.dosage')}</th><th>{t('prescriptions.detail.strength')}</th><th>{t('prescriptions.detail.dosageForm')}</th><th>{t('prescriptions.prescribedQuantity')}</th><th>{t('prescriptions.uom')}</th><th>{t('prescriptions.detail.frequency')}</th><th>{t('prescriptions.detail.duration')}</th><th>{t('prescriptions.detail.repeat')}</th></tr></thead>
+              <thead><tr><th>#</th><th>{t('prescriptions.detail.medication')}</th><th>{t('prescriptions.detail.dosage')}</th><th>{t('prescriptions.detail.strength')}</th><th>{t('prescriptions.detail.dosageForm')}</th><th>{t('prescriptions.prescribedQuantity')}</th><th>{t('prescriptions.uom')}</th><th>{t('prescriptions.detail.frequency')}</th><th>{t('prescriptions.detail.duration')}</th><th>{t('prescriptions.detail.repeat')}</th><th>{t('prescriptions.fulfilment.column')}</th><th>{t('prescriptions.fulfilment.note')}</th></tr></thead>
           <tbody>
             {items.map((it, i) => (
               <tr key={it.item_id}>
-                <td>{i + 1}</td><td>{it.trade_name} ({it.scientific_name})</td><td>{it.dosage}</td><td>{it.strength || '—'}</td><td>{dosageFormLabel(it.dosage_form, t)}</td><td>{it.prescribed_quantity ?? '—'}</td><td>{uomLabel(it.uom, t)}</td><td>{it.frequency}</td><td>{it.duration}</td><td>{it.repeats_count}</td>
+                <td>{i + 1}</td><td>{it.trade_name} ({it.scientific_name})</td><td>{it.dosage}</td><td>{it.strength || '—'}</td><td>{dosageFormLabel(it.dosage_form, t)}</td><td>{it.prescribed_quantity ?? '—'}</td><td>{uomLabel(it.uom, t)}</td><td>{it.frequency}</td><td>{it.duration}</td><td>{it.repeats_count}</td><td>{t(`prescriptions.fulfilment.status.${it.fulfilment_status || 'PENDING'}`)}</td><td>{it.decision_note || '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -362,6 +431,63 @@ function PrescriptionDetailModal({ prescription, onClose }) {
         <div className="paper-actions">
           <button className="primary-button compact" onClick={() => window.print()}>{t('prescriptions.detail.print')}</button>
           <button className="secondary-button compact" onClick={onClose}>{t('common.close')}</button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+export { PrescriptionDetailModal }
+
+function FulfilmentDecisionDialog({ isOpen, onClose, onSave, initialStatus, initialNote, itemLabel, saving }) {
+  const t = useT()
+  const [status, setStatus] = useState(initialStatus || 'PENDING')
+  const [note, setNote] = useState(initialNote || '')
+  const [wasRecordedDecision, setWasRecordedDecision] = useState(false)
+
+  useEffect(() => {
+    if (isOpen) {
+      setStatus(initialStatus || 'PENDING')
+      setNote(initialNote || '')
+      const recorded = initialStatus === 'CLINIC_DISPENSING' || initialStatus === 'EXTERNAL_PHARMACY' || initialStatus === 'PATIENT_DECLINED' || initialStatus === 'CANCELLED'
+      setWasRecordedDecision(recorded)
+    }
+  }, [isOpen, initialStatus, initialNote])
+
+  const DECISION_OPTIONS = [
+    { value: 'PENDING', label: t('prescriptions.fulfilment.status.PENDING') },
+    { value: 'CLINIC_DISPENSING', label: t('prescriptions.fulfilment.status.CLINIC_DISPENSING') },
+    { value: 'EXTERNAL_PHARMACY', label: t('prescriptions.fulfilment.status.EXTERNAL_PHARMACY') },
+    { value: 'PATIENT_DECLINED', label: t('prescriptions.fulfilment.status.PATIENT_DECLINED') },
+    { value: 'CANCELLED', label: t('prescriptions.fulfilment.status.CANCELLED') },
+  ]
+
+  function handleSave() {
+    const resetToPending = status === 'PENDING' && wasRecordedDecision
+    onSave({ fulfilment_status: status, decision_note: note || undefined, reset_to_pending: resetToPending })
+  }
+
+  return (
+    <Modal title={t('prescriptions.fulfilment.decisionTitle')} subtitle={itemLabel} onClose={onClose}>
+      <div className="patient-form">
+        <Field label={t('prescriptions.fulfilment.statusLabel')} required>
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            {DECISION_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+        </Field>
+        <Field label={t('prescriptions.fulfilment.noteLabel')}>
+          <textarea
+            rows="3"
+            maxLength={500}
+            placeholder={t('prescriptions.fulfilment.notePlaceholder')}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <small>{t('prescriptions.fulfilment.noteHint', { count: 500 - note.length })}</small>
+        </Field>
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>{t('common.close')}</button>
+          <button className="primary-button" disabled={saving} onClick={handleSave}>{saving ? t('common.saving') : t('common.save')}</button>
         </div>
       </div>
     </Modal>

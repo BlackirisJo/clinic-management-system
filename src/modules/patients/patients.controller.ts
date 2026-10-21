@@ -172,6 +172,7 @@ export const getPatientVisits = async (req: AuthenticatedRequest, res: Response)
   try {
     const result = await pool.query(
       `SELECT v.visit_id, v.visit_date, v.notes, v.visit_status, v.chief_complaint,
+              v.doctor_id,
               c.clinic_name, c.clinic_id, s.name_ar AS specialty_name, u.full_name AS doctor_name
        FROM visits v
        JOIN clinics c ON v.clinic_id = c.clinic_id

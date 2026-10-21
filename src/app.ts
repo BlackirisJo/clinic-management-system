@@ -12,6 +12,8 @@ import billingRoutes from './modules/billing/billing.routes';
 import backupsRoutes from './modules/backups/backups.routes';
 import appointmentRoutes from './modules/appointments/appointments.routes';
 import usersRoutes from './modules/users/users.routes';
+import doctorSchedulesRoutes from './modules/doctorSchedules/doctorSchedules.routes';
+import calendarRoutes from './modules/calendar/calendar.routes';
 import reportsRoutes from './modules/reports/reports.routes';
 import clinicsRoutes from './modules/clinics/clinics.routes';
 import medicationImportRoutes from './modules/prescriptions/medication.import.routes';
@@ -24,6 +26,7 @@ import stockAdjustmentsRoutes from './modules/inventory/stockAdjustments.routes'
 import medicationReturnsRoutes from './modules/inventory/medicationReturns.routes';
 import dispensingsRoutes from './modules/inventory/dispensings.routes';
 import stockCountsRoutes from './modules/inventory/stockCounts.routes';
+import medicationPricesRoutes from './modules/inventory/medicationPrices.routes';
 import clinicalRoutes from './modules/clinical/clinical.routes';
 import permissionsRoutes from './modules/permissions/permissions.routes';
 import settingsRoutes from './modules/settings/settings.routes';
@@ -50,7 +53,19 @@ app.use((req, res, next) => {
   res.on('finish', () => console.log(JSON.stringify({ requestId, method: req.method, path: req.path, status: res.statusCode, durationMs: Date.now() - startedAt })));
   next();
 });
-app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false }));
+const RATE_LIMIT_MAX = process.env.RATE_LIMIT_MAX
+  ? Number(process.env.RATE_LIMIT_MAX)
+  : process.env.NODE_ENV === 'production' ? 300 : 1000;
+
+app.use('/api', rateLimit({
+  windowMs: 60 * 1000,
+  limit: RATE_LIMIT_MAX,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: (_req: Request, res: Response) => {
+    res.status(429).json({ message: 'Too many requests, please try again later.', code: 'RATE_LIMIT_EXCEEDED' });
+  },
+}));
 
 // فحص سلامة السيرفر (Health Check)
 app.get('/health', async (req: Request, res: Response) => {
@@ -71,6 +86,8 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/backups', backupsRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/doctor-schedules', doctorSchedulesRoutes);
+app.use('/api/calendar', calendarRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/clinics', clinicsRoutes);
 app.use('/api/medications/import', medicationImportRoutes);
@@ -84,6 +101,7 @@ app.use('/api/stock-adjustments', stockAdjustmentsRoutes);
 app.use('/api/medication-returns', medicationReturnsRoutes);
 app.use('/api/dispensings', dispensingsRoutes);
 app.use('/api/stock-counts', stockCountsRoutes);
+app.use('/api/medication-prices', medicationPricesRoutes);
 app.use('/api/clinical', clinicalRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/settings', settingsRoutes);
